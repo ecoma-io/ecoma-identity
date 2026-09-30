@@ -25,6 +25,7 @@
     "arch:canary": "node --test \"tooling/scripts/**/*.test.mjs\"",
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm arch",
     "wrangler:validate": "pnpm exec moon run :wrangler-validate",
+    "wrangler:prereqs": "node tooling/scripts/check-worker-build-prereqs.mjs infra/cloudflare/development/identity",
     "moon": "moon",
     "prepare": "lefthook install"
   },
