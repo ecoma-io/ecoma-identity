@@ -23,38 +23,65 @@
 
   "main": "build/index.js",
   "build": {
-    // WHY --out-dir IS EXPLICIT, AND WHY IT IS NOT "build".
+    // ------------------------------------------------------------------------
+    // THE COMMAND LOCATES THE REPOSITORY ROOT ITSELF. There is no `cwd` key
+    // here, and both halves of that are deliberate.
     //
-    // `main` is resolved by wrangler against THIS FILE'S OWN DIRECTORY, so
-    // "build/index.js" above means `infra/cloudflare/production/identity-admin/build/index.js`.
-    // `worker-build`, by contrast, writes to `--out-dir`, which DEFAULTS to
-    // `build` RELATIVE TO ITS OWN WORKING DIRECTORY — and the command below
-    // changes that directory to the crate, so the default lands at
-    // `apps/identity-admin/worker/build/` instead. Two directories, one name.
+    // WHY NO `cwd`. Measured against wrangler 4.144.0, invoked from the
+    // repository root with `-c infra/cloudflare/staging/identity/wrangler.jsonc`,
+    // this is where a custom build actually runs for each spelling of `cwd`:
     //
-    // The symptom is a check that cannot fail locally and fails in CI with:
+    //   build.cwd      where the build ran
+    //   ------------   ------------------------------------------------------
+    //   (absent)       the INVOKING PROCESS's working directory
+    //   "."            the invoking process's working directory — identical
+    //   "../.."        the invoking process's working directory, plus ".."
+    //   "$PWD"         Error: spawn /bin/sh ENOENT — `cwd` goes to spawn()
+    //                  unexpanded, so a shell token makes wrangler try to
+    //                  spawn the literal string as a directory
+    //   "/abs/path"    exactly that path
     //
-    //   The expected output file at "build/index.js" was not found after
-    //   running custom build: … worker-build --release
+    // So `cwd` has no spelling that is both portable and caller-independent:
+    // the relative ones are relative to whoever ran wrangler, and the absolute
+    // one would hard-code `/home/<user>/…` into nine tracked configs that a
+    // fork, a CI runner or a second contributor cannot use.
     //
-    // which names the path it could not find and not the one that was written.
-    // The pkg really was produced — CI logged "Your wasm pkg is ready to
-    // publish at …/apps/identity-admin/worker/build/" — it was simply in the wrong
-    // place for wrangler to look.
+    // WHY THE COMMAND THEN DOES THE LOCATING. `command -v wrangler` resolves
+    // through node_modules to `<repo>/node_modules/.bin/wrangler`, so three
+    // `dirname`s from it is the repository root — wherever the repository is,
+    // whoever cloned it, and whichever directory wrangler was invoked from.
     //
-    // So the output directory is named explicitly here rather than relying on
-    // a default that is relative to a directory this command moves.
+    // THAT THIS WAS THE BUG. The command used to be
     //
-    // THREE "..", not four, and the difference is not cosmetic. The `cd` runs
-    // from THIS config's own directory, which is four levels below the
-    // repository root (infra/cloudflare/<env>/<w>), so it needs four. The
-    // `--out-dir` is resolved by worker-build AFTER that `cd`, from
-    // `apps/<w>/worker`, which is three levels below the root. Four `..` from
-    // there lands OUTSIDE the repository entirely and the output disappears
-    // into a sibling directory. Both numbers are correct for the directory
-    // each is resolved from, which is exactly why the mismatch stays invisible
-    // until a check looks for the file.
-    "command": "cd ../../../../apps/identity-admin/worker && cargo install -q \"worker-build@^0.8\" --locked && worker-build --release --out-dir ../../../infra/cloudflare/production/identity-admin/build",
+    //   cd ../../../../apps/identity/worker && … --out-dir ../../../…
+    //
+    // with four `..` written for "the config's own directory". Every LOCAL
+    // command and the `wrangler-validate` moon task do `cd` there first, so
+    // four was right for them and the build worked on a laptop.
+    // `deploy-worker.yml` does not: it runs wrangler from the REPOSITORY ROOT
+    // against `-c infra/cloudflare/<env>/<worker>/wrangler.generated.jsonc`,
+    // and four `..` from there leaves the repository entirely. The first
+    // staging deploy failed with
+    //
+    //   [custom build] /bin/sh: 1: cd: can't cd to ../../../../apps/identity/worker
+    //
+    // — one level short, which is exactly what four levels up from the
+    // repository root is. A custom build whose working directory depends on
+    // who invoked wrangler is not a build; it is a build that happens to work
+    // for the callers somebody happened to try first.
+    //
+    // `--out-dir` stays explicit because `worker-build` defaults it to `build`
+    // relative to ITS OWN working directory — the crate — so the default writes
+    // to `apps/<w>/worker/build/` while wrangler looks in
+    // `infra/cloudflare/<env>/<w>/build/`, and reports "The expected output file
+    // at build/index.js was not found", naming the path it could not find
+    // rather than the one that was written.
+    //
+    // Verified from two different caller directories — the repository root and
+    // the config's own — both of which land the build in `apps/<w>/worker` and
+    // put the artefact where `main` points.
+    // ------------------------------------------------------------------------
+    "command": "ROOT=$(dirname \"$(dirname \"$(dirname \"$(command -v wrangler)\")\")\") && cd \"$ROOT/apps/identity-admin/worker\" && cargo install -q \"worker-build@^0.8\" --locked && worker-build --release --out-dir \"$ROOT/infra/cloudflare/production/identity-admin/build\"",
   },
 
   // `redact_query_string` matters here for a different reason than on
