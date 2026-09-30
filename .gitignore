@@ -122,3 +122,11 @@ Thumbs.db
 # the canary vacuous while still reading as a green canary, so it is not done.
 # ---------------------------------------------------------------------------
 tooling/scripts/__fixtures__/violating-tree/.git
+
+# Agent worktrees: full checkouts of this repository, nested inside it, holding
+# another session's in-flight work. `git add -A` would sweep a whole worktree
+# into a commit, and prettier would rewrite the files inside it — both already
+# guarded in `eslint.config.mjs` and `.prettierignore`, and this is the third.
+# `.claude/settings.json` is deliberately NOT ignored: it is repository
+# configuration a checkout should carry, not generated state.
+.claude/worktrees/
