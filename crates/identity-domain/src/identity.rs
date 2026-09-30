@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::error::{require_non_blank, DomainResult};
+use crate::error::{DomainResult, require_non_blank};
 
 /// A provider that can assert an identity about a user.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

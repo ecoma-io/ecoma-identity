@@ -70,9 +70,9 @@ impl EmailAddress {
 
         let mut parts = value.split('@');
         let local = parts.next().unwrap_or_default();
-        let domain = parts.next().ok_or_else(|| {
-            DomainError::invalid("email", "must contain exactly one `@`")
-        })?;
+        let domain = parts
+            .next()
+            .ok_or_else(|| DomainError::invalid("email", "must contain exactly one `@`"))?;
         if parts.next().is_some() {
             return Err(DomainError::invalid(
                 "email",

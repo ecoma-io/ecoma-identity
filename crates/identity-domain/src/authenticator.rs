@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::error::{require_non_blank, DomainError, DomainResult};
+use crate::error::{DomainError, DomainResult, require_non_blank};
 
 /// What kind of factor an authenticator is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -175,9 +175,8 @@ impl Authenticator {
     /// None.
     #[must_use]
     pub fn was_used_recently(&self, now_ms: i64, window_ms: i64) -> bool {
-        self.last_used_at_ms.is_some_and(|used| {
-            used <= now_ms && now_ms.saturating_sub(used) < window_ms
-        })
+        self.last_used_at_ms
+            .is_some_and(|used| used <= now_ms && now_ms.saturating_sub(used) < window_ms)
     }
 }
 
@@ -186,12 +185,7 @@ mod tests {
     use super::*;
 
     fn auth(kind: AuthenticatorKind) -> Authenticator {
-        Authenticator::new(
-            crate::user::UserId::new().expect("uuid"),
-            kind,
-            1_000,
-        )
-        .expect("valid")
+        Authenticator::new(crate::user::UserId::new().expect("uuid"), kind, 1_000).expect("valid")
     }
 
     #[test]
@@ -231,7 +225,10 @@ mod tests {
     fn use_before_enrolment_is_refused() {
         let mut a = auth(AuthenticatorKind::Totp);
         assert!(a.record_use(999).is_err());
-        assert_eq!(a.last_used_at_ms, None, "a refused use must not be recorded");
+        assert_eq!(
+            a.last_used_at_ms, None,
+            "a refused use must not be recorded"
+        );
     }
 
     #[test]

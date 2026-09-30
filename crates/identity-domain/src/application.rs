@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::error::{require_non_blank, DomainError, DomainResult};
+use crate::error::{DomainError, DomainResult, require_non_blank};
 
 /// A registered client's opaque, stable identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -188,10 +188,7 @@ impl Application {
             ));
         }
         if self.redirect_uris.contains(&uri) {
-            return Err(DomainError::invalid(
-                "redirect_uri",
-                "already registered",
-            ));
+            return Err(DomainError::invalid("redirect_uri", "already registered"));
         }
         self.redirect_uris.push(uri);
         Ok(())
@@ -222,10 +219,7 @@ impl Application {
     ///
     /// [`DomainError::IllegalTransition`] when the application may not start an
     /// authorization flow at all.
-    pub fn granted_scopes(
-        &self,
-        requested: &[String],
-    ) -> DomainResult<Vec<String>> {
+    pub fn granted_scopes(&self, requested: &[String]) -> DomainResult<Vec<String>> {
         if !self.status.permits_authorization() {
             return Err(DomainError::illegal(format!(
                 "application is {}",
@@ -277,9 +271,7 @@ mod tests {
         assert!(!a.allows_redirect_uri("https://console.ecoma.io/callback?x=1"));
         assert!(!a.allows_redirect_uri("https://console.ecoma.io/"));
         assert!(!a.allows_redirect_uri("https://console.ecoma.io/cb"));
-        assert!(
-            !a.allows_redirect_uri("https://console.ecoma.io.attacker.test/callback")
-        );
+        assert!(!a.allows_redirect_uri("https://console.ecoma.io.attacker.test/callback"));
         assert!(!a.allows_redirect_uri("http://console.ecoma.io/callback"));
     }
 

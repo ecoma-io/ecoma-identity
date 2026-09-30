@@ -71,7 +71,9 @@ impl core::fmt::Display for Aal {
 /// It is a plain `u32` wrapped in a newtype, not a timestamp: ordering is all
 /// that is needed, and a timestamp would invite someone to compare it to a
 /// clock and reason about skew.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
 #[serde(transparent)]
 pub struct SecurityVersion(u32);
 
@@ -99,15 +101,12 @@ impl SecurityVersion {
     /// *looks* like it revoked every session and did not — the worst possible
     /// failure for this type.
     pub fn bumped(self) -> crate::error::DomainResult<Self> {
-        self.0
-            .checked_add(1)
-            .map(Self)
-            .ok_or_else(|| {
-                crate::error::DomainError::invalid(
-                    "security_version",
-                    "counter exhausted; a migration is required",
-                )
-            })
+        self.0.checked_add(1).map(Self).ok_or_else(|| {
+            crate::error::DomainError::invalid(
+                "security_version",
+                "counter exhausted; a migration is required",
+            )
+        })
     }
 
     /// The raw value.

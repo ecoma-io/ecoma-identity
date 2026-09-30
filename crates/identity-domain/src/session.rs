@@ -234,7 +234,10 @@ mod tests {
     fn expiry_and_status_are_checked_independently() {
         let mut s = session();
         assert!(s.is_usable_at(1_999));
-        assert!(!s.is_usable_at(2_000), "expiry is exclusive at the boundary");
+        assert!(
+            !s.is_usable_at(2_000),
+            "expiry is exclusive at the boundary"
+        );
 
         s.revoke().expect("active");
         assert!(!s.is_usable_at(1), "revoked before expiry is still refused");
@@ -257,7 +260,10 @@ mod tests {
     #[test]
     fn session_identifiers_round_trip() {
         let s = session();
-        assert_eq!(SessionId::parse(&s.id.as_string()).expect("round trip"), s.id);
+        assert_eq!(
+            SessionId::parse(&s.id.as_string()).expect("round trip"),
+            s.id
+        );
         assert!(SessionId::parse("nope").is_err());
     }
 }

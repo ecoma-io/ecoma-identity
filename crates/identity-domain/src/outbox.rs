@@ -282,12 +282,8 @@ mod tests {
 
     #[test]
     fn dispatch_stops_at_the_attempt_ceiling() {
-        let mut e = OutboxEvent::new(
-            OutboxEventType::email_send_v1(),
-            serde_json::json!({}),
-            0,
-        )
-        .expect("valid");
+        let mut e = OutboxEvent::new(OutboxEventType::email_send_v1(), serde_json::json!({}), 0)
+            .expect("valid");
         for _ in 0..OutboxEvent::MAX_DISPATCH_ATTEMPTS {
             assert!(e.should_dispatch());
             e.record_dispatch_attempt().expect("within ceiling");

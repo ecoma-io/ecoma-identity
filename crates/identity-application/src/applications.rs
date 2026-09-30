@@ -171,10 +171,7 @@ pub trait UpdateApplicationCommand {
     ///
     /// [`crate::error::ApplicationError::Forbidden`] for a non-administrator,
     /// [`crate::error::ApplicationError::Domain`] for an invalid URI.
-    fn update_application(
-        &self,
-        input: UpdateApplication,
-    ) -> ApplicationResult<ApplicationView>;
+    fn update_application(&self, input: UpdateApplication) -> ApplicationResult<ApplicationView>;
 }
 
 /// Rotate a confidential client's secret.

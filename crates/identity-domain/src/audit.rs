@@ -138,9 +138,7 @@ impl AuditEventType {
     pub const fn concerns_a_user(self) -> bool {
         !matches!(
             self,
-            Self::ApplicationRegistered
-                | Self::ApplicationUpdated
-                | Self::ApplicationSecretRotated
+            Self::ApplicationRegistered | Self::ApplicationUpdated | Self::ApplicationSecretRotated
         )
     }
 }

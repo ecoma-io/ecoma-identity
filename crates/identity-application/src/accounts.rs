@@ -205,7 +205,10 @@ mod tests {
         };
         let json = serde_json::to_string(&view).expect("serializable");
         for forbidden in ["password", "secret", "token", "security_version"] {
-            assert!(!json.contains(forbidden), "{forbidden} must not be exposed: {json}");
+            assert!(
+                !json.contains(forbidden),
+                "{forbidden} must not be exposed: {json}"
+            );
         }
     }
 }

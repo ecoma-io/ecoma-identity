@@ -10,7 +10,6 @@
 //! the surrounding protocol is. An error type that carried its own status
 //! would be an error type that every transport would have to agree with.
 
-
 use identity_domain::error::DomainError;
 
 /// Why a command or query failed.
@@ -166,20 +165,27 @@ mod tests {
     #[test]
     fn client_safe_errors_are_the_ones_we_chose_to_expose() {
         assert!(ApplicationError::forbidden("nope").is_client_safe());
-        assert!(ApplicationError::NotFound { entity: "application" }.is_client_safe());
+        assert!(
+            ApplicationError::NotFound {
+                entity: "application"
+            }
+            .is_client_safe()
+        );
         assert!(ApplicationError::from(DomainError::not_found("user")).is_client_safe());
     }
 
     #[test]
     fn the_domain_conversion_is_transparent() {
-        let converted: ApplicationResult<u8> = Err(DomainError::not_found("user"))
-            .into_application();
+        let converted: ApplicationResult<u8> =
+            Err(DomainError::not_found("user")).into_application();
         assert_eq!(converted.expect_err("must fail").code(), "not_found");
     }
 
     #[test]
     fn errors_display_without_panicking_on_empty_strings() {
-        let e = ApplicationError::Forbidden { reason: String::new() };
+        let e = ApplicationError::Forbidden {
+            reason: String::new(),
+        };
         assert!(!format!("{e}").is_empty());
         let _: &dyn fmt::Display = &e;
     }

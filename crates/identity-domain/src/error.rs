@@ -101,10 +101,7 @@ pub type DomainResult<T> = Result<T, DomainError>;
 /// rejects nothing that is well-formed and catches nothing that is subtle. A
 /// stricter rule is the caller's, because "strict enough" is a decision about
 /// the field, not about the model as a whole.
-pub fn require_non_blank(
-    field: &'static str,
-    value: &str,
-) -> DomainResult<()> {
+pub fn require_non_blank(field: &'static str, value: &str) -> DomainResult<()> {
     if value.trim().is_empty() {
         return Err(DomainError::invalid(field, "must not be blank"));
     }
@@ -126,11 +123,7 @@ pub fn require_non_blank(
 /// # Errors
 ///
 /// Returns [`DomainError::Invalid`] when `value` exceeds `max_len` bytes.
-pub fn require_max_len(
-    field: &'static str,
-    value: &str,
-    max_len: usize,
-) -> DomainResult<()> {
+pub fn require_max_len(field: &'static str, value: &str, max_len: usize) -> DomainResult<()> {
     if value.len() > max_len {
         return Err(DomainError::invalid(
             field,

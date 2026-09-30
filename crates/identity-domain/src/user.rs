@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::error::{require_non_blank, DomainError, DomainResult};
+use crate::error::{DomainError, DomainResult, require_non_blank};
 
 /// A user's opaque, stable identifier.
 ///

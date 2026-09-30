@@ -36,7 +36,6 @@
 //! can enforce on its own should be enforced on its own rather than deferred
 //! to a layer that may never get written.
 
-
 #[cfg(test)]
 mod tests {
     // One import block for the module, rather than one per test body: a new
@@ -121,18 +120,13 @@ mod tests {
         let version_at_issue = SecurityVersion::new(user.security_version);
         let current = version_at_issue.bumped().expect("not exhausted");
 
-        let session = Session::new(
-            user.id,
-            version_at_issue.get(),
-            1_000,
-            2_000,
-            Aal::Aal1,
-        )
-        .expect("valid");
+        let session =
+            Session::new(user.id, version_at_issue.get(), 1_000, 2_000, Aal::Aal1).expect("valid");
 
         assert_eq!(session.security_version, version_at_issue.get());
         assert_ne!(
-            session.security_version, current.get(),
+            session.security_version,
+            current.get(),
             "a session issued under an older security version must not match"
         );
         // The rule as the application layer will apply it: the access check
@@ -164,19 +158,12 @@ mod tests {
 
     #[test]
     fn aal1_cannot_satisfy_an_aal2_operation() {
-
         // Enforced for real — see `security::tests`. Repeated here so the six
         // invariants are readable as one list, with the honest enforcement state
         // attached to each.
 
-        let session = Session::new(
-            UserId::new().expect("uuid"),
-            0,
-            1_000,
-            2_000,
-            Aal::Aal1,
-        )
-        .expect("valid");
+        let session =
+            Session::new(UserId::new().expect("uuid"), 0, 1_000, 2_000, Aal::Aal1).expect("valid");
         assert!(!session.satisfies(Aal::Aal2));
         assert!(session.satisfies(Aal::Aal1));
     }
@@ -187,22 +174,10 @@ mod tests {
         // property of the user, one account-wide flag would let an attacker with
         // any session on the account make every other session step-up-eligible.
 
-        let mut stepped_up = Session::new(
-            UserId::new().expect("uuid"),
-            0,
-            1_000,
-            2_000,
-            Aal::Aal1,
-        )
-        .expect("valid");
-        let never_stepped_up = Session::new(
-            stepped_up.user_id,
-            0,
-            1_000,
-            2_000,
-            Aal::Aal1,
-        )
-        .expect("valid");
+        let mut stepped_up =
+            Session::new(UserId::new().expect("uuid"), 0, 1_000, 2_000, Aal::Aal1).expect("valid");
+        let never_stepped_up =
+            Session::new(stepped_up.user_id, 0, 1_000, 2_000, Aal::Aal1).expect("valid");
 
         stepped_up.recently_authenticated = true;
         assert!(stepped_up.recently_authenticated);
@@ -221,14 +196,8 @@ mod tests {
         // Enforced for real: `Session::revoke` refuses, and `is_usable_at`
         // consults status first. The application layer's job is to call it.
 
-        let mut session = Session::new(
-            UserId::new().expect("uuid"),
-            0,
-            1_000,
-            2_000,
-            Aal::Aal1,
-        )
-        .expect("valid");
+        let mut session =
+            Session::new(UserId::new().expect("uuid"), 0, 1_000, 2_000, Aal::Aal1).expect("valid");
 
         assert!(session.is_usable_at(1_500));
         session.revoke().expect("active");
@@ -255,8 +224,7 @@ mod tests {
         let bob = UserId::new().expect("uuid");
         let subject = "provider-user-12345";
 
-        let alice_identity =
-            Identity::new(alice, IdentityProvider::OAuth, subject).expect("valid");
+        let alice_identity = Identity::new(alice, IdentityProvider::OAuth, subject).expect("valid");
 
         // The refusing call, once written:
         //   assert!(identities::link(bob, IdentityProvider::OAuth, subject).is_err());
@@ -265,8 +233,7 @@ mod tests {
         // The same subject under a *different* provider is a different identity
         // and must be allowed — otherwise a user who has both a Google and a
         // GitHub account whose subjects collide could not link both.
-        let other_provider =
-            Identity::new(bob, IdentityProvider::Saml, subject).expect("valid");
+        let other_provider = Identity::new(bob, IdentityProvider::Saml, subject).expect("valid");
         assert_eq!(other_provider.subject, alice_identity.subject);
         assert_ne!(other_provider.provider, alice_identity.provider);
     }
@@ -279,12 +246,8 @@ mod tests {
     fn a_suspended_application_refuses_an_authorization_flow() {
         // Not one of the six, but the same shape of rule and already enforceable:
         // the type's own method answers it, so it is asserted rather than deferred.
-        let mut app = Application::new(
-                "client",
-                "Client",
-                ApplicationAccessMode::Oidc,
-            )
-            .expect("valid");
+        let mut app =
+            Application::new("client", "Client", ApplicationAccessMode::Oidc).expect("valid");
         assert!(app.granted_scopes(&["openid".to_string()]).is_ok());
         app.status = ApplicationStatus::Suspended;
         let err = app

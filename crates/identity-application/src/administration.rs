@@ -335,7 +335,12 @@ mod tests {
         new_role: PlatformRole,
         active_admins: u32,
     ) -> RoleChangeRequest {
-        request_by(PlatformRole::Administrator, current_role, new_role, active_admins)
+        request_by(
+            PlatformRole::Administrator,
+            current_role,
+            new_role,
+            active_admins,
+        )
     }
 
     fn request_by(
@@ -495,7 +500,10 @@ mod tests {
         ];
         for input in inputs {
             assert!(
-                input.get("context").and_then(|c| c.get("actor_session_id")).is_some(),
+                input
+                    .get("context")
+                    .and_then(|c| c.get("actor_session_id"))
+                    .is_some(),
                 "an administrative command must carry the actor's session"
             );
         }

@@ -33,9 +33,7 @@ pub mod security;
 pub mod session;
 pub mod user;
 
-pub use application::{
-    Application, ApplicationAccessMode, ApplicationId, ApplicationStatus,
-};
+pub use application::{Application, ApplicationAccessMode, ApplicationId, ApplicationStatus};
 pub use audit::AuditEvent;
 pub use authenticator::{Authenticator, AuthenticatorKind};
 pub use email::EmailAddress;
