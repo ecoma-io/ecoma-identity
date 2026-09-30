@@ -47,6 +47,21 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
     -- change, which is the right direction, and the risk is a typo creating a
     -- second namespace — caught by the fact that a typo'd namespace simply has
     -- no prior rows, so the second caller re-executes rather than being refused.
+    -- THESE TWO COLUMNS ARE THE COMPOSITE PRIMARY KEY, and the constraint
+    -- itself is declared at the foot of this CREATE TABLE rather than here.
+    --
+    -- THE SPELLING IS FORCED BY SQLITE, and it is worth knowing why before
+    -- anyone "tidies" it. A table constraint cannot appear between two columns
+    -- of the column list — the grammar reads a comma as "another column
+    -- follows" — so `PRIMARY KEY (scope, key_value)` written here is a syntax
+    -- error at offset 4634, not a style question. SQLite also allows at most ONE
+    -- PRIMARY KEY per table, so a composite key cannot be spelled by marking
+    -- two columns individually.
+    --
+    -- WHAT THAT COSTS is the one thing worth guarding: the constraint ends up
+    -- separated from the comment above that explains WHY the scope is the front
+    -- half. So the argument is repeated verbatim at the constraint, and this
+    -- cross-reference is bidirectional rather than a pointer into nowhere.
     scope     TEXT NOT NULL CHECK (length(scope) BETWEEN 1 AND 64),
     key_value TEXT NOT NULL CHECK (length(key_value) BETWEEN 8 AND 255),
 
@@ -112,7 +127,24 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
     -- client retry window, and this platform has no client retry window yet
     -- because it has no client.
     created_at_ms INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-    updated_at_ms INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    updated_at_ms INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+
+    -- THE COMPOSITE PRIMARY KEY. The argument for it is on the columns, above;
+    -- restated here because SQLite's grammar puts it HERE and a constraint
+    -- separated from its reasoning is a constraint nobody re-checks.
+    --
+    -- (scope, key_value) and not (key_value): "two different callers may both
+    -- send `Idempotency-Key: 7f3a...` and those are two different requests. A
+    -- single global key column would have one of them receive the other's
+    -- response — a response containing somebody else's tokens, handed to a
+    -- caller who knows nothing about them."
+    --
+    -- IT IS ALSO WHAT SETTLES THE RACE at the foot of this file: two concurrent
+    -- requests with the same key both INSERT, one is refused with a constraint
+    -- violation, and the loser re-reads the winner's stored response. Without
+    -- this constraint there is nothing for the two of them to collide on, and
+    -- the race would not be resolved by the database at all.
+    PRIMARY KEY (scope, key_value)
 );
 
 -- ---------------------------------------------------------------------------

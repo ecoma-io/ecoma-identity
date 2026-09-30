@@ -25,10 +25,27 @@
 --    `tests/integration/schema.test.mjs`.
 -- ===========================================================================
 
--- USER 2 (active member) — an email OTP authenticator, and NOTHING ELSE.
+-- ===========================================================================
+-- USER 2 (active member) — FOUR factors, ONE OF EACH KIND
+-- ===========================================================================
 --
--- THIS IS THE ROW THE "LAST FACTOR" RULE NEEDS, and it is why this fixture is
--- as small as it is for this user.
+-- THIS IS THE ROW THAT EXERCISES THE CLASSIFICATION. `AuthenticatorKind` is four
+-- variants and `is_second_factor()` / `is_primary_factor()` are a partition of
+-- them, so the classification is only worth a test if all four kinds are on real
+-- rows — and this account is where they are:
+--
+--   row 1  email_otp       is_primary_factor  — establishes the account
+--   row 2  totp            is_second_factor   — can reach AAL2
+--   row 3  passkey         is_second_factor   — can reach AAL2
+--   row 4  recovery_code   NEITHER            — and that is deliberate
+--
+-- So USER 2 is NOT the account for the "last factor" rule, and the section below
+-- that rule names USER 8 instead. This account's four rows are for the partition;
+-- USER 8's single row is for the lockout.
+--
+-- ===========================================================================
+-- THE "LAST FACTOR" RULE, AND THE ACCOUNT IT NEEDS: USER 8, NOT USER 2
+-- ===========================================================================
 --
 -- `UnlinkIdentityCommand` refuses removing an account's last sign-in method, and
 -- the analogous rule for a second factor is a lockout risk: "an account whose
@@ -44,9 +61,20 @@
 -- test expecting a refusal would either fail or, worse, pass because the test
 -- double hard-coded the count instead of reading the fixture.
 --
--- THAT IS THE SAME CAUTION as the last-administrator fixture in `users.sql`, and
--- the same mechanical guard covers it: `assert_fixture_invariants.sql` asserts
--- that USER 2 has exactly one authenticator.
+-- THAT ACCOUNT IS **USER 8**, which has exactly one authenticator (a passkey)
+-- further down this file. It is deliberately NOT this one: USER 2 has four, and
+-- the comment at the top of this section says why — four factors is what the
+-- `is_second_factor()` / `is_primary_factor()` partition needs to be worth
+-- testing at all, and a two-roles-one-account fixture could not carry both
+-- properties at once.
+--
+-- `assert_fixture_invariants.sql` asserts the count for USER 8 (`user_8_is_the_
+-- single_factor_account`) rather than for USER 2, for the same reason. The
+-- assertion follows the fixture, not the other way round.
+--
+-- ===========================================================================
+-- ROW 1 OF 4 — email_otp, USER 2. NO SECRET MATERIAL.
+-- ===========================================================================
 --
 -- `kind = 'email_otp'` carries NO SECRET MATERIAL, and that is the point rather
 -- than an omission: "email_otp: proves possession of an inbox, so it stores
@@ -68,7 +96,7 @@ VALUES (
     NULL, NULL, NULL
 );
 
--- USER 2 — a TOTP authenticator, WITH encrypted material.
+-- ROW 2 OF 4 — TOTP for USER 2, WITH encrypted material.
 --
 -- `secret_ciphertext` is 32 arbitrary bytes, `secret_nonce` is 12 bytes — the AES-GCM
 -- nonce length — and `secret_key_id` names the key. These are NOT A TOTP SEED:
@@ -100,7 +128,7 @@ VALUES (
     'fixture-key-1'
 );
 
--- USER 2 — a PASSKEY authenticator, with a public key and NO private key.
+-- ROW 3 OF 4 — PASSKEY for USER 2, a public key and NO private key.
 --
 -- There is no private-key column and there must never be one. `PasskeyCredential`
 -- says it: "The public key, and nothing private. A stored credential is a public
@@ -129,7 +157,7 @@ VALUES (
     NULL, NULL, NULL
 );
 
--- USER 2 — a RECOVERY CODE authenticator, and this row is the interesting one.
+-- ROW 4 OF 4 — RECOVERY CODE for USER 2, and this row is the interesting one.
 --
 -- NEVER USED (`last_used_at_ms IS NULL`). A recovery code is single-use, so a batch is consumed row
 -- by row and a partially-used batch is a normal state — but a row for a whole
@@ -160,7 +188,7 @@ VALUES (
 );
 
 -- ===========================================================================
--- USER 8 — the passkey-only account, with NO email_otp AUTHENTICATOR
+-- THE "LAST FACTOR" ACCOUNT: USER 8, one passkey, no email_otp AUTHENTICATOR
 -- ===========================================================================
 --
 -- This is the counterpart to USER 2. USER 2 has four factors and an inbox;
@@ -178,6 +206,31 @@ VALUES (
 -- it up and forgot it" state 0006's security note calls out as a standing
 -- bypass risk when it is a RECOVERY code. Here it is a passkey, which is the
 -- benign version of the same state.
+--
+-- ===========================================================================
+-- WHY THIS ACCOUNT, SPECIFICALLY, IS THE "LAST FACTOR" FIXTURE
+-- ===========================================================================
+--
+-- THIS IS THE ONLY ACCOUNT IN THE SET WITH EXACTLY ONE AUTHENTICATOR, and the
+-- header's rule needs that. USER 2 has four (the classification partition), USER
+-- 6 has two (an operator with a TOTP and a recovery code), and everyone else has
+-- zero. So the count that makes the lockout rule testable is 1 here and nowhere
+-- else.
+--
+-- IT IS A passkey rather than an email_otp on purpose, and the choice has a second
+-- consequence worth stating: a passkey is `is_second_factor()`, so USER 8's single
+-- factor is an AAL2-capable one. Removing it would leave the account with NO AAL2
+-- path at all, which is the sharpest version of the lockout — an account that
+-- exists and can satisfy AAL1 but can never satisfy an AAL2-required operation
+-- again. A fixture whose single factor were an email_otp would demonstrate the
+-- weaker case, and a test written against the weaker case would pass against an
+-- implementation that got the stronger one wrong.
+--
+-- `assert_fixture_invariants.sql` asserts this count (`user_8_is_the_single_
+-- factor_account`) and asserts, separately, that USER 2 has four — because a
+-- fixture that drifted from four to one would make the last-factor test pass for
+-- the wrong reason on the wrong account, which is the same hazard `users.sql`
+-- records for administrators.
 INSERT INTO authenticators (id, user_id, kind, label,
                             enrolled_at_ms, last_used_at_ms,
                             credential_id, public_key, sign_count,
@@ -196,7 +249,7 @@ VALUES (
 );
 
 -- ===========================================================================
--- USER 6 (support agent) — an operator whose factor set is AAL2-ONLY
+-- USER 6 (support agent) — an operator whose factor set is AAL2-ONLY, TWO factors
 -- ===========================================================================
 --
 -- A support agent has NO email_otp authenticator and only a TOTP. That is the

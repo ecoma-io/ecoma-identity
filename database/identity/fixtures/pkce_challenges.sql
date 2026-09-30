@@ -74,7 +74,7 @@ INSERT INTO pkce_challenges (id, code_hash, code_challenge, code_challenge_metho
                               client_id, redirect_uri, user_id, scopes, expires_at_ms)
 VALUES (
     'e0000000-0000-4000-8000-000000000001',
-    X'0A0B0C0D0E0F101112131415161718191A1B1C1D1E1F202122232425262728',
+    X'000A0B0C0D0E0F101112131415161718191A1B1C1D1E1F202122232425262728',
     'cHkzhqPdnxmqXdJaWbfdWNyc0QUI-kiaWXPy_ffv5Wk',
     'S256',
     'ecoma-fixture-oidc-client',
@@ -184,7 +184,7 @@ INSERT INTO pkce_challenges (id, code_hash, code_challenge, code_challenge_metho
                               client_id, redirect_uri, user_id, scopes, expires_at_ms)
 VALUES (
     'e0000000-0000-4000-8000-000000000004',
-    X'3A3B3C3D3E3F40414243444546474849505152535455565758596061626364',
+    X'003A3B3C3D3E3F40414243444546474849505152535455565758596061626364',
     'd5hvaOCFFirotG7pFhXzD9YMwVo6Q2e7gws3notPCx8',
     'S256',
     'ecoma-fixture-public-client',

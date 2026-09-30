@@ -70,7 +70,6 @@ CREATE TABLE IF NOT EXISTS rate_limit_counters (
     -- conservative choice is to set the limit below the level where a boundary
     -- burst is meaningful, not to add machinery.
     window_ends_at_ms INTEGER NOT NULL CHECK (window_ends_at_ms >= 0),
-
     -- Generic created_at_ms / updated_at_ms, integer milliseconds since the
     -- epoch (the rule is stated once in 0001).
     created_at_ms INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
@@ -88,34 +87,53 @@ CREATE TABLE IF NOT EXISTS rate_limit_counters (
 -- concurrent requests to the same subject would create two counter rows and the
 -- limit would silently double.
 --
--- THE NULL CASE IS THE INTERESTING ONE, and it is a fact about this SQLite,
--- verified by probe rather than assumed — because the textbook answer is the
--- opposite one:
+-- THE NULL CASE IS THE INTERESTING ONE, because this index DOES NOT COVER IT,
+-- and the honest reading of why is worth more than a false claim of coverage.
 --
---   SQLite's own documentation says NULLs are distinct in a UNIQUE index, so
---   "two rows with subject IS NULL never collide" is what a reader expects.
---   THE RUNTIME INSIDE D1 DOES NOT BEHAVE THAT WAY. A probe inserting two
---   `subject = NULL, name = 'otp_send_email'` rows was refused with
---   "UNIQUE constraint failed: rate_limit_counters.subject,
---   rate_limit_counters.name".
+--   MEASURED ON THE RUNTIME THIS MIGRATION RUNS ON (wrangler 4.144.0, local D1):
+--   two rows with `subject = NULL` and the same `name` are ACCEPTED. SQLite's own
+--   documentation says NULLs are distinct in a UNIQUE index, and the behaviour
+--   matches the documentation. A comment written during authoring claimed the
+--   opposite — that the runtime refuses such a pair — and a probe of that claim
+--   falsified it, which is why the claim is here in the corrected form rather
+--   than absent.
 --
--- The consequence is the favourable one, and the reason this index is a partial
--- one rather than a COALESCE expression index:
+-- THE CONSEQUENCE, and it is the reason the global limit is NOT protected by this
+-- index:
 --
---   * the single global counter IS protected by this same UNIQUE index, exactly
---     like every per-subject counter. "There is exactly one platform-wide OTP
---     send counter" is enforced by the database rather than by the discipline of
---     whoever writes the upsert;
---   * a `CREATE UNIQUE INDEX ... ON rate_limit_counters (COALESCE(subject, ''),
---     name)` would have been WRONG on this runtime in a way that is invisible
---     until it mattered — it would compile, apply, and enforce the per-subject
---     case while leaving the global case to an empty string that no code writes.
+--   * every PER-SUBJECT counter is covered. Two concurrent requests for the same
+--     subject and name collide, so the "find my row, then increment it" path
+--     cannot silently fork into two counters and double the limit. This is the
+--     index's whole purpose and it is intact.
+--   * the GLOBAL counter is NOT covered. "There is exactly one platform-wide OTP
+--     send counter" is enforced by nothing here. Two writers racing on a cold
+--     global counter would create two rows, and the limit would silently double
+--     — which is exactly the failure this index exists to prevent, in the one case
+--     where a NULL subject makes it invisible.
 --
--- Because the behaviour is a property of the RUNTIME and not of the schema
--- TEXT, it is restated in the test suite rather than only here: see
--- tests/integration/schema.test.mjs, "the global rate limit counter is unique
--- like every other". A probe that passed once is evidence; a probe that runs in
--- CI is a guarantee.
+-- THE FIX IS NOT IN THIS MIGRATION, and naming why is the useful part. Closing
+-- the gap with `CREATE UNIQUE INDEX ... ON rate_limit_counters (COALESCE(subject,
+-- ''), name)` is possible, and it is a pure ADD under the forward-only rule — but
+-- it also replaces an index another index's name would collide with, and the
+-- `COALESCE` form hides the NULL-means-global fact in an expression that a
+-- `PRAGMA index_list` reader cannot see. The decision belongs with the phase that
+-- ships a rate limiter, because that phase is the first one with a writer, and a
+-- writer is what makes "two racing upserts" a real scenario rather than a
+-- hypothetical. Until then there are no writers, so there is no race to lose.
+--
+-- THE PLACE THIS IS ENFORCED INSTEAD, and it is not the schema: the upsert in the
+-- application layer. 0016's own increment is an UPDATE, not an INSERT, so a writer
+-- that follows the documented shape updates an existing row and never creates a
+-- second one. That is a discipline, not a constraint, and it is listed in
+-- database/README.md under "What is deferred" so it is not mistaken for a
+-- guarantee.
+--
+-- IT IS RESTATED IN THE TEST SUITE because a schema claim that is easy to get
+-- backwards deserves a test rather than a comment: see
+-- tests/integration/schema.test.mjs, "two global rate limit counters are accepted,
+-- and that is the documented NULL behaviour". That test asserts the limitation is
+-- real. A test that asserted the opposite would have kept this comment honest for
+-- about a week.
 CREATE UNIQUE INDEX IF NOT EXISTS ux_rate_limit_counters_subject_name
     ON rate_limit_counters (subject, name);
 
