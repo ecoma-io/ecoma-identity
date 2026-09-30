@@ -23,6 +23,22 @@ packages:
 #     allow-list entry, `pnpm install` in CI does not warn and carry on — it
 #     fails outright with ERR_PNPM_IGNORED_BUILDS, which is the behaviour the
 #     comment above describes. Found by running the pipeline, not by reading it.
+#   - workerd: a TRANSITIVE dependency of wrangler, and the one entry that
+#     cannot be verified locally. Its `install.js` copies the platform binary
+#     out of the matching `@cloudflare/workerd-<platform>-64` optional
+#     dependency — it resolves that optional dependency from the INSTALLER'S
+#     platform, not from the manifest. So a development machine on
+#     linux-x64 runs the script and copies `@cloudflare/workerd-linux-64`; a CI
+#     runner on linux-arm64 silently resolves to the arm64 package, or to
+#     nothing at all, and only then does the ignored-script error surface. An
+#     `ignoredBuiltDependencies: [workerd]` entry passed review three times
+#     locally and failed in every pipeline, which is the whole argument for
+#     having run one.
+#
+#     The five platform packages under `@cloudflare/` are listed as `false`
+#     rather than omitted: they are binaries, not packages with scripts, and
+#     naming them states that the absence is deliberate instead of an oversight.
+#
 # Keep the allow-list complete: every "Ignored build scripts" line in an
 # install log is one missing entry.
 # Shape note: pnpm 11 replaced onlyBuiltDependencies / neverBuiltDependencies /
@@ -30,8 +46,14 @@ packages:
 # silently ignores the old keys — an old-style block here would leave a fresh
 # clone with a broken wrangler while every install still "succeeds".
 allowBuilds:
+  "@cloudflare/workerd-darwin-64": false
+  "@cloudflare/workerd-darwin-arm64": false
+  "@cloudflare/workerd-linux-64": false
+  "@cloudflare/workerd-linux-arm64": false
+  "@cloudflare/workerd-windows-64": false
   esbuild: true
   lefthook: true
+  workerd: true
   wrangler: true
 
 minimumReleaseAgeExclude:
