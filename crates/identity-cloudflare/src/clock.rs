@@ -108,7 +108,12 @@ mod tests {
 /// than inventing a timestamp, so this test exists only for
 /// `wasm32-unknown-unknown`. Until a wasm test runner is wired into CI it is
 /// **unverified**: compiled, not executed.
-#[cfg(target_arch = "wasm32")]
+///
+/// `test` is part of the gate because `wasm_bindgen_test` is a dev-dependency
+/// and a dev-dependency is not linked into a plain `cargo build`. Gating on
+/// `target_arch` alone fails the deployable's own wasm build with `E0432` on
+/// the `use` below. Both halves are load-bearing.
+#[cfg(all(target_arch = "wasm32", test))]
 mod wasm_tests {
     use wasm_bindgen_test::wasm_bindgen_test;
 

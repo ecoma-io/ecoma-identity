@@ -326,7 +326,16 @@ mod tests {
 /// The queue adapter against a real `MessageBatch`, which needs a Workers
 /// runtime to exist. Until a wasm test runner is wired into CI these are
 /// **unverified**: compiled, not executed.
-#[cfg(target_arch = "wasm32")]
+///
+/// `test` is part of the gate, not decoration. `wasm_bindgen_test` is a
+/// [dev-dependency](https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html),
+/// and a dev-dependency is not linked into a plain `cargo build`. Gating on
+/// `target_arch` alone therefore compiles this module in the deployable's own
+/// wasm build and fails it with five `E0432`s, because the only crate named
+/// `wasm_bindgen_test` in that build is the one that was deliberately not
+/// pulled in. Both halves of the gate are load-bearing: the target says "this
+/// needs a Workers runtime", `test` says "and a test harness to run under".
+#[cfg(all(target_arch = "wasm32", test))]
 mod wasm_tests {
     use wasm_bindgen_test::wasm_bindgen_test;
 

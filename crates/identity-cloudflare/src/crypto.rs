@@ -1854,7 +1854,12 @@ mod tests {
 //
 // Until that runner is wired into CI these are **unverified**: the code path
 // they exercise has been compiled for wasm but not executed.
-#[cfg(target_arch = "wasm32")]
+//
+// `test` is part of the gate because `wasm_bindgen_test` is a dev-dependency
+// and a dev-dependency is not linked into a plain `cargo build`. Gating on
+// `target_arch` alone fails the deployable's own wasm build with `E0432` on
+// both the attribute and the `use` below. Both halves are load-bearing.
+#[cfg(all(target_arch = "wasm32", test))]
 #[wasm_bindgen_test::wasm_bindgen_test_configure]
 mod wasm_tests {
     use super::*;
@@ -2003,9 +2008,15 @@ mod wasm_tests {
         let mut tampered = ciphertext.clone();
         let last = tampered.len() - 1;
         tampered[last] ^= 0x01;
+        // Matched on the variant *and* the reason rather than on
+        // `SecurityError::Cryptographic(_)`: `matches!` alone would accept a
+        // failure to even parse the input, which is a different bug with the
+        // same type. The reason is the operator-facing string, so asserting on
+        // it is what pins "this failed because authentication did", not
+        // "this failed somewhere in crypto".
         assert!(matches!(
             cipher.decrypt_async(&tampered).await,
-            Err(SecurityError::Cryptographic)
+            Err(SecurityError::Cryptographic { ref reason }) if !reason.is_empty()
         ));
     }
 
