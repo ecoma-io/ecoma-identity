@@ -1,0 +1,88 @@
+# identity-security — authenticators, factors, token helpers, the error
+# vocabulary the other layers speak.
+#
+# THE DEPENDENCY LAW: `identity-security` → `identity-domain`, and nothing else
+# internal. It is reachable by `identity-jobs-worker` (for the error vocabulary)
+# even though jobs may not depend on the domain — which is why nothing here may
+# evaluate an identity rule. A factor that decides whether a login is allowed
+# would be a rule engine wearing a security crate's name.
+#
+# ADR-0008: no cryptography here, ever. WebCrypto through `worker` is the only
+# source of primitives, and `worker` is not a dependency of this crate — so
+# anything crypto-shaped in this crate is a rule violation before it is a
+# security one.
+
+$schema: https://moonrepo.dev/schemas/moon.json
+
+tags:
+  - rust
+  - crate
+  - security
+
+tasks:
+  format:
+    command: "cargo fmt -p identity-security"
+    options:
+      cache: false
+
+  # `format-check`, not `format:check` — moon 2.5.6 rejects a colon in a
+  # project-level task id. See the note in crates/identity-domain/moon.yml.
+  format-check:
+    command: "cargo fmt -p identity-security -- --check"
+    options:
+      cache: false
+
+  lint:
+    command: "cargo clippy -p identity-security --all-targets -- -D warnings"
+    options:
+      cache: false
+
+  typecheck:
+    command: "cargo check -p identity-security --all-targets"
+    options:
+      cache: false
+
+  test:
+    command: "cargo test -p identity-security --locked"
+    options:
+      cache: false
+
+  test-unit:
+    command: "cargo test -p identity-security --locked --lib"
+    options:
+      cache: false
+
+  # ---------------------------------------------------------------------------
+  # HOST TARGET, DELIBERATELY — this crate does not depend on `worker`.
+  #
+  # `worker` 0.8.7 compiles for the host as well as for wasm32, so a wasm32
+  # build here would not fail; it would just make every change to a factor
+  # recompile for a target no test runs on. The host build is what keeps the
+  # affected-first loop fast, and the wasm32 compile happens once, in
+  # `identity:build`, where the Workers need it.
+  #
+  # Same reasoning, same wording, on identity-domain, identity-application,
+  # identity-oidc and identity-testkit.
+  # ---------------------------------------------------------------------------
+  build:
+    command: "cargo build -p identity-security --locked"
+    options:
+      cache: false
+
+  dev:
+    # `options.runInCI: false`, not the root file's `local: 'only'` — moon 2.5.6
+    # has no `local` field on a task. Verified: `moon ci` skips this task.
+    command: "cargo run -p identity-security --locked"
+    options:
+      runInCI: false
+    inputs: []
+    outputs: []
+
+  package:
+    command: "cargo build -p identity-security --locked --release"
+    options:
+      cache: false
+
+  wrangler-validate:
+    inputs: []
+    outputs: []

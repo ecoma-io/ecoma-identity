@@ -1,0 +1,85 @@
+// What this is: the DEVELOPMENT (local) wrangler configuration for the
+// `identity-admin` Worker — the administrative BFF and operator session.
+//
+// What this is NOT: it is not a staging or production configuration, and it
+// does not have a D1 binding. Read the note on the binding matrix below before
+// editing this file; the absence is the design, not a gap.
+//
+// Read with:  wrangler dev -c infra/cloudflare/development/identity-admin.wrangler.jsonc
+// From a contributor: `moon run identity-admin:dev`.
+//
+// ---------------------------------------------------------------------------------
+// BOUNDARY: there is no `d1_databases` block in this file, and adding one is not
+// a configuration change — it is a brief §2 constraint 3 violation ("The Admin
+// Worker MUST NOT access Identity D1 directly") and needs an ADR before the code
+// lands, let alone before a reviewer sees a binding for it. `infra/cloudflare/
+// README.md` and ADR-0002 own that decision; this file only records the absence
+// so the next editor does not "helpfully" add one and call it a fix.
+// ---------------------------------------------------------------------------------
+
+{
+  "$schema": "../../../../node_modules/wrangler/config-schema.json",
+
+  "name": "identity-admin",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // See infra/cloudflare/development/identity.wrangler.jsonc for why `main`
+  // points at the worker-build JS shim rather than at src/lib.rs.
+  "main": "build/index.js",
+  "build": {
+    "command": "cd ../../../../apps/identity-admin/worker && cargo install -q \"worker-build@^0.8\" --locked && worker-build --release",
+  },
+
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": false,
+    },
+  },
+
+  // The ONE way this Worker reaches identity data: a private service binding
+  // (brief §2 constraint 4, §3). Service bindings do not traverse the public
+  // internet and do not carry identity credentials, which is why they are
+  // preferred over an HTTP call with a shared API key.
+  "services": [
+    {
+      "binding": "IDENTITY",
+      "service": "identity-development",
+    },
+  ],
+
+  // A separate limiter from the identity Worker's. Sharing one namespace would
+  // let an admin console's traffic consume the end-user login budget and lock
+  // real users out — a self-inflicted denial of service with a confusing
+  // symptom.
+  "ratelimits": [
+    {
+      "name": "ADMIN_RATE_LIMITER",
+      "namespace_id": "",
+      "simple": {
+        "limit": 600,
+        "period": 60,
+      },
+    },
+  ],
+
+  // The admin web UI's built output. brief §8: the frontend and the BFF behind
+  // it are ONE release unit, so `dist/` is built by `identity-admin-web:build`
+  // and shipped as this Worker's static assets — not served from a CDN and not
+  // versioned separately.
+  "assets": {
+    "directory": "../../../../apps/identity-admin/web/dist",
+    "binding": "ASSETS",
+    // A Vue SPA: any unknown path is a client-side route, so a miss falls back
+    // to index.html rather than rendering a 404 page from the Worker.
+    "not_found_handling": "single-page-application",
+  },
+
+  "vars": {
+    // Non-secret configuration only; secrets come from `.dev.vars` (gitignored).
+    "ENVIRONMENT": "development",
+  },
+}

@@ -1,0 +1,11 @@
+[package]
+name = "identity-cloudflare"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+identity-domain = { path = "../identity-domain" }
+identity-application = { path = "../identity-application" }
+identity-oidc = { path = "../identity-oidc" }
+identity-security = { path = "../identity-security" }
+worker = { version = "0.8.7", features = ["d1"] }

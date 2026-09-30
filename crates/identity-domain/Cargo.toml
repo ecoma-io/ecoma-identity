@@ -1,0 +1,23 @@
+[package]
+name = "identity-domain"
+description = "The identity model: users, identities, sessions, authenticators, applications. Depends on nothing internal and nothing platform-specific."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# The dependency law this crate exists to express: no internal dependency at
+# all, and nothing from the Cloudflare Workers platform. `tooling/scripts/
+# check-architecture.mjs` judges this from `cargo metadata` — a Cargo.toml
+# edit that adds either one fails CI, and so does the reverse check on
+# identity-application and identity-cloudflare.
+[dependencies]
+serde = { workspace = true }
+uuid = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

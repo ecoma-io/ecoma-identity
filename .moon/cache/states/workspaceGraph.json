@@ -1,0 +1,4539 @@
+{
+  "projects": {
+    "aliases_to_ids": {
+      "@ecoma-io/identity-admin-web": "identity-admin-web",
+      "@ecoma-io/identity-web": "identity-web"
+    },
+    "build_data": {},
+    "config_paths": [
+      "apps/identity/worker/moon.pkl",
+      "crates/identity-domain/moon.hcl",
+      ".moon/workspace.yml",
+      "apps/identity/web/moon.pkl",
+      "crates/identity-oidc/moon.hcl",
+      "apps/identity-jobs/worker/moon.jsonc",
+      "crates/identity-application/moon.json",
+      "crates/identity-cloudflare/moon.pkl",
+      "apps/identity-jobs/worker/moon.toml",
+      "apps/identity/worker/moon.hcl",
+      "apps/identity-jobs/worker/moon.yaml",
+      "crates/identity-application/moon.jsonc",
+      "apps/identity/web/moon.hcl",
+      "apps/identity-admin/worker/moon.json",
+      "apps/identity-admin/web/moon.json",
+      "crates/identity-application/moon.toml",
+      "crates/identity-testkit/moon.json",
+      "crates/identity-security/moon.json",
+      "crates/identity-domain/moon.json",
+      "crates/identity-cloudflare/moon.hcl",
+      "crates/identity-application/moon.yaml",
+      "crates/identity-oidc/moon.json",
+      "apps/identity-admin/worker/moon.jsonc",
+      "apps/identity-admin/web/moon.jsonc",
+      "crates/identity-testkit/moon.jsonc",
+      "apps/identity-admin/worker/moon.toml",
+      "crates/identity-security/moon.jsonc",
+      "apps/identity-admin/web/moon.toml",
+      "crates/identity-testkit/moon.toml",
+      "crates/identity-domain/moon.jsonc",
+      "crates/identity-oidc/moon.jsonc",
+      "apps/identity/worker/moon.json",
+      "crates/identity-security/moon.toml",
+      "apps/identity-admin/web/moon.yaml",
+      "apps/identity/web/moon.json",
+      "crates/identity-oidc/moon.toml",
+      "crates/identity-testkit/moon.yaml",
+      "crates/identity-security/moon.yaml",
+      "crates/identity-domain/moon.yaml",
+      "crates/identity-domain/moon.toml",
+      "apps/identity-admin/worker/moon.yaml",
+      "crates/identity-oidc/moon.yaml",
+      "crates/identity-cloudflare/moon.json",
+      "apps/identity/worker/moon.jsonc",
+      "apps/identity-jobs/worker/moon.yml",
+      "apps/identity/web/moon.jsonc",
+      "apps/identity/worker/moon.toml",
+      "apps/identity/web/moon.toml",
+      "crates/identity-application/moon.yml",
+      "apps/identity/worker/moon.yaml",
+      "crates/identity-cloudflare/moon.jsonc",
+      "apps/identity/web/moon.yaml",
+      "crates/identity-cloudflare/moon.toml",
+      "apps/identity-jobs/worker/moon.pkl",
+      "apps/identity-admin/worker/moon.yml",
+      "crates/identity-cloudflare/moon.yaml",
+      "apps/identity-admin/web/moon.yml",
+      "crates/identity-testkit/moon.yml",
+      "crates/identity-security/moon.yml",
+      "crates/identity-domain/moon.yml",
+      "crates/identity-application/moon.pkl",
+      "crates/identity-oidc/moon.yml",
+      "apps/identity-jobs/worker/moon.hcl",
+      "apps/identity-admin/worker/moon.pkl",
+      "apps/identity/worker/moon.yml",
+      "apps/identity-admin/web/moon.pkl",
+      "apps/identity/web/moon.yml",
+      "crates/identity-testkit/moon.pkl",
+      "crates/identity-security/moon.pkl",
+      "crates/identity-application/moon.hcl",
+      "crates/identity-domain/moon.pkl",
+      ".moon/toolchains.yml",
+      "crates/identity-oidc/moon.pkl",
+      "crates/identity-cloudflare/moon.yml",
+      "apps/identity-admin/worker/moon.hcl",
+      "apps/identity-jobs/worker/moon.json",
+      "apps/identity-admin/web/moon.hcl",
+      "crates/identity-testkit/moon.hcl",
+      "crates/identity-security/moon.hcl"
+    ],
+    "ids_to_indexes": {
+      "identity-admin-web": 0,
+      "identity-web": 9,
+      "identity-worker": 10,
+      "identity-security": 7,
+      "identity-admin-worker": 1,
+      "identity-domain": 4,
+      "identity-testkit": 8,
+      "identity-oidc": 6,
+      "identity-application": 2,
+      "identity-cloudflare": 3,
+      "identity-jobs-worker": 5
+    },
+    "ids_to_target_options": {},
+    "target_to_has_outputs": {},
+    "graph": {
+      "nodes": [
+        {
+          "aliases": [
+            { "alias": "@ecoma-io/identity-admin-web", "plugin": "javascript" }
+          ],
+          "config": {
+            "schema": "",
+            "docker": { "file": {}, "scaffold": {} },
+            "language": "unknown",
+            "layer": "unknown",
+            "owners": { "paths": [] },
+            "stack": "unknown",
+            "toolchains": { "plugins": {} },
+            "workspace": { "inheritedTasks": {}, "mergeStrategies": {} }
+          },
+          "id": "identity-admin-web",
+          "inherited": { "configs": {}, "layers": {} },
+          "language": "javascript",
+          "layer": "unknown",
+          "root": "/home/johnitvn/ecoma-io/ecoma-io/apps/identity-admin/web",
+          "source": "apps/identity-admin/web",
+          "stack": "unknown",
+          "toolchains": ["javascript", "node", "pnpm"]
+        },
+        {
+          "config": {
+            "schema": "https://moonrepo.dev/schemas/moon.json",
+            "docker": { "file": {}, "scaffold": {} },
+            "language": "unknown",
+            "layer": "unknown",
+            "owners": { "paths": [] },
+            "stack": "unknown",
+            "tags": ["rust", "worker", "deployable", "identity-admin"],
+            "tasks": {
+              "build": {
+                "command": "cargo build -p identity-admin-worker --locked --target wasm32-unknown-unknown",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "dev": {
+                "command": null,
+                "args": null,
+                "globalInputs": [],
+                "inputs": [],
+                "outputs": [],
+                "options": { "runInCi": false, "runInSyncPhase": null },
+                "script": "cd \"$MOON_WORKSPACE_ROOT/infra/cloudflare/development/identity-admin\" && pnpm exec wrangler dev --config wrangler.jsonc"
+              },
+              "format": {
+                "command": "cargo fmt -p identity-admin-worker",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "format-check": {
+                "command": "cargo fmt -p identity-admin-worker -- --check",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "lint": {
+                "command": "cargo clippy -p identity-admin-worker --all-targets -- -D warnings",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "package": {
+                "command": "cargo build -p identity-admin-worker --locked --release --target wasm32-unknown-unknown",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "test": {
+                "command": "cargo test -p identity-admin-worker --locked",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "test-unit": {
+                "command": "cargo test -p identity-admin-worker --locked --lib",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "typecheck": {
+                "command": "cargo check -p identity-admin-worker --all-targets",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "wrangler-validate": {
+                "command": null,
+                "args": null,
+                "globalInputs": [],
+                "inputs": [
+                  { "file": "Cargo.toml" },
+                  { "glob": "src/**/*", "cache": true }
+                ],
+                "outputs": [],
+                "options": { "cache": false, "runInSyncPhase": null },
+                "script": "cd \"$MOON_WORKSPACE_ROOT/infra/cloudflare/development/identity-admin\" && pnpm exec wrangler deploy --dry-run --config wrangler.jsonc"
+              }
+            },
+            "toolchains": { "plugins": {} },
+            "workspace": { "inheritedTasks": {}, "mergeStrategies": {} }
+          },
+          "id": "identity-admin-worker",
+          "inherited": { "configs": {}, "layers": {} },
+          "language": "unknown",
+          "layer": "unknown",
+          "root": "/home/johnitvn/ecoma-io/ecoma-io/apps/identity-admin/worker",
+          "source": "apps/identity-admin/worker",
+          "stack": "unknown",
+          "taskTargets": [
+            "identity-admin-worker:build",
+            "identity-admin-worker:dev",
+            "identity-admin-worker:format",
+            "identity-admin-worker:format-check",
+            "identity-admin-worker:lint",
+            "identity-admin-worker:package",
+            "identity-admin-worker:test",
+            "identity-admin-worker:test-unit",
+            "identity-admin-worker:typecheck",
+            "identity-admin-worker:wrangler-validate"
+          ],
+          "toolchains": ["system"]
+        },
+        {
+          "config": {
+            "schema": "https://moonrepo.dev/schemas/moon.json",
+            "docker": { "file": {}, "scaffold": {} },
+            "language": "unknown",
+            "layer": "unknown",
+            "owners": { "paths": [] },
+            "stack": "unknown",
+            "tags": ["rust", "crate", "application"],
+            "tasks": {
+              "build": {
+                "command": "cargo build -p identity-application --locked",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "dev": {
+                "command": "cargo run -p identity-application --locked",
+                "args": null,
+                "globalInputs": [],
+                "inputs": [],
+                "outputs": [],
+                "options": { "runInCi": false, "runInSyncPhase": null }
+              },
+              "format": {
+                "command": "cargo fmt -p identity-application",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "format-check": {
+                "command": "cargo fmt -p identity-application -- --check",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "lint": {
+                "command": "cargo clippy -p identity-application --all-targets -- -D warnings",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "package": {
+                "command": "cargo build -p identity-application --locked --release",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "test": {
+                "command": "cargo test -p identity-application --locked",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "test-unit": {
+                "command": "cargo test -p identity-application --locked --lib",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "typecheck": {
+                "command": "cargo check -p identity-application --all-targets",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "wrangler-validate": {
+                "command": null,
+                "args": null,
+                "globalInputs": [],
+                "inputs": [],
+                "outputs": [],
+                "options": { "runInSyncPhase": null }
+              }
+            },
+            "toolchains": { "plugins": {} },
+            "workspace": { "inheritedTasks": {}, "mergeStrategies": {} }
+          },
+          "id": "identity-application",
+          "inherited": { "configs": {}, "layers": {} },
+          "language": "unknown",
+          "layer": "unknown",
+          "root": "/home/johnitvn/ecoma-io/ecoma-io/crates/identity-application",
+          "source": "crates/identity-application",
+          "stack": "unknown",
+          "taskTargets": [
+            "identity-application:build",
+            "identity-application:dev",
+            "identity-application:format",
+            "identity-application:format-check",
+            "identity-application:lint",
+            "identity-application:package",
+            "identity-application:test",
+            "identity-application:test-unit",
+            "identity-application:typecheck",
+            "identity-application:wrangler-validate"
+          ],
+          "toolchains": ["system"]
+        },
+        {
+          "config": {
+            "schema": "https://moonrepo.dev/schemas/moon.json",
+            "docker": { "file": {}, "scaffold": {} },
+            "language": "unknown",
+            "layer": "unknown",
+            "owners": { "paths": [] },
+            "stack": "unknown",
+            "tags": ["rust", "crate", "adapter", "platform"],
+            "tasks": {
+              "build": {
+                "command": "cargo build -p identity-cloudflare --locked",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "dev": {
+                "command": "cargo run -p identity-cloudflare --locked",
+                "args": null,
+                "globalInputs": [],
+                "inputs": [],
+                "outputs": [],
+                "options": { "runInCi": false, "runInSyncPhase": null }
+              },
+              "format": {
+                "command": "cargo fmt -p identity-cloudflare",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "format-check": {
+                "command": "cargo fmt -p identity-cloudflare -- --check",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "lint": {
+                "command": "cargo clippy -p identity-cloudflare --all-targets -- -D warnings",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "package": {
+                "command": "cargo build -p identity-cloudflare --locked --release",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "test": {
+                "command": "cargo test -p identity-cloudflare --locked",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "test-unit": {
+                "command": "cargo test -p identity-cloudflare --locked --lib",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "typecheck": {
+                "command": "cargo check -p identity-cloudflare --all-targets",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "wrangler-validate": {
+                "command": null,
+                "args": null,
+                "globalInputs": [],
+                "inputs": [],
+                "outputs": [],
+                "options": { "runInSyncPhase": null }
+              }
+            },
+            "toolchains": { "plugins": {} },
+            "workspace": { "inheritedTasks": {}, "mergeStrategies": {} }
+          },
+          "id": "identity-cloudflare",
+          "inherited": { "configs": {}, "layers": {} },
+          "language": "unknown",
+          "layer": "unknown",
+          "root": "/home/johnitvn/ecoma-io/ecoma-io/crates/identity-cloudflare",
+          "source": "crates/identity-cloudflare",
+          "stack": "unknown",
+          "taskTargets": [
+            "identity-cloudflare:build",
+            "identity-cloudflare:dev",
+            "identity-cloudflare:format",
+            "identity-cloudflare:format-check",
+            "identity-cloudflare:lint",
+            "identity-cloudflare:package",
+            "identity-cloudflare:test",
+            "identity-cloudflare:test-unit",
+            "identity-cloudflare:typecheck",
+            "identity-cloudflare:wrangler-validate"
+          ],
+          "toolchains": ["system"]
+        },
+        {
+          "config": {
+            "schema": "https://moonrepo.dev/schemas/moon.json",
+            "docker": { "file": {}, "scaffold": {} },
+            "language": "unknown",
+            "layer": "unknown",
+            "owners": { "paths": [] },
+            "stack": "unknown",
+            "tags": ["rust", "crate", "domain"],
+            "tasks": {
+              "build": {
+                "command": "cargo build -p identity-domain --locked",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "dev": {
+                "command": "cargo run -p identity-domain --locked",
+                "args": null,
+                "globalInputs": [],
+                "inputs": [],
+                "outputs": [],
+                "options": { "runInCi": false, "runInSyncPhase": null }
+              },
+              "format": {
+                "command": "cargo fmt -p identity-domain",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "format-check": {
+                "command": "cargo fmt -p identity-domain -- --check",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "lint": {
+                "command": "cargo clippy -p identity-domain --all-targets -- -D warnings",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "package": {
+                "command": "cargo build -p identity-domain --locked --release",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "test": {
+                "command": "cargo test -p identity-domain --locked",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "test-invariants": {
+                "command": "cargo test -p identity-domain --locked -- --ignored",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "test-unit": {
+                "command": "cargo test -p identity-domain --locked --lib",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "typecheck": {
+                "command": "cargo check -p identity-domain --all-targets",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "wrangler-validate": {
+                "command": null,
+                "args": null,
+                "globalInputs": [],
+                "inputs": [],
+                "outputs": [],
+                "options": { "runInSyncPhase": null }
+              }
+            },
+            "toolchains": { "plugins": {} },
+            "workspace": { "inheritedTasks": {}, "mergeStrategies": {} }
+          },
+          "id": "identity-domain",
+          "inherited": { "configs": {}, "layers": {} },
+          "language": "unknown",
+          "layer": "unknown",
+          "root": "/home/johnitvn/ecoma-io/ecoma-io/crates/identity-domain",
+          "source": "crates/identity-domain",
+          "stack": "unknown",
+          "taskTargets": [
+            "identity-domain:build",
+            "identity-domain:dev",
+            "identity-domain:format",
+            "identity-domain:format-check",
+            "identity-domain:lint",
+            "identity-domain:package",
+            "identity-domain:test",
+            "identity-domain:test-invariants",
+            "identity-domain:test-unit",
+            "identity-domain:typecheck",
+            "identity-domain:wrangler-validate"
+          ],
+          "toolchains": ["system"]
+        },
+        {
+          "config": {
+            "schema": "https://moonrepo.dev/schemas/moon.json",
+            "docker": { "file": {}, "scaffold": {} },
+            "language": "unknown",
+            "layer": "unknown",
+            "owners": { "paths": [] },
+            "stack": "unknown",
+            "tags": ["rust", "worker", "deployable", "identity-jobs"],
+            "tasks": {
+              "build": {
+                "command": "cargo build -p identity-jobs-worker --locked --target wasm32-unknown-unknown",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "dev": {
+                "command": null,
+                "args": null,
+                "globalInputs": [],
+                "inputs": [],
+                "outputs": [],
+                "options": { "runInCi": false, "runInSyncPhase": null },
+                "script": "cd \"$MOON_WORKSPACE_ROOT/infra/cloudflare/development/identity-jobs\" && pnpm exec wrangler dev --config wrangler.jsonc"
+              },
+              "format": {
+                "command": "cargo fmt -p identity-jobs-worker",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "format-check": {
+                "command": "cargo fmt -p identity-jobs-worker -- --check",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "lint": {
+                "command": "cargo clippy -p identity-jobs-worker --all-targets -- -D warnings",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "package": {
+                "command": "cargo build -p identity-jobs-worker --locked --release --target wasm32-unknown-unknown",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "test": {
+                "command": "cargo test -p identity-jobs-worker --locked",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "test-unit": {
+                "command": "cargo test -p identity-jobs-worker --locked --lib",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "typecheck": {
+                "command": "cargo check -p identity-jobs-worker --all-targets",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "wrangler-validate": {
+                "command": null,
+                "args": null,
+                "globalInputs": [],
+                "inputs": [
+                  { "file": "@files(Cargo.toml)" },
+                  { "glob": "@globs(src/**/*)", "cache": true }
+                ],
+                "outputs": [],
+                "options": { "cache": false, "runInSyncPhase": null },
+                "script": "cd \"$MOON_WORKSPACE_ROOT/infra/cloudflare/development/identity-jobs\" && pnpm exec wrangler deploy --dry-run --config wrangler.jsonc"
+              }
+            },
+            "toolchains": { "plugins": {} },
+            "workspace": { "inheritedTasks": {}, "mergeStrategies": {} }
+          },
+          "id": "identity-jobs-worker",
+          "inherited": { "configs": {}, "layers": {} },
+          "language": "unknown",
+          "layer": "unknown",
+          "root": "/home/johnitvn/ecoma-io/ecoma-io/apps/identity-jobs/worker",
+          "source": "apps/identity-jobs/worker",
+          "stack": "unknown",
+          "taskTargets": [
+            "identity-jobs-worker:build",
+            "identity-jobs-worker:dev",
+            "identity-jobs-worker:format",
+            "identity-jobs-worker:format-check",
+            "identity-jobs-worker:lint",
+            "identity-jobs-worker:package",
+            "identity-jobs-worker:test",
+            "identity-jobs-worker:test-unit",
+            "identity-jobs-worker:typecheck",
+            "identity-jobs-worker:wrangler-validate"
+          ],
+          "toolchains": ["system"]
+        },
+        {
+          "config": {
+            "schema": "https://moonrepo.dev/schemas/moon.json",
+            "docker": { "file": {}, "scaffold": {} },
+            "language": "unknown",
+            "layer": "unknown",
+            "owners": { "paths": [] },
+            "stack": "unknown",
+            "tags": ["rust", "crate", "oidc"],
+            "tasks": {
+              "build": {
+                "command": "cargo build -p identity-oidc --locked",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "dev": {
+                "command": "cargo run -p identity-oidc --locked",
+                "args": null,
+                "globalInputs": [],
+                "inputs": [],
+                "outputs": [],
+                "options": { "runInCi": false, "runInSyncPhase": null }
+              },
+              "format": {
+                "command": "cargo fmt -p identity-oidc",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "format-check": {
+                "command": "cargo fmt -p identity-oidc -- --check",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "lint": {
+                "command": "cargo clippy -p identity-oidc --all-targets -- -D warnings",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "package": {
+                "command": "cargo build -p identity-oidc --locked --release",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "test": {
+                "command": "cargo test -p identity-oidc --locked",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "test-unit": {
+                "command": "cargo test -p identity-oidc --locked --lib",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "typecheck": {
+                "command": "cargo check -p identity-oidc --all-targets",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "wrangler-validate": {
+                "command": null,
+                "args": null,
+                "globalInputs": [],
+                "inputs": [],
+                "outputs": [],
+                "options": { "runInSyncPhase": null }
+              }
+            },
+            "toolchains": { "plugins": {} },
+            "workspace": { "inheritedTasks": {}, "mergeStrategies": {} }
+          },
+          "id": "identity-oidc",
+          "inherited": { "configs": {}, "layers": {} },
+          "language": "unknown",
+          "layer": "unknown",
+          "root": "/home/johnitvn/ecoma-io/ecoma-io/crates/identity-oidc",
+          "source": "crates/identity-oidc",
+          "stack": "unknown",
+          "taskTargets": [
+            "identity-oidc:build",
+            "identity-oidc:dev",
+            "identity-oidc:format",
+            "identity-oidc:format-check",
+            "identity-oidc:lint",
+            "identity-oidc:package",
+            "identity-oidc:test",
+            "identity-oidc:test-unit",
+            "identity-oidc:typecheck",
+            "identity-oidc:wrangler-validate"
+          ],
+          "toolchains": ["system"]
+        },
+        {
+          "config": {
+            "schema": "https://moonrepo.dev/schemas/moon.json",
+            "docker": { "file": {}, "scaffold": {} },
+            "language": "unknown",
+            "layer": "unknown",
+            "owners": { "paths": [] },
+            "stack": "unknown",
+            "tags": ["rust", "crate", "security"],
+            "tasks": {
+              "build": {
+                "command": "cargo build -p identity-security --locked",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "dev": {
+                "command": "cargo run -p identity-security --locked",
+                "args": null,
+                "globalInputs": [],
+                "inputs": [],
+                "outputs": [],
+                "options": { "runInCi": false, "runInSyncPhase": null }
+              },
+              "format": {
+                "command": "cargo fmt -p identity-security",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "format-check": {
+                "command": "cargo fmt -p identity-security -- --check",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "lint": {
+                "command": "cargo clippy -p identity-security --all-targets -- -D warnings",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "package": {
+                "command": "cargo build -p identity-security --locked --release",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "test": {
+                "command": "cargo test -p identity-security --locked",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "test-unit": {
+                "command": "cargo test -p identity-security --locked --lib",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "typecheck": {
+                "command": "cargo check -p identity-security --all-targets",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "wrangler-validate": {
+                "command": null,
+                "args": null,
+                "globalInputs": [],
+                "inputs": [],
+                "outputs": [],
+                "options": { "runInSyncPhase": null }
+              }
+            },
+            "toolchains": { "plugins": {} },
+            "workspace": { "inheritedTasks": {}, "mergeStrategies": {} }
+          },
+          "id": "identity-security",
+          "inherited": { "configs": {}, "layers": {} },
+          "language": "unknown",
+          "layer": "unknown",
+          "root": "/home/johnitvn/ecoma-io/ecoma-io/crates/identity-security",
+          "source": "crates/identity-security",
+          "stack": "unknown",
+          "taskTargets": [
+            "identity-security:build",
+            "identity-security:dev",
+            "identity-security:format",
+            "identity-security:format-check",
+            "identity-security:lint",
+            "identity-security:package",
+            "identity-security:test",
+            "identity-security:test-unit",
+            "identity-security:typecheck",
+            "identity-security:wrangler-validate"
+          ],
+          "toolchains": ["system"]
+        },
+        {
+          "config": {
+            "schema": "",
+            "docker": { "file": {}, "scaffold": {} },
+            "language": "unknown",
+            "layer": "unknown",
+            "owners": { "paths": [] },
+            "stack": "unknown",
+            "toolchains": { "plugins": {} },
+            "workspace": { "inheritedTasks": {}, "mergeStrategies": {} }
+          },
+          "id": "identity-testkit",
+          "inherited": { "configs": {}, "layers": {} },
+          "language": "unknown",
+          "layer": "unknown",
+          "root": "/home/johnitvn/ecoma-io/ecoma-io/crates/identity-testkit",
+          "source": "crates/identity-testkit",
+          "stack": "unknown",
+          "toolchains": ["system"]
+        },
+        {
+          "aliases": [
+            { "alias": "@ecoma-io/identity-web", "plugin": "javascript" }
+          ],
+          "config": {
+            "schema": "",
+            "docker": { "file": {}, "scaffold": {} },
+            "language": "unknown",
+            "layer": "unknown",
+            "owners": { "paths": [] },
+            "stack": "unknown",
+            "toolchains": { "plugins": {} },
+            "workspace": { "inheritedTasks": {}, "mergeStrategies": {} }
+          },
+          "id": "identity-web",
+          "inherited": { "configs": {}, "layers": {} },
+          "language": "javascript",
+          "layer": "unknown",
+          "root": "/home/johnitvn/ecoma-io/ecoma-io/apps/identity/web",
+          "source": "apps/identity/web",
+          "stack": "unknown",
+          "toolchains": ["javascript", "node", "pnpm"]
+        },
+        {
+          "config": {
+            "schema": "https://moonrepo.dev/schemas/moon.json",
+            "docker": { "file": {}, "scaffold": {} },
+            "language": "unknown",
+            "layer": "unknown",
+            "owners": { "paths": [] },
+            "stack": "unknown",
+            "tags": ["rust", "worker", "deployable", "identity"],
+            "tasks": {
+              "build": {
+                "command": "cargo build -p identity-worker --locked --target wasm32-unknown-unknown",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "dev": {
+                "command": null,
+                "args": null,
+                "globalInputs": [],
+                "inputs": [],
+                "outputs": [],
+                "options": { "runInCi": false, "runInSyncPhase": null },
+                "script": "cd \"$MOON_WORKSPACE_ROOT/infra/cloudflare/development/identity\" && pnpm exec wrangler dev --config wrangler.jsonc"
+              },
+              "format": {
+                "command": "cargo fmt -p identity-worker",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "format-check": {
+                "command": "cargo fmt -p identity-worker -- --check",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "lint": {
+                "command": "cargo clippy -p identity-worker --all-targets -- -D warnings",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "package": {
+                "command": "cargo build -p identity-worker --locked --release --target wasm32-unknown-unknown",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "test": {
+                "command": "cargo test -p identity-worker --locked",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "test-unit": {
+                "command": "cargo test -p identity-worker --locked --lib",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "typecheck": {
+                "command": "cargo check -p identity-worker --all-targets",
+                "args": null,
+                "globalInputs": [],
+                "options": { "cache": false, "runInSyncPhase": null }
+              },
+              "wrangler-validate": {
+                "command": null,
+                "args": null,
+                "globalInputs": [],
+                "inputs": [
+                  { "file": "Cargo.toml" },
+                  { "glob": "src/**/*", "cache": true }
+                ],
+                "outputs": [],
+                "options": { "cache": false, "runInSyncPhase": null },
+                "script": "cd \"$MOON_WORKSPACE_ROOT/infra/cloudflare/development/identity\" && pnpm exec wrangler deploy --dry-run --config wrangler.jsonc"
+              }
+            },
+            "toolchains": { "plugins": {} },
+            "workspace": { "inheritedTasks": {}, "mergeStrategies": {} }
+          },
+          "id": "identity-worker",
+          "inherited": { "configs": {}, "layers": {} },
+          "language": "unknown",
+          "layer": "unknown",
+          "root": "/home/johnitvn/ecoma-io/ecoma-io/apps/identity/worker",
+          "source": "apps/identity/worker",
+          "stack": "unknown",
+          "taskTargets": [
+            "identity-worker:build",
+            "identity-worker:dev",
+            "identity-worker:format",
+            "identity-worker:format-check",
+            "identity-worker:lint",
+            "identity-worker:package",
+            "identity-worker:test",
+            "identity-worker:test-unit",
+            "identity-worker:typecheck",
+            "identity-worker:wrangler-validate"
+          ],
+          "toolchains": ["system"]
+        }
+      ],
+      "node_holes": [],
+      "edge_property": "directed",
+      "edges": []
+    },
+    "renamed_ids": {},
+    "repo_type": "monorepo",
+    "root_id": null,
+    "tags_to_ids": {},
+    "tags_to_targets": {}
+  },
+  "tasks": {
+    "graph": {
+      "nodes": [
+        {
+          "command": "cargo",
+          "args": [
+            "build",
+            "-p",
+            "identity-admin-worker",
+            "--locked",
+            "--target",
+            "wasm32-unknown-unknown"
+          ],
+          "id": "build",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-admin-worker:build",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cd",
+          "id": "dev",
+          "inputs": [
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "outputStyle": "stream",
+            "persistent": true,
+            "priority": "low",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": false,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "preset": "server",
+          "script": "cd \"$MOON_WORKSPACE_ROOT/infra/cloudflare/development/identity-admin\" && pnpm exec wrangler dev --config wrangler.jsonc",
+          "state": { "emptyInputs": true, "setRunInCi": true },
+          "target": "identity-admin-worker:dev",
+          "toolchains": ["system"],
+          "type": "run"
+        },
+        {
+          "command": "cargo",
+          "args": ["fmt", "-p", "identity-admin-worker"],
+          "id": "format",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-admin-worker:format",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["fmt", "-p", "identity-admin-worker", "--", "--check"],
+          "id": "format-check",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-admin-worker:format-check",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": [
+            "clippy",
+            "-p",
+            "identity-admin-worker",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "id": "lint",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-admin-worker:lint",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": [
+            "build",
+            "-p",
+            "identity-admin-worker",
+            "--locked",
+            "--release",
+            "--target",
+            "wasm32-unknown-unknown"
+          ],
+          "id": "package",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-admin-worker:package",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["test", "-p", "identity-admin-worker", "--locked"],
+          "id": "test",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-admin-worker:test",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["test", "-p", "identity-admin-worker", "--locked", "--lib"],
+          "id": "test-unit",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-admin-worker:test-unit",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["check", "-p", "identity-admin-worker", "--all-targets"],
+          "id": "typecheck",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-admin-worker:typecheck",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cd",
+          "id": "wrangler-validate",
+          "inputs": [
+            { "file": "Cargo.toml" },
+            { "glob": "src/**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "script": "cd \"$MOON_WORKSPACE_ROOT/infra/cloudflare/development/identity-admin\" && pnpm exec wrangler deploy --dry-run --config wrangler.jsonc",
+          "state": {},
+          "target": "identity-admin-worker:wrangler-validate",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["build", "-p", "identity-application", "--locked"],
+          "id": "build",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-application:build",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["run", "-p", "identity-application", "--locked"],
+          "id": "dev",
+          "inputs": [
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "outputStyle": "stream",
+            "persistent": true,
+            "priority": "low",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": false,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "preset": "server",
+          "state": { "emptyInputs": true, "setRunInCi": true },
+          "target": "identity-application:dev",
+          "toolchains": ["system"],
+          "type": "run"
+        },
+        {
+          "command": "cargo",
+          "args": ["fmt", "-p", "identity-application"],
+          "id": "format",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-application:format",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["fmt", "-p", "identity-application", "--", "--check"],
+          "id": "format-check",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-application:format-check",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": [
+            "clippy",
+            "-p",
+            "identity-application",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "id": "lint",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-application:lint",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": [
+            "build",
+            "-p",
+            "identity-application",
+            "--locked",
+            "--release"
+          ],
+          "id": "package",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-application:package",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["test", "-p", "identity-application", "--locked"],
+          "id": "test",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-application:test",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["test", "-p", "identity-application", "--locked", "--lib"],
+          "id": "test-unit",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-application:test-unit",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["check", "-p", "identity-application", "--all-targets"],
+          "id": "typecheck",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-application:typecheck",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "noop",
+          "id": "wrangler-validate",
+          "inputs": [
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": true,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "emptyInputs": true },
+          "target": "identity-application:wrangler-validate",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["build", "-p", "identity-cloudflare", "--locked"],
+          "id": "build",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-cloudflare:build",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["run", "-p", "identity-cloudflare", "--locked"],
+          "id": "dev",
+          "inputs": [
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "outputStyle": "stream",
+            "persistent": true,
+            "priority": "low",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": false,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "preset": "server",
+          "state": { "emptyInputs": true, "setRunInCi": true },
+          "target": "identity-cloudflare:dev",
+          "toolchains": ["system"],
+          "type": "run"
+        },
+        {
+          "command": "cargo",
+          "args": ["fmt", "-p", "identity-cloudflare"],
+          "id": "format",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-cloudflare:format",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["fmt", "-p", "identity-cloudflare", "--", "--check"],
+          "id": "format-check",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-cloudflare:format-check",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": [
+            "clippy",
+            "-p",
+            "identity-cloudflare",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "id": "lint",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-cloudflare:lint",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": [
+            "build",
+            "-p",
+            "identity-cloudflare",
+            "--locked",
+            "--release"
+          ],
+          "id": "package",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-cloudflare:package",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["test", "-p", "identity-cloudflare", "--locked"],
+          "id": "test",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-cloudflare:test",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["test", "-p", "identity-cloudflare", "--locked", "--lib"],
+          "id": "test-unit",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-cloudflare:test-unit",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["check", "-p", "identity-cloudflare", "--all-targets"],
+          "id": "typecheck",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-cloudflare:typecheck",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "noop",
+          "id": "wrangler-validate",
+          "inputs": [
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": true,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "emptyInputs": true },
+          "target": "identity-cloudflare:wrangler-validate",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["build", "-p", "identity-domain", "--locked"],
+          "id": "build",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-domain:build",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["run", "-p", "identity-domain", "--locked"],
+          "id": "dev",
+          "inputs": [
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "outputStyle": "stream",
+            "persistent": true,
+            "priority": "low",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": false,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "preset": "server",
+          "state": { "emptyInputs": true, "setRunInCi": true },
+          "target": "identity-domain:dev",
+          "toolchains": ["system"],
+          "type": "run"
+        },
+        {
+          "command": "cargo",
+          "args": ["fmt", "-p", "identity-domain"],
+          "id": "format",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-domain:format",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["fmt", "-p", "identity-domain", "--", "--check"],
+          "id": "format-check",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-domain:format-check",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": [
+            "clippy",
+            "-p",
+            "identity-domain",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "id": "lint",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-domain:lint",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["build", "-p", "identity-domain", "--locked", "--release"],
+          "id": "package",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-domain:package",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["test", "-p", "identity-domain", "--locked"],
+          "id": "test",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-domain:test",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": [
+            "test",
+            "-p",
+            "identity-domain",
+            "--locked",
+            "--",
+            "--ignored"
+          ],
+          "id": "test-invariants",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-domain:test-invariants",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["test", "-p", "identity-domain", "--locked", "--lib"],
+          "id": "test-unit",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-domain:test-unit",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["check", "-p", "identity-domain", "--all-targets"],
+          "id": "typecheck",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-domain:typecheck",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "noop",
+          "id": "wrangler-validate",
+          "inputs": [
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": true,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "emptyInputs": true },
+          "target": "identity-domain:wrangler-validate",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": [
+            "build",
+            "-p",
+            "identity-jobs-worker",
+            "--locked",
+            "--target",
+            "wasm32-unknown-unknown"
+          ],
+          "id": "build",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-jobs-worker:build",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cd",
+          "id": "dev",
+          "inputs": [
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "outputStyle": "stream",
+            "persistent": true,
+            "priority": "low",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": false,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "preset": "server",
+          "script": "cd \"$MOON_WORKSPACE_ROOT/infra/cloudflare/development/identity-jobs\" && pnpm exec wrangler dev --config wrangler.jsonc",
+          "state": { "emptyInputs": true, "setRunInCi": true },
+          "target": "identity-jobs-worker:dev",
+          "toolchains": ["system"],
+          "type": "run"
+        },
+        {
+          "command": "cargo",
+          "args": ["fmt", "-p", "identity-jobs-worker"],
+          "id": "format",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-jobs-worker:format",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["fmt", "-p", "identity-jobs-worker", "--", "--check"],
+          "id": "format-check",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-jobs-worker:format-check",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": [
+            "clippy",
+            "-p",
+            "identity-jobs-worker",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "id": "lint",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-jobs-worker:lint",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": [
+            "build",
+            "-p",
+            "identity-jobs-worker",
+            "--locked",
+            "--release",
+            "--target",
+            "wasm32-unknown-unknown"
+          ],
+          "id": "package",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-jobs-worker:package",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["test", "-p", "identity-jobs-worker", "--locked"],
+          "id": "test",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-jobs-worker:test",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["test", "-p", "identity-jobs-worker", "--locked", "--lib"],
+          "id": "test-unit",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-jobs-worker:test-unit",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["check", "-p", "identity-jobs-worker", "--all-targets"],
+          "id": "typecheck",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-jobs-worker:typecheck",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cd",
+          "id": "wrangler-validate",
+          "inputs": [
+            { "file": "@files(Cargo.toml)" },
+            { "glob": "@globs(src/**/*)", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "script": "cd \"$MOON_WORKSPACE_ROOT/infra/cloudflare/development/identity-jobs\" && pnpm exec wrangler deploy --dry-run --config wrangler.jsonc",
+          "state": {},
+          "target": "identity-jobs-worker:wrangler-validate",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["build", "-p", "identity-oidc", "--locked"],
+          "id": "build",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-oidc:build",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["run", "-p", "identity-oidc", "--locked"],
+          "id": "dev",
+          "inputs": [
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "outputStyle": "stream",
+            "persistent": true,
+            "priority": "low",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": false,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "preset": "server",
+          "state": { "emptyInputs": true, "setRunInCi": true },
+          "target": "identity-oidc:dev",
+          "toolchains": ["system"],
+          "type": "run"
+        },
+        {
+          "command": "cargo",
+          "args": ["fmt", "-p", "identity-oidc"],
+          "id": "format",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-oidc:format",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["fmt", "-p", "identity-oidc", "--", "--check"],
+          "id": "format-check",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-oidc:format-check",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": [
+            "clippy",
+            "-p",
+            "identity-oidc",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "id": "lint",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-oidc:lint",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["build", "-p", "identity-oidc", "--locked", "--release"],
+          "id": "package",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-oidc:package",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["test", "-p", "identity-oidc", "--locked"],
+          "id": "test",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-oidc:test",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["test", "-p", "identity-oidc", "--locked", "--lib"],
+          "id": "test-unit",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-oidc:test-unit",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["check", "-p", "identity-oidc", "--all-targets"],
+          "id": "typecheck",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-oidc:typecheck",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "noop",
+          "id": "wrangler-validate",
+          "inputs": [
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": true,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "emptyInputs": true },
+          "target": "identity-oidc:wrangler-validate",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["build", "-p", "identity-security", "--locked"],
+          "id": "build",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-security:build",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["run", "-p", "identity-security", "--locked"],
+          "id": "dev",
+          "inputs": [
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "outputStyle": "stream",
+            "persistent": true,
+            "priority": "low",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": false,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "preset": "server",
+          "state": { "emptyInputs": true, "setRunInCi": true },
+          "target": "identity-security:dev",
+          "toolchains": ["system"],
+          "type": "run"
+        },
+        {
+          "command": "cargo",
+          "args": ["fmt", "-p", "identity-security"],
+          "id": "format",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-security:format",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["fmt", "-p", "identity-security", "--", "--check"],
+          "id": "format-check",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-security:format-check",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": [
+            "clippy",
+            "-p",
+            "identity-security",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "id": "lint",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-security:lint",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["build", "-p", "identity-security", "--locked", "--release"],
+          "id": "package",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-security:package",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["test", "-p", "identity-security", "--locked"],
+          "id": "test",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-security:test",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["test", "-p", "identity-security", "--locked", "--lib"],
+          "id": "test-unit",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-security:test-unit",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["check", "-p", "identity-security", "--all-targets"],
+          "id": "typecheck",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-security:typecheck",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "noop",
+          "id": "wrangler-validate",
+          "inputs": [
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": true,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "emptyInputs": true },
+          "target": "identity-security:wrangler-validate",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": [
+            "build",
+            "-p",
+            "identity-worker",
+            "--locked",
+            "--target",
+            "wasm32-unknown-unknown"
+          ],
+          "id": "build",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-worker:build",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cd",
+          "id": "dev",
+          "inputs": [
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "outputStyle": "stream",
+            "persistent": true,
+            "priority": "low",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": false,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "preset": "server",
+          "script": "cd \"$MOON_WORKSPACE_ROOT/infra/cloudflare/development/identity\" && pnpm exec wrangler dev --config wrangler.jsonc",
+          "state": { "emptyInputs": true, "setRunInCi": true },
+          "target": "identity-worker:dev",
+          "toolchains": ["system"],
+          "type": "run"
+        },
+        {
+          "command": "cargo",
+          "args": ["fmt", "-p", "identity-worker"],
+          "id": "format",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-worker:format",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["fmt", "-p", "identity-worker", "--", "--check"],
+          "id": "format-check",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-worker:format-check",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": [
+            "clippy",
+            "-p",
+            "identity-worker",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "id": "lint",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-worker:lint",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": [
+            "build",
+            "-p",
+            "identity-worker",
+            "--locked",
+            "--release",
+            "--target",
+            "wasm32-unknown-unknown"
+          ],
+          "id": "package",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-worker:package",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["test", "-p", "identity-worker", "--locked"],
+          "id": "test",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-worker:test",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["test", "-p", "identity-worker", "--locked", "--lib"],
+          "id": "test-unit",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-worker:test-unit",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cargo",
+          "args": ["check", "-p", "identity-worker", "--all-targets"],
+          "id": "typecheck",
+          "inputs": [
+            { "glob": "**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "state": { "defaultInputs": true },
+          "target": "identity-worker:typecheck",
+          "toolchains": ["system"],
+          "type": "test"
+        },
+        {
+          "command": "cd",
+          "id": "wrangler-validate",
+          "inputs": [
+            { "file": "Cargo.toml" },
+            { "glob": "src/**/*", "cache": true },
+            {
+              "glob": "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}",
+              "cache": true
+            }
+          ],
+          "options": {
+            "allowFailure": false,
+            "cache": false,
+            "inferInputs": false,
+            "internal": false,
+            "interactive": false,
+            "mergeArgs": "append",
+            "mergeChecks": "append",
+            "mergeDeps": "append",
+            "mergeEnv": "append",
+            "mergeInputs": "append",
+            "mergeOutputs": "append",
+            "mergeTags": "append",
+            "mergeToolchains": "append",
+            "persistent": false,
+            "priority": "normal",
+            "retryCount": 0,
+            "runDepsInParallel": true,
+            "runInCI": true,
+            "runInSyncPhase": false,
+            "runFromWorkspaceRoot": false,
+            "shell": true,
+            "unixShell": "bash",
+            "windowsShell": "powershell"
+          },
+          "script": "cd \"$MOON_WORKSPACE_ROOT/infra/cloudflare/development/identity\" && pnpm exec wrangler deploy --dry-run --config wrangler.jsonc",
+          "state": {},
+          "target": "identity-worker:wrangler-validate",
+          "toolchains": ["system"],
+          "type": "test"
+        }
+      ],
+      "node_holes": [],
+      "edge_property": "directed",
+      "edges": []
+    },
+    "targets_to_indexes": {
+      "identity-cloudflare:test-unit": 27,
+      "identity-application:typecheck": 18,
+      "identity-admin-worker:format-check": 3,
+      "identity-worker:package": 76,
+      "identity-worker:test": 77,
+      "identity-application:test-unit": 17,
+      "identity-domain:test": 36,
+      "identity-oidc:build": 51,
+      "identity-oidc:dev": 52,
+      "identity-admin-worker:typecheck": 8,
+      "identity-application:lint": 14,
+      "identity-domain:build": 30,
+      "identity-cloudflare:format-check": 23,
+      "identity-jobs-worker:format": 43,
+      "identity-application:build": 10,
+      "identity-admin-worker:build": 0,
+      "identity-security:lint": 65,
+      "identity-cloudflare:dev": 21,
+      "identity-worker:wrangler-validate": 80,
+      "identity-domain:dev": 31,
+      "identity-security:build": 61,
+      "identity-domain:test-invariants": 37,
+      "identity-admin-worker:format": 2,
+      "identity-application:wrangler-validate": 19,
+      "identity-admin-worker:package": 5,
+      "identity-domain:format-check": 33,
+      "identity-security:dev": 62,
+      "identity-jobs-worker:test": 47,
+      "identity-jobs-worker:typecheck": 49,
+      "identity-worker:typecheck": 79,
+      "identity-jobs-worker:build": 41,
+      "identity-application:format": 12,
+      "identity-oidc:lint": 55,
+      "identity-admin-worker:test": 6,
+      "identity-admin-worker:dev": 1,
+      "identity-application:test": 16,
+      "identity-domain:wrangler-validate": 40,
+      "identity-jobs-worker:dev": 42,
+      "identity-oidc:wrangler-validate": 60,
+      "identity-jobs-worker:package": 46,
+      "identity-application:format-check": 13,
+      "identity-admin-worker:test-unit": 7,
+      "identity-oidc:typecheck": 59,
+      "identity-security:format-check": 64,
+      "identity-security:test-unit": 68,
+      "identity-worker:build": 71,
+      "identity-admin-worker:wrangler-validate": 9,
+      "identity-worker:lint": 75,
+      "identity-security:typecheck": 69,
+      "identity-domain:package": 35,
+      "identity-jobs-worker:lint": 45,
+      "identity-security:test": 67,
+      "identity-admin-worker:lint": 4,
+      "identity-jobs-worker:format-check": 44,
+      "identity-oidc:test-unit": 58,
+      "identity-oidc:format-check": 54,
+      "identity-cloudflare:typecheck": 28,
+      "identity-oidc:format": 53,
+      "identity-oidc:package": 56,
+      "identity-worker:format-check": 74,
+      "identity-security:wrangler-validate": 70,
+      "identity-oidc:test": 57,
+      "identity-worker:dev": 72,
+      "identity-application:package": 15,
+      "identity-worker:format": 73,
+      "identity-domain:format": 32,
+      "identity-domain:test-unit": 38,
+      "identity-cloudflare:test": 26,
+      "identity-domain:lint": 34,
+      "identity-jobs-worker:wrangler-validate": 50,
+      "identity-security:package": 66,
+      "identity-cloudflare:lint": 24,
+      "identity-domain:typecheck": 39,
+      "identity-jobs-worker:test-unit": 48,
+      "identity-application:dev": 11,
+      "identity-cloudflare:wrangler-validate": 29,
+      "identity-security:format": 63,
+      "identity-cloudflare:build": 20,
+      "identity-cloudflare:package": 25,
+      "identity-cloudflare:format": 22,
+      "identity-worker:test-unit": 78
+    }
+  }
+}

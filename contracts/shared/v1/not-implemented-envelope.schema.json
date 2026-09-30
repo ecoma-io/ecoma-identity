@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/shared/v1/not-implemented-envelope.schema.json",
+  "title": "The 501 not_implemented envelope",
+  "description": "The body every declared-but-unimplemented route answers with, in the error envelope of identity_cloudflare::error::ErrorEnvelope. The code is the one every layer agrees on: ApplicationError::NotImplemented and TransportError::Unimplemented both map to the string 'not_implemented', and docs/architecture/worker-architecture.md names ApplicationError::NotImplemented as the envelope for a declared route. The STATUS is 501 — deliberately OUTSIDE the closed HttpStatus set, because it is answered by a hand-built response at the route table rather than by ErrorEnvelope::status(). ErrorEnvelope::status() would map this code to 500, which is wrong for a declared route: a client that sees 500 retries, and a client that sees 501 stops.",
+  "type": "object",
+  "x-rust-type": "identity_cloudflare::error::ErrorEnvelope, built from a CloudflareError whose code() is \"not_implemented\"",
+  "x-serde-status": "the envelope type is IMPLEMENTED; no Worker emits it yet — all three Worker composition roots are one-line placeholders (apps/*/worker/src/lib.rs), so in the repository as it stands no route is served at all. The 501 is CONTRACTED, not observed.",
+  "x-http-status": 501,
+  "required": ["code", "message", "client_safe"],
+  "additionalProperties": false,
+  "properties": {
+    "code": {
+      "type": "string",
+      "const": "not_implemented",
+      "description": "The stable machine-readable code. Present so a caller can tell 'this system has not built that yet' from 'you asked for the wrong thing' without reading the message.",
+      "x-serde": "pub code: String",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "ApplicationError::NotImplemented -> \"not_implemented\"; TransportError::Unimplemented -> \"not_implemented\""
+      }
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The human-readable message. For a not-implemented failure the crate's own rendering is \"this operation is not implemented yet (<operation>)\" — UNIMPLEMENTED_MESSAGE plus the parenthesised operation name. It is client_safe, so this is the error's own text rather than the generic substitute. It never contains a secret and never claims a flow exists.",
+      "x-serde": "pub message: String",
+      "x-serde-status": "required",
+      "x-construction": "identity_cloudflare::error::UNIMPLEMENTED_MESSAGE == \"this operation is not implemented yet\", rendered by CloudflareError::message_when_client_safe as format!(\"{UNIMPLEMENTED_MESSAGE} ({operation})\")",
+      "test": "identity_cloudflare::error::tests::an_unimplemented_error_says_so_in_the_message asserts the code, the presence of the operation name, and client_safe == true"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The request identifier, when the transport had one, so a user can quote it and an operator can find the log line. OMITTED from the body entirely when absent, not serialised as null.",
+      "x-serde": "#[serde(skip_serializing_if = \"Option::is_none\", default)] pub request_id: Option<String>",
+      "x-serde-status": "optional, omitted when absent",
+      "x-serde-note": "#[serde(skip_serializing_if = \"Option::is_none\", default)] — absent from the body, not null.",
+      "x-test": "identity_cloudflare::error::tests::an_absent_request_id_is_omitted_rather_than_serialised_as_null"
+    },
+    "client_safe": {
+      "type": "boolean",
+      "const": true,
+      "description": "Whether the message is the error's own text rather than the generic substitute. TRUE for not_implemented: TransportError::Unimplemented is client-safe, and a caller must be able to tell from the response body that the system has not built this yet without reading the code and inferring.",
+      "x-serde": "pub client_safe: bool",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "TransportError::is_client_safe — Unimplemented is not among the operator-facing variants",
+        "constraining": "the field is a plain bool in Rust; the true value follows from which variant was constructed"
+      }
+    }
+  },
+  "x-do-not-confuse-with": {
+    "shape": "this is ErrorEnvelope, NOT identity_oidc::response::OAuthErrorResponse",
+    "why": "the OAuth endpoints answer in the RFC 6749 section 5.2 shape because a third-party OAuth client library parses that one; the rest of the API answers in this shape because Ecoma's own clients parse it. One envelope for both would break one of them. A DEFERRED /oauth/* route in the bootstrap is contracted to answer THIS envelope, because the 501 comes from the route table before any OAuth-specific handler runs."
+  }
+}

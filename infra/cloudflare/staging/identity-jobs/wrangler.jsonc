@@ -1,0 +1,90 @@
+// What this is: the STAGING wrangler configuration for the `identity-jobs`
+// Worker — the queue consumer for email, security notifications and audit
+// archival.
+//
+// What this is NOT: it is not production, and it owns no identity state, so it
+// has no database binding at all.
+//
+// STAGING IS PRODUCTION-SHAPED: same consumer settings, same dead-letter
+// topology, same bindings — pointing at staging resources throughout. A staging
+// config that drops the dead-letter queue would mean dead-letter handling is
+// first exercised during a production incident.
+//
+// ---------------------------------------------------------------------------------
+// BOUNDARY: no `d1_databases` block, and none may be added. brief §2 constraint 5
+// — jobs owns no identity state. Its own record-keeping (idempotency, dead
+// letters) is KV, below.
+// ---------------------------------------------------------------------------------
+
+{
+  "$schema": "../../../../node_modules/wrangler/config-schema.json",
+
+  // STAGING SCRIPT NAME = `identity-jobs-staging`. Same reasoning as
+  // identity-staging above: without the suffix, deploying from this file would
+  // overwrite the production environment of the same script.
+  "name": "identity-jobs-staging",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "main": "build/index.js",
+  "build": {
+    "command": "cd ../../../../apps/identity-jobs/worker && cargo install -q \"worker-build@^0.8\" --locked && worker-build --release",
+  },
+
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.1,
+      "persist": true,
+    },
+  },
+
+  "services": [
+    {
+      "binding": "IDENTITY",
+      "service": "identity-staging",
+    },
+    {
+      "binding": "EMAIL_PROVIDER",
+      "service": "identity-email-provider-staging",
+    },
+  ],
+
+  "kv_namespaces": [
+    {
+      // STAGING namespace. Idempotency keys: a lost one means a duplicate
+      // email, not a wrong authorization decision (brief §2 constraint 24).
+      "binding": "JOBS_KV",
+      "id": "0000000000000000000000000000000b",
+    },
+  ],
+
+  "queues": {
+    "consumers": [
+      {
+        // STAGING queue, matching the producer in
+        // identity.wrangler.jsonc in this directory. brief §2 constraint 22 —
+        // the pair stays compatible through the versioned envelope in
+        // contracts/events/v1/, not through a config setting.
+        "queue": "identity-staging",
+        // Identical to production on purpose. A batch size that is safe on
+        // staging and wrong on production is a batch size that has never been
+        // tested.
+        "max_batch_size": 10,
+        "max_batch_timeout": 30,
+        "max_retries": 5,
+        "dead_letter_queue": "identity-staging-dlq",
+      },
+    ],
+  },
+
+  "vars": {
+    "ENVIRONMENT": "staging",
+  },
+}

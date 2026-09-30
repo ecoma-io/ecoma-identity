@@ -1,0 +1,103 @@
+// What this is: the DEVELOPMENT (local) wrangler configuration for the
+// `identity-jobs` Worker — the queue consumer for email delivery, security
+// notifications and audit archival.
+//
+// What this is NOT: it is not a staging or production configuration, and it
+// owns no identity state and therefore has no database binding at all.
+//
+// Read with:  wrangler dev -c infra/cloudflare/development/identity-jobs.wrangler.jsonc
+// From a contributor: `moon run identity-jobs:dev`.
+//
+// ---------------------------------------------------------------------------------
+// BOUNDARY: no `d1_databases` block, and none may be added. brief §2 constraint 5
+// — "The Jobs Worker is a background side-effect worker and owns NO identity
+// state." It also does not get its own database: jobs records the fact that it
+// did something (idempotency keys, dead-letter state) and that is KV, below.
+// A second database for jobs would be a second place to enforce a rule and a
+// second thing to migrate under brief §2 constraint 21.
+//
+// The same rule is stated in Cargo.toml: this crate does not depend on
+// `identity-domain` or `identity-application`, so it cannot evaluate an identity
+// rule even if someone hands it a payload that asks it to. `tooling/scripts/
+// check-architecture.mjs` enforces that from `cargo metadata`.
+// ---------------------------------------------------------------------------------
+
+{
+  "$schema": "../../../../node_modules/wrangler/config-schema.json",
+
+  "name": "identity-jobs",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // See infra/cloudflare/development/identity.wrangler.jsonc for why `main`
+  // points at the worker-build JS shim rather than at src/lib.rs.
+  "main": "build/index.js",
+  "build": {
+    "command": "cd ../../../../apps/identity-jobs/worker && cargo install -q \"worker-build@^0.8\" --locked && worker-build --release",
+  },
+
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": false,
+    },
+  },
+
+  "services": [
+    {
+      // The narrow internal endpoints jobs needs — e.g. re-reading a user
+      // record to address an email. Deliberately narrow: a service binding to
+      // the whole identity Worker exposes its entire route table, so the
+      // internal surface is kept small on the identity side, and jobs only
+      // calls the endpoints it needs.
+      "binding": "IDENTITY",
+      "service": "identity-development",
+    },
+    {
+      // brief §3 marks this binding "deferred". It is declared in every
+      // environment so the code path is uniform; the DEFERRED part is the
+      // provider implementation, not the binding.
+      "binding": "EMAIL_PROVIDER",
+      "service": "identity-email-provider-development",
+    },
+  ],
+
+  "kv_namespaces": [
+    {
+      // Scratch space and idempotency keys: "have I already sent this
+      // verification email?". brief §2 constraint 24 — never authoritative
+      // identity state. If a key is lost the consequence is a duplicate email,
+      // not a wrong authorization decision.
+      "binding": "JOBS_KV",
+      "id": "",
+      "remote": false,
+    },
+  ],
+
+  "queues": {
+    "consumers": [
+      {
+        // Same queue name as the producer binding in identity.wrangler.jsonc.
+        // brief §2 constraint 22: producer and consumer are backward-compatible
+        // with each other, which is a property of the event envelope in
+        // contracts/events/v1/ — not something this file can enforce.
+        "queue": "identity-development",
+        "max_batch_size": 10,
+        "max_batch_timeout": 30,
+        // Retries here, not in the Worker code: a transient SMTP failure must
+        // not require a redeploy to recover from.
+        "max_retries": 5,
+        // A message that fails 5 times is parked rather than dropped. Dropping
+        // a security notification silently is worse than parking it.
+        "dead_letter_queue": "identity-development-dlq",
+      },
+    ],
+  },
+
+  "vars": {
+    // Non-secret configuration only; secrets come from `.dev.vars` (gitignored).
+    "ENVIRONMENT": "development",
+  },
+}

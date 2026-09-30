@@ -1,0 +1,133 @@
+# Git hooks — the three moments a commit is judged, and what each is FOR.
+#
+# This file names JOBS only: which command runs at which hook, and nothing about
+# what the command enforces. Every rule those commands apply lives with the
+# document that owns it — the boundary law in `docs/architecture/` and
+# `module-boundaries.config.mjs`, the scope vocabulary in `commitlint.config.mjs`
+# and `cocogitto.toml`, the release policy in `docs/operations/`. A rule
+# restated here would be the second copy, and the second copy is the one that
+# goes stale: a hook file that repeats the law reads as the law and gets
+# updated last.
+#
+# `pnpm install` runs `lefthook install`, so these are wired into `.git/hooks`
+# for every clone. A gate that exists only on one machine catches nothing on
+# anyone else's.
+
+# ---------------------------------------------------------------------------
+# pre-commit — for the mistakes that cost a reviewer's attention, and can still
+# be fixed by the person who made them seconds after making them.
+# ---------------------------------------------------------------------------
+pre-commit:
+  # Serial, and deliberately so. The architecture guard judges the workspace
+  # rather than staged files, so a formatter rewriting bytes underneath a
+  # parallel lint run means two commands read different trees — and one
+  # mistake then surfaces as three failures, leaving the reviewer to work out
+  # which one was real.
+  parallel: false
+  commands:
+    format:
+      # A diff nobody can read past its own whitespace is a diff that is not
+      # reviewed, only endured.
+      glob: "*.{js,mjs,cjs,ts,vue,json,jsonc,yml,yaml,md,css,html}"
+      run: set -euo pipefail; pnpm exec prettier --check --ignore-unknown {staged_files}
+
+    lint:
+      glob: "*.{js,mjs,cjs,ts,vue}"
+      run: set -euo pipefail; pnpm exec eslint --no-warn-ignored {staged_files}
+
+    architecture:
+      # The cheapest moment to catch a boundary crossing, and the most
+      # expensive to catch later: by then the violation is load-bearing and
+      # other commits were written around it. This is the only boundary check
+      # that runs per commit.
+      run: set -euo pipefail; node tooling/scripts/check-architecture.mjs
+
+# ---------------------------------------------------------------------------
+# commit-msg — for the message, judged while it is still a draft.
+# ---------------------------------------------------------------------------
+commit-msg:
+  commands:
+    cocogitto:
+      # THE AUTHORITATIVE TIER, and it is authoritative for one thing: whether
+      # this message is allowed to become a release commit. Cocogitto is what
+      # the release process depends on, and `cocogitto.toml` is its config.
+      # `{1}` is the file git has already written the draft message into.
+      #
+      # `--config` is load-bearing rather than redundant: `cog` discovers
+      # `cog.toml` and nothing else, so without the flag this job parses no
+      # config, enforces no scope, and exits 0 on a message it never
+      # examined — a green light on an unchecked gate, which is worse than no
+      # gate because it reads as one. The measured evidence is in the header
+      # of `cocogitto.toml`.
+      run: set -euo pipefail; cog --config cocogitto.toml verify --file {1}
+
+    commitlint:
+      # THE SECOND, INDEPENDENT TIER. It exists because the first one cannot
+      # be everywhere: CI re-runs this tier against commits that arrived with
+      # no hook ever installed. Neither tier subsumes the other — a message
+      # one accepts and the other rejects is a bug in one of the two configs,
+      # never a reason to reach for a bypass.
+      run: set -euo pipefail; pnpm exec commitlint --edit {1}
+
+# ---------------------------------------------------------------------------
+# pre-push — for the full suite, once, on the way out rather than in review.
+# ---------------------------------------------------------------------------
+pre-push:
+  parallel: false
+  commands:
+    # Moon owns the task graph, so anything with a task is addressed by task
+    # name: CI and the deploy workflows name the same tasks this file does,
+    # and a project that overrides a task keeps working. Raw commands appear
+    # only where no task covers the job, and each says so.
+    typecheck:
+      run: set -euo pipefail; pnpm exec moon run :typecheck
+
+    test:
+      run: set -euo pipefail; pnpm exec moon run :test
+
+    # The two frontends carry their own toolchain and their own tsconfig, and
+    # `tsc` cannot read a `.vue` file — so a frontend whose typecheck never
+    # ran is a frontend that ships its type errors to a browser.
+    web-typecheck:
+      run: set -euo pipefail; pnpm --filter @ecoma-io/identity-web typecheck
+
+    web-test:
+      run: set -euo pipefail; pnpm --filter @ecoma-io/identity-web test
+
+    admin-web-typecheck:
+      run: set -euo pipefail; pnpm --filter @ecoma-io/identity-admin-web typecheck
+
+    admin-web-test:
+      run: set -euo pipefail; pnpm --filter @ecoma-io/identity-admin-web test
+
+    # ---- the Rust suite: no moon task covers it, so it is named here -----
+    # A broken build or a documented API that no longer compiles is otherwise
+    # discovered by whoever depends on it. `--locked`, because the lockfile is
+    # committed and a push that resolves differently from CI fails in someone
+    # else's pipeline.
+    cargo-test:
+      run: set -euo pipefail; cargo test --workspace --locked
+
+    cargo-clippy:
+      run: set -euo pipefail; cargo clippy --workspace --all-targets
+
+    cargo-doc:
+      run: set -euo pipefail; cargo doc --workspace --no-deps
+
+    # ---- the boundary law, and the proof the guard still works ----------
+    architecture:
+      run: set -euo pipefail; node tooling/scripts/check-architecture.mjs
+
+    architecture-canary:
+      # A guard that has stopped catching anything still reports green for as
+      # long as nobody crosses a boundary on purpose. The canary crosses one
+      # in a fixture tree and must fail — the only way to know the gate is a
+      # gate.
+      run: set -euo pipefail; pnpm arch:canary
+
+    contracts:
+      # A Worker answering a shape its own contract file no longer describes
+      # is drift that surfaces in a consumer that is already broken. No moon
+      # task covers this yet; it moves under one when one exists, and this is
+      # the raw job until then.
+      run: set -euo pipefail; node tooling/ci/check-contracts.mjs

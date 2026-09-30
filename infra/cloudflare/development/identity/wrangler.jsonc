@@ -1,0 +1,147 @@
+// What this is: the DEVELOPMENT (local) wrangler configuration for the
+// `identity` Worker.
+//
+// What this is NOT: it is not a staging or production configuration, and no id
+// in it points at anything an operator created. Every binding here is local.
+// Brief §3 fixes this Worker's binding set; brief constraint 26 forbids a local
+// dev shortcut that would make this file "work" by skipping the real code path.
+//
+// Read with:  wrangler dev -c infra/cloudflare/development/identity.wrangler.jsonc
+// From a contributor: `moon run identity:dev` (see apps/identity/worker/moon.yml),
+// which passes this exact path.
+//
+// Boundary: `IDENTITY_DB` is the ONLY D1 binding that may exist in this
+// repository. `identity-admin` and `identity-jobs` do not have one, and adding
+// one to either is a brief §2 constraint 3 / constraint 5 violation, not a
+// config tweak — it needs an ADR first (brief §2 constraint 29).
+
+{
+  "$schema": "../../../../node_modules/wrangler/config-schema.json",
+
+  // The Worker name. The SAME name is used in every environment; wrangler's
+  // `--env` or `-c` selects which file is read, so `identity` in development
+  // and `identity` in production are the same script name in the same account
+  // but different environments. brief §7: exactly three deployables.
+  "name": "identity",
+  "compatibility_date": "2026-09-01",
+  // `nodejs_compat` is what lets the `worker` crate's `http` module and the
+  // WebCrypto-backed shims run on the Workers runtime. Pinned explicitly so a
+  // `compatibility_date` bump cannot silently change it.
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Rust Workers are not published directly. `worker-build` runs cargo for
+  // wasm32-unknown-unknown, runs wasm-bindgen, and writes `build/index.js` +
+  // `build/index_bg.wasm`; `main` below points at the JS shim and the wasm is
+  // discovered beside it. There is no `main` pointing at `src/lib.rs` — that
+  // path is not what wrangler uploads, and a config that names it would fail
+  // at upload time with a confusing error.
+  "main": "build/index.js",
+  "build": {
+    // `--out-dir build` is worker-build's default, and `build` is relative to
+    // the wrangler config file — which lives three directories down. The
+    // leading `../../../../` puts the Rust crate at the right place for cargo
+    // while keeping `build/index.js` resolvable relative to THIS file.
+    //
+    // moon runs the wasm build itself in `identity:build` (see
+    // apps/identity/worker/moon.yml), so CI and a local build produce the same
+    // artefact from the same task. This command is what `wrangler dev` uses
+    // when a developer runs it directly without moon.
+    "command": "cd ../../../../apps/identity/worker && cargo install -q \"worker-build@^0.8\" --locked && worker-build --release",
+  },
+
+  // Local observability only. `wrangler dev` prints these to the terminal;
+  // they are not persisted anywhere. `infra/cloudflare/production/` sets
+  // `persist: true` deliberately — the difference is one line and it is the
+  // difference between laptop logs and a queryable log store.
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": false,
+    },
+  },
+
+  "d1_databases": [
+    {
+      "binding": "IDENTITY_DB",
+      "database_name": "identity-development",
+      // A local dev database is created by `wrangler d1 create` on the
+      // developer machine and is NOT in any shared account. Wrangler's local
+      // D1 simulator only needs the NAME to key its local SQLite file, so an
+      // empty id here is intentional and works offline. An id would be a
+      // production secret under brief constraint 27; there is none here.
+      "database_id": "",
+      // brief §2 constraint 2: migrations run inside the Identity Worker and
+      // nowhere else. This is the directory the Worker's own migration runner
+      // reads. It is set here too so `moon run identity:dev` exercises the
+      // same path CI does.
+      "migrations_dir": "../../../../database/identity/migrations",
+      // brief §2 constraint 2 in the local sense: the development database is
+      // a local database. Nothing in this file can reach a shared one.
+      "remote": false,
+    },
+  ],
+
+  "kv_namespaces": [
+    {
+      "binding": "IDENTITY_KV",
+      // brief §2 constraint 24: KV holds rate-limit counters and nothing
+      // authoritative. Local KV is a local directory keyed by name.
+      "id": "",
+      "remote": false,
+    },
+  ],
+
+  "queues": {
+    "producers": [
+      {
+        "binding": "IDENTITY_QUEUE",
+        "queue": "identity-development",
+        "remote": false,
+      },
+    ],
+  },
+
+  // `EMAIL_PROVIDER` is a fetch service binding (brief §3). In development it
+  // has the same SHAPE as the other environments — a service the Worker POSTs
+  // an email payload to — so the send path is exercised, not stubbed. The
+  // DEFERRED part is the provider implementation itself; brief §3 marks this
+  // binding "deferred" and this file does not claim otherwise.
+  "services": [
+    {
+      "binding": "EMAIL_PROVIDER",
+      "service": "identity-email-provider-development",
+    },
+  ],
+
+  "ratelimits": [
+    {
+      "name": "RATE_LIMITER",
+      // Rate limiting bindings are simulated locally. `namespace_id` is only
+      // meaningful against a deployed namespace, so it is empty here and set
+      // explicitly in staging and production.
+      "namespace_id": "",
+      "simple": {
+        "limit": 60,
+        "period": 60,
+      },
+    },
+  ],
+
+  "vars": {
+    // Non-secret configuration only. Secrets come from `.dev.vars`
+    // (gitignored) — brief constraint 26 says local dev runs the same code
+    // path with real secrets, and constraint 27 says none are committed.
+    //
+    // `ENVIRONMENT` labels logs and lets the Worker refuse to treat a
+    // development run as production. It can never relax an authentication
+    // check: doing so would be constraint 26, and the only way to bypass auth
+    // in this repository is to not build the bypass.
+    "ENVIRONMENT": "development",
+    // brief §2 constraint 6: identity decides WHO a user is, never WHAT they
+    // may do in a business system. This is the base URL the OIDC discovery
+    // document builds its issuer URLs from.
+    "ISSUER_BASE_URL": "http://localhost:8787",
+  },
+}

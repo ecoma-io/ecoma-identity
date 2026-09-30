@@ -1,0 +1,133 @@
+// What this is: the PRODUCTION wrangler configuration for the `identity-jobs`
+// Worker — the queue consumer for email delivery, security notifications and
+// audit archival.
+//
+// What this is NOT: it is not a working config on its own (every id is a
+// PLACEHOLDER, see the secrets note in
+// infra/cloudflare/production/identity.wrangler.jsonc), and it owns no
+// identity state, so it has no database binding at all.
+//
+// =================================================================================
+// SECRETS (brief §2 constraint 27). Placeholders are injected at deploy time by
+// .github/workflows/deploy-production.yml into a generated copy of this file
+// that is never committed.
+// =================================================================================
+
+{
+  "$schema": "../../../../node_modules/wrangler/config-schema.json",
+
+  "name": "identity-jobs",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "main": "build/index.js",
+  "build": {
+    "command": "cd ../../../../apps/identity-jobs/worker && cargo install -q \"worker-build@^0.8\" --locked && worker-build --release",
+  },
+
+  // Jobs has no user-facing query strings, but it does log message ids and
+  // recipient addresses. `persist: true` is what makes a "why did this user
+  // not get their verification email" question answerable after the fact,
+  // which is the single most common operational question this Worker will get.
+  "observability": {
+    "enabled": true,
+    "redact_query_string": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.1,
+      "persist": true,
+    },
+    "issues": {
+      "enabled": true,
+    },
+  },
+
+  "services": [
+    {
+      "binding": "IDENTITY",
+      // PLACEHOLDER — injected at deploy time. Jobs calls a narrow set of
+      // internal identity endpoints. "Narrow" is enforced on the identity
+      // side (few endpoints) as well as here (few calls); a service binding
+      // exposes the target's whole route table, so the constraint that matters
+      // is that most identity routes are not reachable from a Worker that
+      // cannot evaluate identity rules.
+      "service": "PRODUCTION_IDENTITY_WORKER",
+    },
+    {
+      "binding": "EMAIL_PROVIDER",
+      // PLACEHOLDER — injected at deploy time. brief §3 marks this binding
+      // "deferred": the binding is declared so the code path is uniform across
+      // environments, and the actual send implementation is DEFERRED to the
+      // authentication-implementation phase.
+      "service": "PRODUCTION_EMAIL_PROVIDER",
+    },
+  ],
+
+  "kv_namespaces": [
+    {
+      "binding": "JOBS_KV",
+      // PLACEHOLDER — injected at deploy time. Idempotency: "have I already
+      // sent this?". brief §2 constraint 24 — never authoritative. A lost key
+      // produces one duplicate email, which is a far better failure than the
+      // alternative of storing the fact durably in D1 and making a side-effect
+      // worker transactionally coupled to identity state.
+      "id": "PRODUCTION_JOBS_KV_NAMESPACE_ID",
+    },
+  ],
+
+  "queues": {
+    "consumers": [
+      {
+        // PLACEHOLDER — injected at deploy time.
+        "queue": "PRODUCTION_IDENTITY_QUEUE",
+        "max_batch_size": 10,
+        "max_batch_timeout": 30,
+        // brief §2 constraint 22 is what makes this safe: the event envelope
+        // is versioned, so a message written by the previous release of
+        // `identity` is still readable by this release of `identity-jobs`.
+        // The queue's own retry/dead-letter behaviour is separate from that
+        // and is what this block configures.
+        "max_retries": 5,
+        // A message that exhausts retries is parked, not dropped. A silently
+        // dropped security notification ("new device login", "password
+        // changed") is the failure mode this line exists to prevent.
+        "dead_letter_queue": "PRODUCTION_IDENTITY_QUEUE_DLQ",
+      },
+    ],
+  },
+
+  // No smart placement, unlike the other two Workers. Jobs is almost entirely
+  // time-waiting: it is woken by a queue message, does one outbound HTTP call
+  // to a provider that is in another region anyway, and goes back to sleep.
+  // Placement would add a hop to a Worker that is not serving anyone a page.
+  // Keeping placement off here also keeps the cost story simple — jobs is the
+  // one deployable whose cost scales with message volume rather than with user
+  // traffic, and that is easier to reason about without placement in the way.
+  "placement": {
+    "mode": "off",
+  },
+
+  "vars": {
+    "ENVIRONMENT": "production",
+  },
+
+  // ---------------------------------------------------------------------------------
+  // BOUNDARY: no `d1_databases` block, and none may be added. brief §2 constraint
+  // 5 — "The Jobs Worker is a background side-effect worker and owns NO identity
+  // state." Adding one is a constraint 5 violation needing an ADR (constraint
+  // 29), not a config change.
+  //
+  // The Cargo-level half of the same boundary is that this crate does not
+  // depend on `identity-domain` or `identity-application` (see
+  // apps/identity-jobs/worker/Cargo.toml), so it cannot evaluate an identity
+  // rule even if handed a payload asking it to. `tooling/scripts/
+  // check-architecture.mjs` enforces that from `cargo metadata`. A D1 binding
+  // without that dependency would be worse than either alone: read access to
+  // state with no vocabulary for interpreting it.
+  // ---------------------------------------------------------------------------------
+}

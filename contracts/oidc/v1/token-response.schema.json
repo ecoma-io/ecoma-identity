@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/oidc/v1/token-response.schema.json",
+  "title": "TokenResponse",
+  "description": "A successful token response, derived from identity_oidc::response::TokenResponse. The type carries no skip_serializing_if on any field, so every field is present on the wire; id_token and refresh_token are present with the value null when they do not apply, which is the distinction between 'no ID token because this was not an OIDC request' and 'the key is missing from the body'.",
+  "type": "object",
+  "x-rust-type": "identity_oidc::response::TokenResponse",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; no token is minted anywhere in the bootstrap phase — minting is DEFERRED to phase 4 (OIDC provider)",
+  "required": [
+    "access_token",
+    "token_type",
+    "expires_in",
+    "id_token",
+    "refresh_token",
+    "scope"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "access_token": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The access token. Opaque to the client in this design: a JWT would leak claims to anything that can read it and would be validated by every client separately. See ADR-0005.",
+      "x-serde": "pub access_token: String",
+      "x-serde-status": "required"
+    },
+    "token_type": {
+      "type": "string",
+      "const": "Bearer",
+      "description": "The token type. Always 'Bearer' — TokenResponse::TOKEN_TYPE is the only value either constructor writes.",
+      "x-serde": "pub token_type: String",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "identity_oidc::response::TokenResponse::TOKEN_TYPE == \"Bearer\"",
+        "constraining": "the field is a String in Rust; both TokenResponse::oidc and TokenResponse::oauth2 write the constant"
+      }
+    },
+    "expires_in": {
+      "type": "integer",
+      "description": "Lifetime in seconds. An integer, not a duration string: the client counts down from it.",
+      "x-serde": "pub expires_in: u64",
+      "x-serde-status": "required"
+    },
+    "id_token": {
+      "type": ["string", "null"],
+      "description": "The ID token, a compact JWS. Present only for an OIDC request (one that carried the openid scope) and null otherwise. Its claim set is IdTokenClaims — see id-token-claims.schema.json.",
+      "x-serde": "pub id_token: Option<String>",
+      "x-serde-status": "required on the wire, nullable",
+      "x-serde-note": "Option<String> with no skip_serializing_if, so the key is always present; TokenResponse::oauth2 writes null."
+    },
+    "refresh_token": {
+      "type": ["string", "null"],
+      "description": "The refresh token. Null when the client is not registered for the refresh_token grant. A credential: never logged, never returned by any other call.",
+      "x-serde": "pub refresh_token: Option<String>",
+      "x-serde-status": "required on the wire, nullable",
+      "x-serde-note": "Option<String> with no skip_serializing_if, so the key is always present."
+    },
+    "scope": {
+      "type": "string",
+      "description": "The scopes actually granted, space-delimited per RFC 6749 section 5.1. A client that asked for more than it registered for learns the difference here, from the server, rather than by discovering it at a protected resource.",
+      "x-serde": "pub scope: String",
+      "x-serde-status": "required"
+    }
+  }
+}

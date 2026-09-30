@@ -1,0 +1,84 @@
+{
+  "$comment": "The repository settings that are NOT code \u2014 branch rules and merge policy \u2014 written down because nothing else can hold them. A clone carries every gate in this tree, and none of these: delete the repository and they are gone, recreate it and they come back as GitHub's defaults, which are not these. That is the failure this file exists to prevent, and it is not hypothetical \u2014 `ci-gate` and `analysis-gate` being required checks is the only thing standing between a red run and a merge.\n\nApply it with `gh api --method PUT repos/ecoma-io/ecoma-identity --input <the repository object>` and `gh api --method POST repos/ecoma-io/ecoma-identity/rulesets --input <a rulesets entry>`, once `main` exists: ruleset conditions name `~DEFAULT_BRANCH`, which does not resolve until the first push, so the ruleset is created after the branch. Read the live state back with `GET /repos/ecoma-io/ecoma-identity/rulesets` to diff it against this file.\n\nThis is a record, not an enforcer: no gate compares it to reality, because doing so needs an admin token this repository's sessions do not hold. Check it by hand when something about landing a change feels different from what is written here.\n\nThe tier-by-tier derivation behind each rule \u2014 Scorecard's `Branch-Protection` check, what every rule buys and what it deliberately forfeits, and why `required_linear_history` is absent \u2014 lives in `ecoma`'s `.github/repository-settings.json` and is not restated here. The shape and the parameters below are identical to `runtime-trail`'s; only the two differences are called out in this file.",
+  "repository": {
+    "$comment": "Merge policy. Exactly one method stays enabled, so the strategy is a mechanism rather than whichever button someone clicked. `allow_auto_merge` is on because the merge queue below rides on it: with the queue required on `main`, enabling auto-merge is how a pull request enters the queue, through the API and the UI alike \u2014 without it the queue is declared but unenterable. `delete_branch_on_merge` is safe under merge commits and only under them: a merge commit's second parent puts a branch's commits on `main` as the same objects, so deleting the ref removes a pointer and not history.",
+    "allow_merge_commit": true,
+    "allow_squash_merge": false,
+    "allow_rebase_merge": false,
+    "allow_auto_merge": true,
+    "delete_branch_on_merge": true
+  },
+  "rulesets": [
+    {
+      "name": "main",
+      "target": "branch",
+      "enforcement": "active",
+      "conditions": {
+        "ref_name": {
+          "include": ["~DEFAULT_BRANCH"],
+          "exclude": []
+        }
+      },
+      "rules": [
+        {
+          "type": "deletion"
+        },
+        {
+          "type": "non_fast_forward"
+        },
+        {
+          "type": "pull_request",
+          "parameters": {
+            "required_approving_review_count": 0,
+            "dismiss_stale_reviews_on_push": false,
+            "required_reviewers": [],
+            "require_code_owner_review": true,
+            "dismissal_restriction": {
+              "enabled": false,
+              "allowed_actors": []
+            },
+            "require_last_push_approval": false,
+            "required_review_thread_resolution": false,
+            "allowed_merge_methods": ["merge"]
+          },
+          "$comment": "Mirrors `ecoma` and `runtime-trail` exactly. `required_linear_history` is deliberately ABSENT: it forbids merge commits outright, and linearity is recoverable as a view (`git log --first-first-parent`) while the pull-request boundary a merge commit records is not recoverable once a rebase has flattened it \u2014 that boundary is what makes `git revert -m 1 <merge>` the one operation this repository's charter promises.\n\n`required_approving_review_count: 0` with `require_last_push_approval: false` and `dismiss_stale_reviews_on_push: false` is not an oversight and must not be raised one at a time: this is a single-maintainer repository, and GitHub defines last-push approval as an approval from someone other than the person who pushed. Raising either boolean alone buys nothing, because the tier holding it stays gated behind the approval count. All three move together, and only when a second maintainer exists."
+        },
+        {
+          "type": "required_status_checks",
+          "parameters": {
+            "strict_required_status_checks_policy": true,
+            "do_not_enforce_on_create": false,
+            "required_status_checks": [
+              {
+                "context": "ci-gate",
+                "integration_id": 15368
+              },
+              {
+                "context": "analysis-gate",
+                "integration_id": 15368
+              }
+            ]
+          },
+          "$comment": "`integration_id` 15368 is GitHub Actions: it pins each check to the app that produces it, so a differently-owned check of the same name cannot satisfy it. `ci-gate` and `analysis-gate` are single aggregating jobs on purpose \u2014 one name to require, so adding a CI job never means remembering to add it here too. A repository that adds a third required job must add it to this file in the same commit; the failure mode is a merge queue that sits on a check the repository no longer requires, or a red run that cannot block a merge."
+        },
+        {
+          "type": "merge_queue",
+          "parameters": {
+            "merge_method": "MERGE",
+            "grouping_strategy": "ALLGREEN",
+            "max_entries_to_build": 5,
+            "min_entries_to_merge": 1,
+            "max_entries_to_merge": 5,
+            "min_entries_to_merge_wait_minutes": 2,
+            "check_response_timeout_minutes": 60
+          },
+          "$comment": "Every pull request lands here. No direct merges and no direct pushes to `main`. The `identity` production canary's two human gates are a separate mechanism \u2014 GitHub *environments* with required reviewers \u2014 because a workflow-level `if:` can be removed by anyone who can push a workflow file, while an environment's required reviewers cannot."
+        }
+      ]
+    }
+  ],
+  "notAppliedYet": {
+    "$comment": "One entry, about the distance between this file and the live repository. Everything above is target state: the repository was created empty and had no rulesets when this file was written (verified over the public API \u2014 `GET /repos/ecoma-io/runtime-trail/rulesets` returned `[]`), and applying them needs an admin token. Until they are applied, main is protected by nothing but the hooks every commit already carries. After the first push, apply the ruleset, then diff live state against this file \u2014 a stale entry here is worse than none, because it reads as a known gap when it is really an unread one.",
+    "branchRules": "Target state only, nothing applied yet. Apply order: push `main` first (the ruleset's condition needs a default branch), then `POST /repos/ecoma-io/runtime-trail/rulesets` with the entry above. The published OpenSSF Scorecard `Branch-Protection` score will read this ruleset over the public GraphQL API once applied \u2014 rulesets are readable without an admin token where classic branch protection is not \u2014 so the published score is a live audit of the rules above."
+  }
+}

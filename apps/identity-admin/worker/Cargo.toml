@@ -1,0 +1,33 @@
+[package]
+name = "identity-admin-worker"
+description = "The Admin Worker: the administrative BFF and session. Reaches identity only through a private service binding."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# The composition root for `identity-admin`.
+#
+# The dependency list is the boundary, stated as a manifest: this crate
+# depends on `identity-application` ONLY for the `IdentityAdminClient` port —
+# the typed interface of the internal service boundary — and on
+# `identity-domain` for nothing that would let it read identity state.
+# `identity-cloudflare` is here for the D1 adapter of the *admin* database and
+# for the service-binding call, never for the identity one.
+#
+# It does NOT depend on `identity-cloudflare`'s identity repositories, and it
+# does NOT take an `IDENTITY_DB` binding. `tooling/scripts/check-architecture.mjs`
+# enforces both, because a manifest-level omission is the only kind of
+# boundary that cannot be worked around by a well-meaning import.
+[dependencies]
+identity-domain = { workspace = true }
+identity-application = { workspace = true }
+identity-cloudflare = { workspace = true }
+worker = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

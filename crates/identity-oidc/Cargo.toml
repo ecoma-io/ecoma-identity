@@ -1,0 +1,27 @@
+[package]
+name = "identity-oidc"
+description = "OpenID Connect protocol types: discovery, authorization, tokens, JWKS. Shape only, no storage, no session logic."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# Protocol-focused: this crate knows the *shape* of an OIDC message and
+# nothing about where identity state lives. It may depend on the domain
+# (for user and application identifiers that appear in claims) and on
+# serialization. It may NOT depend on the Cloudflare adapter, on the
+# application layer, or on the security crate — the last of these because a
+# protocol type that also verified a signature would be doing two jobs, and
+# the boundary between "what does a token look like" and "is this token
+# valid" is the one that matters most here.
+[dependencies]
+identity-domain = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+urlencoding = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

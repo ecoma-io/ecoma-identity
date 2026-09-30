@@ -1,0 +1,160 @@
+# Architecture decision records
+
+Fifteen decisions, numbered 0001–0015, accepted on 2026-09-30. They record _why
+this repository is shaped the way it is_ — the parts of the shape that were
+available to choose differently, and what the choice costs.
+
+They are not the place to look for what a component does. `docs/architecture/`
+states what the system is; `docs/security/` states the non-negotiable rules;
+`docs/operations/` states how it is run; `docs/getting-started/` states how to
+run it locally. An ADR states what was decided and refuses it, and it names the
+document that owns the consequences so the two do not drift.
+
+## The rule that outranks the rest
+
+**A change to a hard constraint requires a new ADR _before_ the change.** Not
+after, not in the same commit, not as a comment. If a pull request relaxes,
+extends or reinterprets a constraint in `docs/security/security-constraints.md`,
+it links a new ADR in this directory, and the code change cannot land until that
+ADR is accepted. `SECURITY.md` says the same thing for security: the process is
+slower on purpose.
+
+The consequences are already visible inside this set, and they are the reason
+the rule exists. A constraint ADR's whole job is to make the next change
+expensive enough that somebody thinks about it. "This is a config change" is
+almost never true — it is a change to a decision, and decisions live here.
+
+## The fifteen
+
+| #                                                  | Title                                                       | Status   | One line                                                                                                                             |
+| -------------------------------------------------- | ----------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| [0001](0001-rust-and-cloudflare-workers.md)        | Rust and Cloudflare Workers on the platform                 | Accepted | The language is chosen so the dependency graph is manifest-readable and mechanical, not so it compiles fast.                         |
+| [0002](0002-three-deployables-and-no-more.md)      | Three deployables and no more                               | Accepted | Three Workers, three blast radii, and a fourth is an ADR plus a proof rather than a directory.                                       |
+| [0003](0003-identity-d1-single-owner.md)           | Identity D1 is reachable only by the Identity Worker        | Accepted | The single-writer rule is enforced by the _absence_ of a binding, not by a runtime check.                                            |
+| [0004](0004-admin-worker-holds-no-database.md)     | The Admin Worker holds no database                          | Accepted | The component with the worst inputs must not hold the capability that turns them into the whole user table.                          |
+| [0005](0005-no-business-authorization.md)          | Identity holds no business authorization                    | Accepted | Identity decides _who_, never _what_; a role here is about an account, never a merge.                                                |
+| [0006](0006-jobs-worker-owns-no-identity-state.md) | The Jobs Worker owns no identity state                      | Accepted | A background worker that can evaluate identity rules can make identity decisions, and a queue message is not a trustworthy caller.   |
+| [0007](0007-outbox-pattern.md)                     | The outbox pattern and the absence of atomicity             | Accepted | A D1 commit and a queue enqueue cannot be one transaction, so delivery is at-least-once and that is the point.                       |
+| [0008](0008-webcrypto-only.md)                     | WebCrypto only; no self-implemented cryptography            | Accepted | No cryptography crate, ever; including a hand-rolled constant-time comparison.                                                       |
+| [0009](0009-no-auth-bypass.md)                     | No authentication bypass in any environment                 | Accepted | Not a flag, not an env var, not a dev role, not a test-only shortcut — local dev runs the real path.                                 |
+| [0010](0010-server-side-sessions.md)               | Sessions are server-side records, not tokens                | Accepted | A session is a row; `security_version` makes account-wide revocation O(1) rather than a delete-all.                                  |
+| [0011](0011-forward-only-migrations.md)            | Forward-only, backward-compatible database migrations       | Accepted | There is no database rollback path; a migration may add, never remove or narrow.                                                     |
+| [0012](0012-release-is-not-deployment.md)          | Release is not deployment                                   | Accepted | Release Please owns the version, the changelog, the PR and the tag, and holds no Cloudflare credential.                              |
+| [0013](0013-immutable-worker-versions.md)          | Immutable Worker versions; rollback never rebuilds          | Accepted | A rollback promotes an existing version id; a rebuild is a new artifact wearing a rollback's name.                                   |
+| [0014](0014-canary-promotion-identity.md)          | Canary promotion for Identity; automatic for Admin and Jobs | Accepted | `identity` ladders to 100% behind two human gates; Admin and Jobs hold no state, so a bad one is an outage rather than a compromise. |
+| [0015](0015-frontend-and-bff-one-release-unit.md)  | Frontend and BFF are one release unit                       | Accepted | The SPA is a directory inside the Worker's uploaded artifact, so the coupling is structural rather than conventional.                |
+
+The one-line summaries are summaries. The Context sections are the argument.
+
+## What an ADR must contain
+
+Every record here follows MADR in the same order, and the order matters
+because a reader arrives with a different question for each part.
+
+| Section                 | The question it answers                          | The rule for writing it                                                                                                                                                                                                                                                                                                                                                                                              |
+| ----------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Title                   | What was decided?                                | A statement, not a topic. "Identity D1 is reachable only by the Identity Worker" decides something; "Database access" does not.                                                                                                                                                                                                                                                                                      |
+| Status, Date, Deciders  | Is this in force?                                | Status comes from the vocabulary in `docs/README.md`; a record in this directory that is not `Proposed` is in force.                                                                                                                                                                                                                                                                                                 |
+| Context                 | What made the decision necessary?                | Specific to _this_ system. A reader who has never seen the codebase should finish this section agreeing with the decision, not merely understanding it.                                                                                                                                                                                                                                                              |
+| Decision drivers        | What was being optimised?                        | Written before the decision, because it is the only record of what the alternatives were competing on.                                                                                                                                                                                                                                                                                                               |
+| Decision                | What is the rule?                                | Active voice, as an instruction: "Migrations are applied by…", not "Migrations are applied…" in the third person. Then, in the same section, an **Enforcement** table.                                                                                                                                                                                                                                               |
+| Consequences            | What does this cost?                             | Honest in **both** directions, in three subsections: what it makes easier, what it makes harder or more expensive, and **what a future maintainer will resent about it** — because the third subsection is what tells them when it is the right time to revisit.                                                                                                                                                     |
+| Alternatives considered | What else was on the table, and why did it lose? | At least two. The reason must be the _actual_ reason, specific to this system. "Rejected because it puts the admin console's blast radius at the whole identity database" is useful. "Rejected because it is bad practice" is not — it tells the next reader nothing they could not have said about any other repository. If an alternative was genuinely close, say so, and say what would have changed the answer. |
+| Revisit when            | What observable thing would reopen this?         | Named conditions, not opinions. "if Cloudflare ships a read-only D1 credential" is a condition; "if it becomes inconvenient" is not.                                                                                                                                                                                                                                                                                 |
+| Related                 | Where does this sit?                             | Links to other ADRs by filename, and to the **owner document** for the consequences. The owner document states what follows; the ADR states what was decided. When two documents disagree, the owner wins — fix the other in the same commit.                                                                                                                                                                        |
+
+Two rules cut across all of them:
+
+- **Name the enforcement point or say there isn't one.** Every ADR that
+  establishes an enforceable boundary carries an **Enforcement** table whose
+  third column says what exists today. A decision with no enforcement point is
+  legitimate — plenty of these are process — but it says so explicitly and names
+  what the enforcement will be. A decision that appears enforced when it is not
+  is worse than one that admits it is not.
+- **Never describe unimplemented behaviour in the present tense.** This
+  repository is at bootstrap: every declared protocol route answers **501** and
+  `/ready` says so. "The Admin Worker queries the identity service" is a lie at
+  this commit; "the Admin Worker's read path is an internal endpoint on
+  `identity`, reached through the `IDENTITY` service binding" is a decision.
+  Where a path is being written by someone else, reference it as a path and say
+  it is landing concurrently — never claim to have read a file you have not
+  read.
+
+## How to add one
+
+1. Take the next number. `0000` is the template and never carries a decision;
+   numbers are never reused, including by a rejected record — a superseded ADR
+   keeps its number and gains a status, so the links pointing at it keep
+   resolving.
+2. Copy `0000-template.md` to `NNNN-title.md`, where the title is the decision as
+   a statement. The filename slug follows the title.
+3. Fill in every section in the template's order. The preamble comment in the
+   template is guidance for the author and is not part of the record; the
+   `<!-- -->` comment under the title says what the file is and, more usefully,
+   what it is **not**.
+4. Add a row to the table above and to the enforcement table below. Both are
+   index files, and an ADR that is not in the index is an ADR nobody finds.
+5. Cross-link: every ADR this one depends on, extends, or is the enforcement
+   for — in the **Related** section, and by filename so the link resolves.
+6. Update the owner document in the same commit. An ADR that contradicts its
+   owner document is worse than no ADR, because the owner document is what a
+   reader is sent to.
+7. `pnpm verify` must pass and `pnpm arch:canary` must pass before the PR is
+   ready. If your decision needs a _new_ check in
+   `tooling/scripts/check-architecture.mjs`, the check and its canary fixture are
+   part of the change, and a new gate must come with a fixture that proves it
+   fires.
+
+## The enforcement table
+
+This is the one a reviewer reads first, so every cell is stated as of the commit
+that carries it, and a cell that says "not yet built" is a deliberate statement
+rather than a gap. The check names are the ids in `tooling/scripts/check-architecture.mjs`,
+run by `pnpm arch`.
+
+**How to read the last column.** _Built_ means I ran the check on this tree and
+read the file it judges. _Landing concurrently_ means the file is being written by
+another agent right now and I have read only its `CHECKS` array — I know the check
+id, not its behaviour. _Not yet built_ means the enforcement does not exist; the
+row names what should land.
+
+| ADR                                                | Boundary                                                                                   | Enforced by                                                                                          | State                                                                                                                                                                                                                                              |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [0001](0001-rust-and-cloudflare-workers.md)        | `identity-domain` depends on nothing internal or platform-shaped                           | `boundary-3-domain-platform`                                                                         | Built — 0 violations when I ran `pnpm arch`                                                                                                                                                                                                        |
+| [0001](0001-rust-and-cloudflare-workers.md)        | No `unsafe` anywhere                                                                       | `[workspace.lints.rust] unsafe_code = "forbid"`, inherited by every crate                            | Built                                                                                                                                                                                                                                              |
+| [0001](0001-rust-and-cloudflare-workers.md)        | No cryptography crate, ever                                                                | —                                                                                                    | **Not yet built.** No check in the `CHECKS` array judges the dependency allowlist; see [0008](0008-webcrypto-only.md)                                                                                                                              |
+| [0002](0002-three-deployables-and-no-more.md)      | Exactly three deployables                                                                  | `deploymentable-count`                                                                               | Built — 0 violations                                                                                                                                                                                                                               |
+| [0002](0002-three-deployables-and-no-more.md)      | A Worker is registered in all four places                                                  | `boundary-5-worker-registration`                                                                     | Landing concurrently — and currently reporting 3 violations: `apps/*/worker/` have no `moon.yml` of their own                                                                                                                                      |
+| [0003](0003-identity-d1-single-owner.md)           | The Admin Worker holds no Identity D1 binding                                              | `boundary-1-admin-d1`                                                                                | Built — 0 violations, 2 warnings on comments that _name_ the binding                                                                                                                                                                               |
+| [0003](0003-identity-d1-single-owner.md)           | Jobs reaches neither D1 nor the rule engine                                                | `boundary-2-jobs-isolation`                                                                          | Built — 0 violations                                                                                                                                                                                                                               |
+| [0003](0003-identity-d1-single-owner.md)           | No migration runner outside the Worker                                                     | The `migrations_dir` in the three `identity` wrangler configs; the deploy workflow's migration step  | Partially built — the `migrations_dir` is committed and is the only one in the tree; the workflow step is `DEFERRED` to the release phase                                                                                                          |
+| [0004](0004-admin-worker-holds-no-database.md)     | The whole of the above, plus the escalation path                                           | `boundary-1-admin-d1`, the crate graph, and the `database/admin/` tree                               | Built for the config and manifest; the admin-owned database is `PLANNED` and `database/admin/migrations/` is empty because there is nothing to migrate                                                                                             |
+| [0005](0005-no-business-authorization.md)          | No other Ecoma repository's source lives here                                              | `monorepo-self-contained`                                                                            | Built — 0 violations                                                                                                                                                                                                                               |
+| [0006](0006-jobs-worker-owns-no-identity-state.md) | No dependency on `identity-domain` or `identity-application`                               | `boundary-2-jobs-isolation`                                                                          | Built — 0 violations                                                                                                                                                                                                                               |
+| [0006](0006-jobs-worker-owns-no-identity-state.md) | `JOBS_KV` is never authoritative                                                           | `no-authoritative-kv-or-do`                                                                          | Partially — 0 violations, 6 warnings; the check cannot from a config establish that no authorization _read_ consults it                                                                                                                            |
+| [0007](0007-outbox-pattern.md)                     | Every message type carries a `.vN` suffix                                                  | `OutboxEventType`'s constructor                                                                      | Built — a real constructor, tested                                                                                                                                                                                                                 |
+| [0007](0007-outbox-pattern.md)                     | Consumers are idempotent                                                                   | The `identity-security` idempotency gate                                                             | **Not yet built** — the trait has no body; `DEFERRED` to the events phase                                                                                                                                                                          |
+| [0007](0007-outbox-pattern.md)                     | No request path enqueues                                                                   | —                                                                                                    | **Not yet built.** No check in the `CHECKS` array judges queue send sites; the review rule is the enforcement until one does                                                                                                                       |
+| [0008](0008-webcrypto-only.md)                     | No cryptographic primitive outside `identity-cloudflare`                                   | The layer law: platform-free crates and bodyless trait gates                                         | Built for the layer law. The `crypto` module in `crates/identity-cloudflare/` was being written concurrently and **I have not read it**                                                                                                            |
+| [0008](0008-webcrypto-only.md)                     | Constant-time comparison is delegated                                                      | The gate traits; no `==` on a secret outside them                                                    | **Not yet built** — the gate bodies are `DEFERRED`; the review rule stands in                                                                                                                                                                      |
+| [0009](0009-no-auth-bypass.md)                     | No authentication bypass anywhere in the tree                                              | `no-auth-bypass`                                                                                     | Built — 0 violations                                                                                                                                                                                                                               |
+| [0009](0009-no-auth-bypass.md)                     | No production secret is committed                                                          | `no-committed-secrets`, plus the root `.gitignore`                                                   | Built, but **unverifiable on this tree**: the check reports `SKIPPED` because the repository has no commits and the index is empty                                                                                                                 |
+| [0010](0010-server-side-sessions.md)               | A revoked session cannot authenticate; a stale `security_version` invalidates its sessions | `SessionStatus::permits_authentication`, `SecurityVersion::bumped()`, the `#[ignore]`d invariants    | Types built; the request-path check that joins them is `DEFERRED` to the sessions phase                                                                                                                                                            |
+| [0010](0010-server-side-sessions.md)               | No token in `localStorage` or readable JS                                                  | `AGENTS.md`'s TypeScript conventions; review                                                         | **Not yet built** — the apps are `DEFERRED`                                                                                                                                                                                                        |
+| [0011](0011-forward-only-migrations.md)            | A migration adds, never removes or narrows                                                 | Review of every file in `database/identity/migrations/`; `AGENTS.md` "Prohibited shortcuts"          | Prose plus review. A lint over the migration files is a candidate for `check-architecture.mjs`                                                                                                                                                     |
+| [0012](0012-release-is-not-deployment.md)          | Release Please holds no Cloudflare credential                                              | The release-please configuration; `boundary-5-worker-registration` treats it as a registration point | Partially — `release-please-config.json` does not exist yet, so the check reports that step `skipped` rather than passing it                                                                                                                       |
+| [0012](0012-release-is-not-deployment.md)          | A human merges the release PR                                                              | The ruleset on the default branch, and the merge queue                                               | **Not yet built.** `.github/repository-settings.json` records the ruleset and the merge queue as target state — its own `notAppliedYet` block says applying them needs an admin token this repository does not hold                                |
+| [0013](0013-immutable-worker-versions.md)          | A rollback workflow contains no checkout and no build step                                 | `.github/workflows/rollback.yml`                                                                     | **Not yet built.** The file is `DEFERRED` to the release phase; when it lands, the _absence_ of a build step in it is the enforcement                                                                                                              |
+| [0014](0014-canary-promotion-identity.md)          | The two human gates cannot be removed by the PR that would benefit                         | GitHub `environments` with required reviewers, in repository settings rather than in a workflow file | **Not yet built** — the workflows are `DEFERRED` to the release phase, and `repository-settings.json` carries no environment entry                                                                                                                 |
+| [0015](0015-frontend-and-bff-one-release-unit.md)  | Nothing in the backend imports or names a frontend package                                 | `boundary-4-no-frontend-in-backend`                                                                  | Built — 0 violations                                                                                                                                                                                                                               |
+| [0015](0015-frontend-and-bff-one-release-unit.md)  | The SPA is inside the uploaded artifact                                                    | `assets.directory` in the deployable's `wrangler.jsonc`                                              | Built for the console — the path is committed and a change to it is a visible diff. The frontend build that produces `dist/` is not yet wired into a per-project `moon.yml`                                                                        |
+| [0015](0015-frontend-and-bff-one-release-unit.md)  | The two cannot be released apart                                                           | The release-please configuration naming exactly the three deployables                                | **Not yet built, and honestly so:** the configuration prevents a _separate_ release from being cut, but it does not prevent a human from building a `dist/` by hand and pointing a config at it. That is a review, not a gate, and the ADR says so |
+
+## Reading order
+
+If you are new, read in number order — each ADR assumes the ones before it, and
+0001–0004 in particular are four views of the same argument about capabilities.
+If you are looking for one thing, the table above is the index. If you are about
+to change something, read the ADR that owns the boundary first; the "Revisit
+when" section will tell you whether the conditions have actually been met, which
+is the question the section exists to answer.

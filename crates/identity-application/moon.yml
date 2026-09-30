@@ -1,0 +1,85 @@
+# identity-application — the use cases: authentication, sessions, accounts,
+# applications, administration, audit.
+#
+# THE DEPENDENCY LAW: `identity-application` → `identity-domain`, and nothing
+# else internal. It must not know what D1, a Queue or a Cloudflare binding is —
+# `tooling/scripts/check-architecture.mjs` judges that from `cargo metadata`, so
+# a `worker` dependency added here fails CI rather than review.
+#
+# This crate holds PORTS (the traits the adapters implement), which is why
+# identity-cloudflare depends on it and not the other way round.
+
+$schema: https://moonrepo.dev/schemas/moon.json
+
+tags:
+  - rust
+  - crate
+  - application
+
+tasks:
+  format:
+    command: "cargo fmt -p identity-application"
+    options:
+      cache: false
+
+  # `format-check`, not `format:check` — moon 2.5.6 rejects a colon in a
+  # project-level task id. See the note in crates/identity-domain/moon.yml.
+  format-check:
+    command: "cargo fmt -p identity-application -- --check"
+    options:
+      cache: false
+
+  lint:
+    command: "cargo clippy -p identity-application --all-targets -- -D warnings"
+    options:
+      cache: false
+
+  typecheck:
+    command: "cargo check -p identity-application --all-targets"
+    options:
+      cache: false
+
+  test:
+    command: "cargo test -p identity-application --locked"
+    options:
+      cache: false
+
+  test-unit:
+    command: "cargo test -p identity-application --locked --lib"
+    options:
+      cache: false
+
+  # ---------------------------------------------------------------------------
+  # HOST TARGET, DELIBERATELY — this crate does not depend on `worker`.
+  #
+  # `worker` 0.8.7 compiles for the host as well as for wasm32, so a wasm32
+  # build here would not fail; it would just make every change in a use case
+  # recompile for a target no test runs on. The host build is what keeps the
+  # affected-first loop fast, and the wasm32 compile happens once, in
+  # `identity:build`, where the Workers need it.
+  #
+  # Same reasoning, same wording, on identity-domain, identity-oidc,
+  # identity-security and identity-testkit.
+  # ---------------------------------------------------------------------------
+  build:
+    command: "cargo build -p identity-application --locked"
+    options:
+      cache: false
+
+  dev:
+    # `options.runInCI: false`, not the root file's `local: 'only'` — moon 2.5.6
+    # has no `local` field on a task. Verified: `moon ci` skips this task.
+    command: "cargo run -p identity-application --locked"
+    options:
+      runInCI: false
+    inputs: []
+    outputs: []
+
+  package:
+    command: "cargo build -p identity-application --locked --release"
+    options:
+      cache: false
+
+  wrangler-validate:
+    inputs: []
+    outputs: []

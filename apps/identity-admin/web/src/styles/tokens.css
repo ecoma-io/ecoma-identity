@@ -1,0 +1,114 @@
+/*
+  Design tokens for the end-user identity UI.
+
+  What this is: the smallest set of custom properties that lets the app be
+  legible and consistent — colour, spacing, type, focus, and a light/dark
+  scheme.
+
+  What this is NOT: a design system. There is no shared component library in
+  this repository yet, and importing one that does not exist — or copying a
+  token set from another repository and calling it the org's — would be the kind
+  of thing that quietly becomes a second source of truth. These tokens are
+  local, they are few, and they are named for what they are.
+
+  The colour set is chosen for contrast, not for looks. Every foreground /
+  background pair used for text meets WCAG AA (4.5:1) in both schemes, because
+  an identity product that is hard to read is a security problem: a user who
+  cannot read the deferral message clearly is a user who will guess instead.
+
+  When a real design system lands, this file is what gets replaced, and the
+  class names in `app.css` are the contract that has to survive the swap.
+*/
+
+:root {
+  color-scheme: light dark;
+
+  /* ---- surface and text ------------------------------------------------
+     Two neutral ramps rather than a palette. A token set this small should
+     not imply a brand colour the product has not chosen. */
+  --colour-canvas: #ffffff;
+  --colour-surface: #f6f7f9;
+  --colour-surface-raised: #ffffff;
+  --colour-border: #d4d7dd;
+  --colour-border-strong: #9aa1ac;
+
+  --colour-text: #16181d;
+  --colour-text-muted: #565c66;
+
+  /* ---- state -----------------------------------------------------------
+     `deferred` is the state this app spends the bootstrap phase in, so it has
+     a real token rather than being rendered as an error. Amber on white, not
+     red: "not built yet" is not a failure, and colouring it as one would put
+     every screen into a false alarm. */
+  --colour-accent: #1b4fd8;
+  --colour-accent-contrast: #ffffff;
+  --colour-deferred-surface: #fff8e6;
+  --colour-deferred-border: #b58100;
+  --colour-deferred-text: #4d3600;
+
+  --colour-error-surface: #fdecec;
+  --colour-error-border: #a01b1b;
+  --colour-error-text: #6d1010;
+
+  --colour-focus: #0b3ec4;
+
+  /* ---- type ------------------------------------------------------------
+     A system font stack. A webfont would be a network dependency for a screen
+     that mostly renders short sentences of plain text, and it would delay the
+     one thing this app most needs to be legible. */
+  --font-body:
+    system-ui, -apple-system, "Segoe UI", roboto, "Helvetica Neue", arial,
+    sans-serif;
+  --font-mono:
+    ui-monospace, sfmono-regular, "SF Mono", menlo, consolas, "Liberation Mono",
+    monospace;
+
+  --size-base: 1rem;
+  --size-small: 0.875rem;
+  --size-large: 1.25rem;
+  --size-heading: 1.5rem;
+
+  /* ---- space ----------------------------------------------------------- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 1rem;
+  --space-4: 1.5rem;
+  --space-5: 2rem;
+
+  --radius: 6px;
+
+  /* A focus ring thick enough to see at 1x and drawn with `outline-offset` so
+     it does not sit on top of the control it outlines. */
+  --focus-ring: 3px;
+  --focus-offset: 2px;
+}
+
+/*
+  The dark scheme overrides only what has to change, and names the same roles
+  the light scheme does. A token that silently means something different in dark
+  mode is a bug waiting for the one screen that depends on it.
+*/
+@media (prefers-color-scheme: dark) {
+  :root {
+    --colour-canvas: #16181d;
+    --colour-surface: #1e2126;
+    --colour-surface-raised: #24272d;
+    --colour-border: #3a3f47;
+    --colour-border-strong: #6c737d;
+
+    --colour-text: #f2f3f5;
+    --colour-text-muted: #b6bbc4;
+
+    --colour-accent: #8fb0ff;
+    --colour-accent-contrast: #0b1220;
+    --colour-deferred-surface: #2c2410;
+    --colour-deferred-border: #e0b04a;
+    --colour-deferred-text: #f5e3ba;
+
+    --colour-error-surface: #2e1616;
+    --colour-error-border: #f08c8c;
+    --colour-error-text: #f7d4d4;
+
+    --colour-focus: #9dbcff;
+  }
+}

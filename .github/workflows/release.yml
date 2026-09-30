@@ -1,0 +1,116 @@
+name: Release
+
+# Releasing, in this repository, is exactly four things: a version number, a
+# changelog, a release pull request, and a git tag. That is the whole of it.
+#
+# THERE IS NO DEPLOY JOB IN THIS FILE, AND ITS ABSENCE IS THE ENFORCEMENT OF
+# ADR-0012, not an omission. Release Please does not call wrangler, holds no
+# Cloudflare credential, and does not know a Cloudflare account exists. A
+# release that also deployed would make production promotion as frequent as
+# version bumps, and the two human gates ADR-0014 puts on `identity` would be
+# the only thing between a `chore` commit and 100% of the authentication
+# service's traffic. The tag this workflow creates is the TRIGGER for
+# `deploy-production.yml`; it is not itself a deployment.
+#
+# What a release PR contains: the version bump in `.release-please-manifest.json`
+# and the changelog derived from the conventional commits since the last tag.
+# It contains nothing else. A release PR carrying a diff to
+# `.github/workflows/` is a review finding — `release-please-config.json`
+# declares no `extraFiles` and no `scripts`, so there is no mechanism by which
+# it could, and the absence is what makes the finding conclusive.
+#
+# The release PR is MERGED BY A HUMAN (constraint 17). Nothing in this file
+# merges it, and nothing may: the merge queue in
+# `.github/repository-settings.json` is the only path onto the default branch,
+# and it requires `ci-gate` and `analysis-gate` — which is also why the App
+# token below exists.
+
+on:
+  push:
+    branches: [main]
+
+# `contents: read` at the top as the floor. The one job below that needs more
+# declares its own, and a job-level `permissions` block REPLACES this one rather
+# than merging with it.
+permissions:
+  contents: read
+
+# Two release-please runs cannot overlap: the second would compute a version
+# from commits the first has already claimed, and the resulting pair of tags
+# would have no defined order. Not cancellable — a half-finished release run
+# that cancelled itself would leave a release PR open and no explanation, and
+# the fix for that is a re-run, not a kill.
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release Please (version, changelog, PR, tag)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Everything this job needs and no more. `contents: write` is required to
+    # push a tag and to update the manifest; `pull-requests: write` to open and
+    # maintain the release PR; `issues: write` because release-please updates
+    # the linked release's notes through the issues API. It does NOT need
+    # `id-token` or `deployments`, and it holds no Cloudflare secret of any kind
+    # — the absence is the point.
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    # Hoisted so the App-token step below has something its `if:` is allowed to
+    # read — GitHub's secrets guide is flat that secrets cannot be referenced
+    # directly in `if:` conditionals, and the runtime agrees (a direct read
+    # takes the job to a startup failure with zero jobs and no log). Only the id
+    # is lifted: the private key is passed straight into the action's `with:`,
+    # where the `secrets` context IS available.
+    env:
+      RELEASE_APP_ID: ${{ secrets.ECOMA_APP_ID }}
+    outputs:
+      # Left unprefixed and unused downstream. `deploy-production.yml` triggers
+      # on the TAG PUSH, not on this job's output, and that indirection is
+      # deliberate: a tag is a durable, refetchable fact that survives a
+      # re-run, a failed run and a deleted branch, where a job output lives
+      # only as long as the run that produced it. Wiring the deploy to an
+      # output would make the deploy unreproducible by hand — and this
+      # repository's rollback story depends on being able to re-derive any
+      # promotion from a tag and a version id.
+      released: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+    steps:
+      # The App token, ON. GitHub documents that events raised with
+      # `GITHUB_TOKEN` do not start new workflow runs, which leaves a release
+      # pull request with no `ci-gate` and no `analysis-gate` — the two checks
+      # required to merge it — sitting at `mergeable_state: blocked` with
+      # nothing red to open. A release PR nobody can merge is a release process
+      # that stalls, and the failure looks like a CI problem rather than a
+      # permissions one. An App token is an ordinary actor; its pull request
+      # triggers CI the way a contributor's does. The credentials are
+      # organisation secrets (ECOMA_APP_ID, ECOMA_APP_KEY) shared by every
+      # repository running this arrangement; where they are absent the fallback
+      # token still maintains the release pull request — it just cannot see CI
+      # run on it unattended, and that is stated in the run summary below
+      # rather than left to be discovered.
+      - name: Mint a GitHub App token
+        id: app-token
+        if: env.RELEASE_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ECOMA_APP_ID }}
+          private-key: ${{ secrets.ECOMA_APP_KEY }}
+
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+        with:
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      # Said out loud in the run summary, because "the release PR cannot be
+      # merged" is a much cheaper problem to diagnose when the summary already
+      # told the maintainer why. This step cannot fail the run: release-please
+      # having succeeded is the real verdict, and a warning about a missing
+      # optional secret is not a failure of it.
+      - name: Note the token arrangement
+        if: always() && env.RELEASE_APP_ID == ''
+        run: |
+          echo "::warning::No ECOMA_APP_ID secret: the release pull request is maintained with GITHUB_TOKEN, which cannot start new workflow runs. The PR will be opened and updated, but ci-gate and analysis-gate will not run on it unattended and it must be merged with a manual re-run of CI."

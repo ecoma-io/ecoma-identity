@@ -1,0 +1,127 @@
+# identity-domain — the identity model: users, identities, sessions,
+# authenticators, applications.
+#
+# THE DEPENDENCY LAW THIS CRATE EXISTS TO EXPRESS: it depends on nothing
+# internal and on nothing platform-shaped. `tooling/scripts/check-architecture.mjs`
+# judges that from `cargo metadata`, so neither half can be added by accident.
+#
+# `test-invariants` below is the task `src/invariants.rs` names in its own docs.
+# It is not part of `test`, and the reason is on that task.
+
+$schema: https://moonrepo.dev/schemas/moon.json
+
+tags:
+  - rust
+  - crate
+  - domain
+
+tasks:
+  format:
+    command: "cargo fmt -p identity-domain"
+    options:
+      cache: false
+
+  # `format-check`, not `format:check`. Moon 2.5.6 rejects a colon in a
+  # PROJECT-level task id ("Invalid identifier format"), and the root
+  # `moon.yml` — which is outside this project's scope — carries the same
+  # colon spelling. The dashed name is the one a project can actually declare
+  # and the one `moon run :format-check` resolves. See the note on the same
+  # rename in the root `moon.yml`.
+  format-check:
+    command: "cargo fmt -p identity-domain -- --check"
+    options:
+      cache: false
+
+  # `-D warnings` because a clippy warning nobody reads is a warning nobody
+  # fixes, and the org's bar is zero (`AGENTS.md` §Definition of done).
+  lint:
+    command: "cargo clippy -p identity-domain --all-targets -- -D warnings"
+    options:
+      cache: false
+
+  typecheck:
+    command: "cargo check -p identity-domain --all-targets"
+    options:
+      cache: false
+
+  # `--locked` because `Cargo.lock` is committed and a push that resolves
+  # differently from CI fails in someone else's pipeline.
+  test:
+    command: "cargo test -p identity-domain --locked"
+    options:
+      cache: false
+
+  test-unit:
+    command: "cargo test -p identity-domain --locked --lib"
+    options:
+      cache: false
+
+  # ---------------------------------------------------------------------------
+  # test-invariants — "how much of the security model is real yet?"
+  #
+  # `-- --ignored` is the whole point. `src/invariants.rs` holds `#[ignore]`d
+  # skeletons, each naming a rule the system must enforce and skipped because
+  # the enforcing code does not exist yet. A maintainer asking how much is real
+  # runs this task and reads which ones fail.
+  #
+  # It is NOT part of `test` and it is NOT in CI, on purpose. A suite that is
+  # red in every pipeline is a suite people learn to scroll past, and then the
+  # one moment it mattered — the rule that finally got implemented — is the
+  # moment nobody noticed. So the honest state stays visible and opt-in.
+  #
+  # The bare `--` is load-bearing: it separates cargo's own flags from the test
+  # binary's, which is where `--ignored` is understood. Without it cargo
+  # rejects the flag instead of passing it on.
+  # ---------------------------------------------------------------------------
+  test-invariants:
+    command: "cargo test -p identity-domain --locked -- --ignored"
+    options:
+      cache: false
+
+  # ---------------------------------------------------------------------------
+  # HOST TARGET, DELIBERATELY. This crate does not depend on `worker`.
+  #
+  # `worker` 0.8.7 does compile for the host as well as for wasm32, so building
+  # this for wasm32 here would not fail — it would just be the wrong cost. The
+  # host build is what keeps the affected-first loop fast: a change in
+  # identity-domain recompiles ONE crate instead of the three Workers that pull
+  # it in, and the wasm32 compile happens once, in `identity:build`, where the
+  # Workers actually need it.
+  #
+  # The same comment, for the same reason, is on the other four non-platform
+  # crates: identity-application, identity-oidc, identity-security and
+  # identity-testkit.
+  # ---------------------------------------------------------------------------
+  build:
+    command: "cargo build -p identity-domain --locked"
+    options:
+      cache: false
+
+  dev:
+    # `options.runInCI: false`, not the root file's `local: 'only'`. Moon 2.5.6
+    # has no `local` field on a task — the root `moon.yml` spells it that way
+    # and that key is inert, which is why this is written out rather than
+    # inherited. Verified: with this option, `moon ci` runs `lint` and skips
+    # `dev`; without it, `moon ci` would run a long-lived process and hang a
+    # pipeline, which is the exact failure the root file's comment warns about.
+    command: "cargo run -p identity-domain --locked"
+    options:
+      runInCI: false
+    inputs: []
+    outputs: []
+
+  # `publish = false` in Cargo.toml: there is no published package, so this is
+  # a release build and nothing more. A `package` task that claimed to produce
+  # a distributable here would be a task reporting success without doing the
+  # thing its name says.
+  package:
+    command: "cargo build -p identity-domain --locked --release"
+    options:
+      cache: false
+
+  wrangler-validate:
+    # No wrangler config, so there is nothing to validate. A Worker owns this
+    # task; a library crate declaring it keeps `moon run :wrangler-validate`
+    # resolving to a real task in every project.
+    inputs: []
+    outputs: []

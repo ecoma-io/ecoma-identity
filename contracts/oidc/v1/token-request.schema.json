@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/oidc/v1/token-request.schema.json",
+  "title": "TokenRequest",
+  "description": "The parameters /oauth/token accepts, derived from identity_oidc::request::TokenRequest. These are form-encoded parameters, not a JSON body — the type is a plain struct with serde derives, so a JSON document is used here only to make the field names and requiredness checkable. grant_type is a String rather than an enum tag on purpose: an unsupported grant must be answered with an OAuth error response, not a deserialization failure, so a client sending grant_type=password gets 501 and unsupported_grant_type rather than a 400 from a parser.",
+  "type": "object",
+  "x-rust-type": "identity_oidc::request::TokenRequest",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; the endpoint that would redeem it is DEFERRED to phase 4 (OIDC provider)",
+  "required": ["grant_type"],
+  "additionalProperties": false,
+  "properties": {
+    "grant_type": {
+      "type": "string",
+      "description": "The discriminator the endpoint switches on. Recognised: authorization_code and refresh_token. Anything else — including the implicit and password grants — is GrantType::Unsupported and is refused with the OAuth error shape, not a parse error.",
+      "x-serde": "pub grant_type: String",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "TokenRequest::grant — \"authorization_code\" | \"refresh_token\" | everything else Unsupported",
+        "constraining": "the field is a String in Rust; the set is closed by grant(), which maps any other value to Unsupported"
+      }
+    },
+    "code": {
+      "type": ["string", "null"],
+      "description": "The authorization code, for the authorization_code grant. Single-use: a second redemption is refused.",
+      "x-serde": "pub code: Option<String>",
+      "x-serde-status": "optional",
+      "x-serde-note": "Option<String> with no skip_serializing_if and no default attribute."
+    },
+    "redirect_uri": {
+      "type": ["string", "null"],
+      "description": "The redirect URI, which must equal the one in the authorization request. Re-sending it is not redundancy: it is the check that a code stolen from a log cannot be redeemed by a different client.",
+      "x-serde": "pub redirect_uri: Option<String>",
+      "x-serde-status": "optional",
+      "x-serde-note": "Option<String> with no skip_serializing_if and no default attribute."
+    },
+    "client_id": {
+      "type": ["string", "null"],
+      "description": "The client identifier, when the client is not authenticating with HTTP basic auth.",
+      "x-serde": "pub client_id: Option<String>",
+      "x-serde-status": "optional",
+      "x-serde-note": "Option<String> with no skip_serializing_if and no default attribute."
+    },
+    "client_secret": {
+      "type": ["string", "null"],
+      "description": "The client secret, when the client is using client_secret_post. Not accepted for public clients. A credential: it never appears in a log, a response body or any read of the registration.",
+      "x-serde": "pub client_secret: Option<String>",
+      "x-serde-status": "optional",
+      "x-serde-note": "Option<String> with no skip_serializing_if and no default attribute."
+    },
+    "refresh_token": {
+      "type": ["string", "null"],
+      "description": "The refresh token, for the refresh_token grant.",
+      "x-serde": "pub refresh_token: Option<String>",
+      "x-serde-status": "optional",
+      "x-serde-note": "Option<String> with no skip_serializing_if and no default attribute."
+    },
+    "code_verifier": {
+      "type": ["string", "null"],
+      "description": "The PKCE verifier, for the authorization_code grant. Checked against the code_challenge the authorization request carried.",
+      "x-serde": "pub code_verifier: Option<String>",
+      "x-serde-status": "optional",
+      "x-serde-note": "Option<String> with no skip_serializing_if and no default attribute."
+    },
+    "scope": {
+      "type": ["string", "null"],
+      "description": "Requested scopes on a refresh. A refresh may narrow a grant and never widen one. Space-delimited; an absent value parses to the empty list, which narrows to nothing rather than failing.",
+      "x-serde": "pub scope: Option<String>",
+      "x-serde-status": "optional",
+      "x-serde-note": "Option<String> with no skip_serializing_if and no default attribute. TokenRequest::scopes treats None as an empty list."
+    }
+  }
+}

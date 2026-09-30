@@ -1,0 +1,11 @@
+[package]
+name = "identity-reporting-worker"
+version = "0.0.0"
+edition = "2024"
+
+# VIOLATION (checks 5 and 6): a fourth deployable. The brief makes exactly
+# three, and this directory is in neither the Cargo members, nor
+# .moon/workspace.yml, nor infra/cloudflare/, nor release-please-config.json.
+[dependencies]
+identity-application = { path = "../../../crates/identity-application" }
+worker = { version = "0.8.7" }

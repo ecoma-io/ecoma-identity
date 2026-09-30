@@ -1,0 +1,35 @@
+{
+  // Fixture wrangler config for the Identity Worker, $ENV environment.
+  // Legal, with the KV and rate-limiter bindings the brief allows.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "identity",
+  "compatibility_date": "2026-08-05",
+  // A comment containing a brace } and quotes " to prove the stripper is
+  // comment-aware rather than a regex over slashes.
+  "d1_databases": [
+    {
+      "binding": "IDENTITY_DB",
+      "database_name": "identity-$ENV",
+      "database_id": "0000",
+    },
+  ],
+  "kv_namespaces": [{ "binding": "IDENTITY_KV", "id": "1111" }],
+  "queues": {
+    "producers": [{ "binding": "IDENTITY_QUEUE", "queue": "identity" }],
+  },
+  // VIOLATION (check 10): a Durable Object binding on the Identity Worker.
+  // §24 forbids a DO as authoritative identity state in bootstrap, and a DO is
+  // exactly the thing that reads as a natural home for session state — which is
+  // why the constraint needs a gate rather than a note.
+  //
+  // It is declared HERE, in the real wrangler.jsonc, and not in a file called
+  // `wrangler-do.jsonc`. Cloudflare reads a file named `wrangler.jsonc`; a
+  // differently named file is not a config that would ever be deployed, and a
+  // fixture that put the violation somewhere the check cannot see would be
+  // testing the check's ability to miss.
+  "durable_objects": {
+    "bindings": [{ "name": "SESSION_STORE", "class_name": "SessionStore" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SessionStore"] }],
+  "vars": { "ENVIRONMENT": "production" },
+}

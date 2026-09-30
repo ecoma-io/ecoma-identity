@@ -1,0 +1,253 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/oidc/v1/discovery-document.schema.json",
+  "title": "DiscoveryDocument",
+  "description": "The OpenID Provider metadata document served at /.well-known/openid-configuration, derived from identity_oidc::discovery::DiscoveryDocument. Every field is a PROMISE. Promising a response type or grant the implementation does not serve is how a conformance suite fails and how a client picks an endpoint that will 501. In the bootstrap phase the document is CONSTRUCTIBLE (DiscoveryDocument::bootstrap) but the ROUTE that serves it is DEFERRED to phase 4, so no client can fetch it: a document that is right and unreachable is still unreachable.",
+  "type": "object",
+  "x-rust-type": "identity_oidc::discovery::DiscoveryDocument",
+  "x-serde-status": "the document is IMPLEMENTED as a shape — DiscoveryDocument::bootstrap is a real function and a real test; the /.well-known/openid-configuration route is DEFERRED to phase 4 (OIDC provider)",
+  "required": [
+    "issuer",
+    "authorization_endpoint",
+    "token_endpoint",
+    "userinfo_endpoint",
+    "jwks_uri",
+    "revocation_endpoint",
+    "end_session_endpoint",
+    "scopes_supported",
+    "response_types_supported",
+    "grant_types_supported",
+    "subject_types_supported",
+    "id_token_signing_alg_values_supported",
+    "userinfo_signing_alg_values_supported",
+    "code_challenge_methods_supported",
+    "token_endpoint_auth_methods_supported",
+    "claims_supported",
+    "claims_parameter_supported",
+    "request_parameter_supported",
+    "require_request_uri_registration"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "issuer": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The issuer identifier. Every token this provider mints carries an iss that must equal this string exactly, including scheme and any trailing slash. Not a URL this provider resolves.",
+      "x-serde": "pub issuer: String",
+      "x-serde-status": "required",
+      "x-construction": "the argument to DiscoveryDocument::bootstrap; every endpoint below is derived from it by string concatenation"
+    },
+    "authorization_endpoint": {
+      "type": "string",
+      "description": "The authorization endpoint.",
+      "x-serde": "pub authorization_endpoint: String",
+      "x-serde-status": "required",
+      "x-construction": "format!(\"{issuer}/oauth/authorize\") — matches Route::Authorize.path()"
+    },
+    "token_endpoint": {
+      "type": "string",
+      "description": "The token endpoint.",
+      "x-serde": "pub token_endpoint: String",
+      "x-serde-status": "required",
+      "x-construction": "format!(\"{issuer}/oauth/token\") — matches Route::Token.path()"
+    },
+    "userinfo_endpoint": {
+      "type": "string",
+      "description": "The userinfo endpoint.",
+      "x-serde": "pub userinfo_endpoint: String",
+      "x-serde-status": "required",
+      "x-construction": "format!(\"{issuer}/oauth/userinfo\") — matches Route::UserInfo.path()"
+    },
+    "jwks_uri": {
+      "type": "string",
+      "description": "The JWKS URI — the public keys clients use to verify this provider's signatures.",
+      "x-serde": "pub jwks_uri: String",
+      "x-serde-status": "required",
+      "x-construction": "format!(\"{issuer}/.well-known/jwks.json\") — matches Route::Jwks.path()"
+    },
+    "revocation_endpoint": {
+      "type": "string",
+      "description": "The revocation endpoint, per RFC 7009.",
+      "x-serde": "pub revocation_endpoint: String",
+      "x-serde-status": "required",
+      "x-construction": "format!(\"{issuer}/oauth/revoke\") — matches Route::Revoke.path()"
+    },
+    "end_session_endpoint": {
+      "type": "string",
+      "description": "The end-session endpoint.",
+      "x-serde": "pub end_session_endpoint: String",
+      "x-serde-status": "required",
+      "x-construction": "format!(\"{issuer}/oauth/logout\") — matches Route::Logout.path()"
+    },
+    "scopes_supported": {
+      "type": "array",
+      "description": "The scopes this provider supports. The openid scope is mandatory for an OIDC provider and is not optional here.",
+      "x-serde": "pub scopes_supported: Vec<String>",
+      "x-serde-status": "required",
+      "minItems": 1,
+      "items": { "type": "string" },
+      "x-accepted-values": {
+        "source": "DiscoveryDocument::bootstrap — [REQUIRED_SCOPE, SCOPE_PROFILE, SCOPE_EMAIL] == [\"openid\", \"profile\", \"email\"]",
+        "constraining": "the field is a Vec<String> in Rust; a provider without the openid scope is not an OIDC provider"
+      },
+      "x-bootstrap-value": ["openid", "profile", "email"]
+    },
+    "response_types_supported": {
+      "type": "array",
+      "description": "The response types this provider supports. 'code' only: the implicit and hybrid flows return tokens in a redirect, and a token in a URL is a token in a browser history, a referrer header and a proxy log.",
+      "x-serde": "pub response_types_supported: Vec<String>",
+      "x-serde-status": "required",
+      "minItems": 1,
+      "items": { "type": "string", "enum": ["code"] },
+      "x-bootstrap-value": ["code"],
+      "x-accepted-values": {
+        "source": "DiscoveryDocument::bootstrap — vec![\"code\"]",
+        "test": "identity_oidc::discovery::tests::the_implicit_flow_is_not_advertised asserts the vector equals exactly [\"code\"]"
+      }
+    },
+    "grant_types_supported": {
+      "type": "array",
+      "description": "The grant types this provider supports. authorization_code and refresh_token; never implicit, never password. The token endpoint's TokenRequest::grant maps anything else to Unsupported, so advertising a third value would be advertising a 501.",
+      "x-serde": "pub grant_types_supported: Vec<String>",
+      "x-serde-status": "required",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": ["authorization_code", "refresh_token"]
+      },
+      "x-bootstrap-value": ["authorization_code", "refresh_token"],
+      "x-accepted-values": {
+        "source": "DiscoveryDocument::bootstrap, cross-checked against TokenRequest::grant which recognises exactly these two",
+        "test": "identity_oidc::discovery::tests::the_implicit_flow_is_not_advertised asserts neither 'implicit' nor 'password' is present"
+      }
+    },
+    "subject_types_supported": {
+      "type": "array",
+      "description": "The subject identifier types. 'public' only — the same subject for the same user across every client, which is the privacy-preserving choice. 'pairwise' would be the stronger privacy property and is NOT this provider's: advertising it without implementing it would be a lie clients act on.",
+      "x-serde": "pub subject_types_supported: Vec<String>",
+      "x-serde-status": "required",
+      "minItems": 1,
+      "items": { "type": "string", "enum": ["public"] },
+      "x-bootstrap-value": ["public"],
+      "x-accepted-values": {
+        "source": "DiscoveryDocument::bootstrap — vec![\"public\"]",
+        "test": "identity_oidc::discovery::tests::the_subject_type_is_public"
+      }
+    },
+    "id_token_signing_alg_values_supported": {
+      "type": "array",
+      "description": "The signing algorithms this provider's ID tokens may be signed with. RS256 only.",
+      "x-serde": "pub id_token_signing_alg_values_supported: Vec<String>",
+      "x-serde-status": "required",
+      "minItems": 1,
+      "items": { "type": "string", "enum": ["RS256"] },
+      "x-bootstrap-value": ["RS256"],
+      "x-accepted-values": {
+        "source": "DiscoveryDocument::bootstrap — vec![\"RS256\"]; matches JwtHeader::ALGORITHM"
+      }
+    },
+    "userinfo_signing_alg_values_supported": {
+      "type": "array",
+      "description": "The signing algorithms this provider's userinfo responses may use. RS256 only, even though UserInfoResponse is an unsigned JSON document by design — the field is declared because a signed userinfo response is specified and some clients require it. A client seeing this may attempt to fetch a signed userinfo response; this provider does not produce one.",
+      "x-serde": "pub userinfo_signing_alg_values_supported: Vec<String>",
+      "x-serde-status": "required",
+      "minItems": 1,
+      "items": { "type": "string", "enum": ["RS256"] },
+      "x-bootstrap-value": ["RS256"],
+      "x-accepted-values": {
+        "source": "DiscoveryDocument::bootstrap — vec![\"RS256\"]"
+      },
+      "x-divergence-from-code": "The discovery document advertises RS256 for userinfo while identity_oidc::response::UserInfoResponse is an unsigned JSON document. Both are true as written: the advertisement is a capability declaration, and no route produces a signed userinfo response. A client that requires a signed userinfo response is not one this provider serves."
+    },
+    "code_challenge_methods_supported": {
+      "type": "array",
+      "description": "The PKCE code-challenge methods. S256 only. 'plain' is not advertised: declaring a downgrade offer is worse than advertising the weak one, and advertising both is worse than advertising one.",
+      "x-serde": "pub code_challenge_methods_supported: Vec<String>",
+      "x-serde-status": "required",
+      "minItems": 1,
+      "items": { "type": "string", "enum": ["S256"] },
+      "x-bootstrap-value": ["S256"],
+      "x-accepted-values": {
+        "source": "identity_oidc::SUPPORTED_CODE_CHALLENGE_METHOD; AuthorizationRequest::uses_supported_pkce checks against the same constant",
+        "test": "identity_oidc::discovery::tests::only_s256_pkce_is_advertised asserts 'plain' is absent"
+      }
+    },
+    "token_endpoint_auth_methods_supported": {
+      "type": "array",
+      "description": "The token endpoint's client authentication methods. client_secret_basic and client_secret_post for confidential clients, none for public ones. private_key_jwt is NOT offered, even though ClientMetadata carries a jwks_uri field: a client that offers one is offering something the token endpoint will not accept, and the discovery document is where the refusal is visible.",
+      "x-serde": "pub token_endpoint_auth_methods_supported: Vec<String>",
+      "x-serde-status": "required",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": ["client_secret_basic", "client_secret_post", "none"]
+      },
+      "x-bootstrap-value": [
+        "client_secret_basic",
+        "client_secret_post",
+        "none"
+      ],
+      "x-accepted-values": {
+        "source": "DiscoveryDocument::bootstrap, which writes these three; identity_oidc::client::ClientMetadata::SUPPORTED_AUTH_METHODS declares the identical set",
+        "test": "identity_oidc::client::tests::private_key_jwt_is_not_advertised_by_a_client_registration asserts the set contains no 'private_key_jwt'"
+      }
+    },
+    "claims_supported": {
+      "type": "array",
+      "description": "The claims this provider may put in an ID token. The first twelve are the registered and this-provider's own claims IdTokenClaims always or conditionally carries; email_verified is the last.",
+      "x-serde": "pub claims_supported: Vec<String>",
+      "x-serde-status": "required",
+      "minItems": 1,
+      "items": { "type": "string" },
+      "x-bootstrap-value": [
+        "iss",
+        "sub",
+        "aud",
+        "exp",
+        "iat",
+        "auth_time",
+        "nonce",
+        "acr",
+        "amr",
+        "name",
+        "email",
+        "email_verified"
+      ],
+      "x-accepted-values": {
+        "source": "DiscoveryDocument::bootstrap — the twelve names, in that order",
+        "cross-check": "the eight required claims of IdTokenClaims plus the three optional profile/email claims; nonce is a registered claim that may be null"
+      }
+    },
+    "claims_parameter_supported": {
+      "type": "boolean",
+      "const": false,
+      "description": "Whether this provider accepts the 'claims' request parameter. Declined explicitly as false rather than omitted: absent means 'unspecified', and a client that reads unspecified as 'maybe' is the problem this field exists to answer.",
+      "x-serde": "pub claims_parameter_supported: bool",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "DiscoveryDocument::bootstrap — false",
+        "test": "identity_oidc::discovery::tests::jar_is_declined_explicitly_rather_than_omitted asserts all three boolean fields are false"
+      }
+    },
+    "request_parameter_supported": {
+      "type": "boolean",
+      "const": false,
+      "description": "Whether this provider will accept a request with no redirect_uri — that is, whether the redirect target may be learned from the request. Always false: a redirect URI learned at request time is the open redirect this design refuses.",
+      "x-serde": "pub request_parameter_supported: bool",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "DiscoveryDocument::bootstrap — false"
+      }
+    },
+    "require_request_uri_registration": {
+      "type": "boolean",
+      "const": false,
+      "description": "Whether request and request_uri are supported. False: JAR is a large surface and nothing here needs it.",
+      "x-serde": "pub require_request_uri_registration: bool",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "DiscoveryDocument::bootstrap — false"
+      }
+    }
+  }
+}

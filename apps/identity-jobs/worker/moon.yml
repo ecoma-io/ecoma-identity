@@ -1,0 +1,152 @@
+# identity-jobs-worker — the composition root for `identity-jobs`: the queue
+# consumer for email, security notifications and audit archival.
+#
+# THE BOUNDARY THIS FILE EXISTS TO STATE: the Jobs Worker depends on NEITHER
+# `identity-domain` NOR `identity-application`, and it is the one dependency
+# fact in this repository that is expressed by an ABSENCE. A background worker
+# that can evaluate identity rules can make identity decisions, and a queue
+# message is not a trustworthy caller — whoever produced the message is exactly
+# what the consumer must not have to take on faith. The sentence that starts
+# the erosion is "it only needs the `User` type".
+# `docs/architecture/jobs-isolation.md` owns the argument.
+#
+# That is why this file names no domain or application crate anywhere: not in
+# the commands below, not in the inputs, not in a comment implying one belongs
+# here. `tooling/scripts/check-architecture.mjs` check 2 judges the actual
+# `cargo metadata` graph, so the absence is mechanical rather than a promise.
+# What this Worker MAY reach for the error and idempotency vocabulary is
+# `identity-security` and `identity-cloudflare` — both below it in the law, and
+# neither of which can evaluate a rule.
+#
+# It owns no identity state, so it holds no D1 binding. `JOBS_KV` holds
+# idempotency keys and dead-letter bookkeeping: losing one costs a duplicate
+# email, never a wrong authorization decision. That is the whole difference
+# between scratch space and authoritative state (§24).
+
+$schema: https://moonrepo.dev/schemas/moon.json
+
+tags:
+  - rust
+  - worker
+  - deployable
+  - identity-jobs
+
+tasks:
+  # HOST TARGET, and this is the whole reason a Worker project needs its own
+  # moon.yml at all: the root vocabulary is a `prettier --write` aimed at
+  # JavaScript. A `prettier --write` aimed at a Rust crate is a task that
+  # reformats nothing and reports success, which is the state
+  # `boundary-5-worker-registration` exists to refuse.
+  format:
+    command: "cargo fmt -p identity-jobs-worker"
+    options:
+      cache: false
+
+  # `format-check`, not `format:check` — moon 2.5.6 rejects a colon in a
+  # PROJECT-level task id ("Invalid identifier format"). Verified against
+  # moon 2.5.6: the colon spelling fails to parse, the dashed one resolves.
+  # See the note in crates/identity-domain/moon.yml.
+  format-check:
+    command: "cargo fmt -p identity-jobs-worker -- --check"
+    options:
+      cache: false
+
+  # `-D warnings`: a clippy warning nobody reads is a warning nobody fixes.
+  lint:
+    command: "cargo clippy -p identity-jobs-worker --all-targets -- -D warnings"
+    options:
+      cache: false
+
+  typecheck:
+    command: "cargo check -p identity-jobs-worker --all-targets"
+    options:
+      cache: false
+
+  # `--locked` because `Cargo.lock` is committed and a push that resolves
+  # differently from CI fails in someone else's pipeline.
+  test:
+    command: "cargo test -p identity-jobs-worker --locked"
+    options:
+      cache: false
+
+  test-unit:
+    command: "cargo test -p identity-jobs-worker --locked --lib"
+    options:
+      cache: false
+
+  # ---------------------------------------------------------------------------
+  # THE WORKERS TARGET. Only `build` and `package` need it.
+  #
+  # format, lint, typecheck and test all run on the host above, deliberately:
+  # `worker` 0.8.7 compiles for the host as well as for wasm32, so a wasm32
+  # build here would not fail, it would just recompile the whole dependency
+  # graph for a target no test runs on. The wasm32 compile is the deployable's
+  # actual deliverable, so it is the one that gets the target flag.
+  # ---------------------------------------------------------------------------
+  build:
+    command: "cargo build -p identity-jobs-worker --locked --target wasm32-unknown-unknown"
+    options:
+      cache: false
+
+  dev:
+    # `options.runInCI: false`, not the root file's `local: 'only'` — moon 2.5.6
+    # has no `local` field on a task, so the root file's spelling is inert.
+    # `wrangler dev` binds a port and never returns: a task that never
+    # terminates is a pipeline that hangs, and it must never be one.
+    #
+    # `script:`, not `command:`, because wrangler is a pnpm-installed binary
+    # and is NOT on the PATH moon gives a task — moon does not add
+    # `node_modules/.bin`. Verified: `command: 'wrangler …'` exits 127.
+    #
+    # `--cwd` is deliberately NOT used even though wrangler supports it: it
+    # re-roots the config's own relative paths (`main`, and the `migrations_dir`
+    # the sibling Identity config carries), and the build command inside
+    # `infra/cloudflare/development/identity-jobs/wrangler.jsonc` resolves
+    # `../../../../apps/identity-jobs/worker` against the process working
+    # directory. Verified: with `--cwd` the custom build cannot find the crate;
+    # run from the config's own directory it does.
+    script: 'cd "$MOON_WORKSPACE_ROOT/infra/cloudflare/development/identity-jobs" && pnpm exec wrangler dev --config wrangler.jsonc'
+    options:
+      runInCI: false
+    inputs: []
+    outputs: []
+
+  # A release build of the deployable for the target it ships to. There is no
+  # published package (`publish = false` in Cargo.toml), so this is a release
+  # wasm artefact and nothing more — a `package` task that claimed to produce a
+  # distributable here would be a task reporting success without doing the
+  # thing its name says.
+  package:
+    command: "cargo build -p identity-jobs-worker --locked --release --target wasm32-unknown-unknown"
+    options:
+      cache: false
+
+  # ---------------------------------------------------------------------------
+  # wrangler:validate — `wrangler deploy --dry-run` against the DEVELOPMENT
+  # config. Dry-run compiles the Worker and runs wrangler's own checks without
+  # uploading, so it is a real check of the thing that ships rather than a
+  # command that exits 0.
+  #
+  # For this Worker it is also the check that would notice a `d1_databases`
+  # block appearing in a Jobs config, which `boundary-2-jobs-isolation` judges
+  # separately. Two independent readers of the same file is the point.
+  #
+  # If `wrangler` is not installed this fails loudly and non-zero: pnpm exits
+  # 1 with `Command "wrangler" not found`, moon propagates the non-zero exit.
+  # A `|| true` here would make "the check did not run" indistinguishable from
+  # "the check passed", which is the one outcome this task must never produce.
+  # ---------------------------------------------------------------------------
+  wrangler-validate:
+    script: 'cd "$MOON_WORKSPACE_ROOT/infra/cloudflare/development/identity-jobs" && pnpm exec wrangler deploy --dry-run --config wrangler.jsonc'
+    options:
+      cache: false
+    # Project-relative, because a project-level `inputs:` block resolves
+    # against the project root and not against the workspace root. Spelling
+    # `apps/identity-jobs/worker/src/**` here would look for
+    # `apps/identity-jobs/worker/apps/identity-jobs/worker/src/**` and fail to
+    # parse. The wrangler config lives outside this project and is therefore
+    # not an input; `cache: false` below makes that irrelevant to correctness.
+    inputs:
+      - "@files(Cargo.toml)"
+      - "@globs(src/**/*)"
+    outputs: []

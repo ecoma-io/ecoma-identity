@@ -1,0 +1,50 @@
+# Local environment for the Identity Worker.
+#
+# This file is the *shape* of the file, not a working configuration. Copy it:
+#
+#     cp infra/cloudflare/development/.dev.vars.example .dev.vars
+#
+# and fill in the real values. `.dev.vars` is gitignored and is never committed
+# (constraint §27; the architecture guard checks the git index, not the working
+# tree, so a developer's local file does not fail their build).
+#
+# There is no "development" value for any of these that disables
+# authentication. Local development runs the same code path as production,
+# with real secrets and real cryptography. A bypass here is a bypass in
+# production, because nobody ever removes it — see docs/adr/0009-no-auth-bypass.md.
+
+# --- Signing -----------------------------------------------------------------
+# 32+ random bytes, base64url. The Worker refuses to start without it; it does
+# not fall back to a default, because a default signing key is a key an
+# attacker can read in this file.
+#
+#   node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+IDENTITY_SIGNING_SECRET=
+
+# --- Encryption --------------------------------------------------------------
+# A 32-byte key, base64url, for SecretCipher (AES-GCM). Separate from the
+# signing key on purpose: one key that both signs and encrypts is one key whose
+# compromise is both impersonation and disclosure.
+#
+#   node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+IDENTITY_ENCRYPTION_KEY=
+
+# --- Issuer ------------------------------------------------------------------
+# The `iss` claim in every token and the issuer in the discovery document. It
+# must be the origin the client will actually reach this Worker on, or every
+# token will verify against a different issuer than the client expects.
+IDENTITY_ISSUER=http://localhost:8787
+
+# --- Email -------------------------------------------------------------------
+# Deferred: no email is sent in this phase. The binding exists so the shape is
+# fixed, and the send path returns a documented "unimplemented" error rather
+# than a fake success.
+EMAIL_PROVIDER_URL=
+EMAIL_FROM_ADDRESS=no-reply@example.invalid
+
+# --- Applications ------------------------------------------------------------
+# A seed value for generating client secrets. 256 bits minimum; the domain
+# refuses anything shorter.
+#
+#   node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+IDENTITY_CLIENT_SECRET_SEED=

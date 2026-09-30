@@ -1,0 +1,90 @@
+// What this is: the STAGING wrangler configuration for the `identity-admin`
+// Worker — the administrative BFF and operator session.
+//
+// What this is NOT: it is not production, and it has no D1 binding. See the
+// boundary note below.
+//
+// STAGING IS PRODUCTION-SHAPED: same bindings, same settings, different
+// resources. The binding it does have — `IDENTITY` — points at the STAGING
+// identity Worker, so a staging admin action can never reach production
+// identity state even if someone runs it by hand.
+//
+// ---------------------------------------------------------------------------------
+// BOUNDARY: no `d1_databases` block, and none may be added. brief §2 constraint 3
+// — "The Admin Worker MUST NOT access Identity D1 directly." It reaches identity
+// through the `IDENTITY` service binding below and nothing else. Adding a D1
+// binding here is a constraint 3 violation needing an ADR, not a config change.
+// ---------------------------------------------------------------------------------
+
+{
+  "$schema": "../../../../node_modules/wrangler/config-schema.json",
+
+  "name": "identity-admin-staging",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "main": "build/index.js",
+  "build": {
+    "command": "cd ../../../../apps/identity-admin/worker && cargo install -q \"worker-build@^0.8\" --locked && worker-build --release",
+  },
+
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.1,
+      "persist": true,
+    },
+  },
+
+  "services": [
+    {
+      // → the STAGING identity Worker. Service bindings are private: the call
+      // does not leave the account and carries no identity credentials, which
+      // is exactly why brief §2 constraint 4 prefers it over an HTTP call with
+      // a shared key.
+      "binding": "IDENTITY",
+      "service": "identity-staging",
+    },
+  ],
+
+  "ratelimits": [
+    {
+      "name": "ADMIN_RATE_LIMITER",
+      // STAGING namespace, separate from production's, for the same reason the
+      // identity limiter is: a shared budget lets console traffic lock out
+      // real users.
+      "namespace_id": "1002",
+      "simple": {
+        "limit": 600,
+        "period": 60,
+      },
+    },
+  ],
+
+  "assets": {
+    // brief §8: the frontend and the BFF behind it are one release unit. This
+    // directory is built by `identity-admin-web:build` in the same commit as
+    // this Worker's bundle, so the two cannot be deployed apart.
+    "directory": "../../../../apps/identity-admin/web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+  },
+
+  "placement": {
+    // Matches production's shape: an admin Worker is latency-sensitive
+    // (every click is a round trip) and its D1 is the admin database, which
+    // lives in the same account. See the placement note in
+    // infra/cloudflare/production/identity-admin.wrangler.jsonc.
+    "mode": "smart",
+  },
+
+  "vars": {
+    "ENVIRONMENT": "staging",
+  },
+}

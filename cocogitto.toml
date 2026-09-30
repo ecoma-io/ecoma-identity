@@ -1,0 +1,154 @@
+# Cocogitto — the RELEASE-message authority for this repository.
+#
+# ---------------------------------------------------------------------------
+# WHAT THIS FILE IS FOR
+#
+# Two things, and only these two:
+#
+#   1. It declares the SCOPE VOCABULARY a commit may use. A scope outside this
+#      list is rejected at `commit-msg`, which is the moment a reviewer can
+#      still ask "which module is this, and did its boundary table move with
+#      it?" A module the commit vocabulary does not name is a module with no
+#      law, so a new module brings its scope here in the same commit as its
+#      directory — the same rule `commitlint.config.mjs` states from its side,
+#      and the same rule `AGENTS.md` §"Before you change anything" states as
+#      one four-file commit. The two files MUST carry the same list; the
+#      duplication is deliberate, because the tiers fail in different places.
+#
+#   2. It is the config Cocogitto reads when it validates the message being
+#      written, and when it later cuts a release. Release Please owns version,
+#      release PR and tag (`docs/operations/release-process.md`); Cocogitto
+#      owns the MESSAGE. Those are different verbs and they must not be
+#      confused with Commitlint's.
+#
+# ---------------------------------------------------------------------------
+# COMMITLINT IS NOT THE RELEASE-MESSAGE AUTHORITY. THIS FILE IS.
+#
+# Commitlint (`commitlint.config.mjs`) runs as a second, independent tier: a
+# different implementation, checking a superset of the rules, at the point a
+# CI job can reach a pushed commit where no local hook was ever installed. If
+# a message is rejected, look at the tier that rejected it before changing
+# anything. `AGENTS.md` §"Commits, PRs, and security" says the same thing in
+# prose; the two must keep agreeing.
+#
+# ---------------------------------------------------------------------------
+# THE FILENAME IS NOT WHAT COCOGITTO LOOKS FOR — `lefthook.yml` PASSES IT
+#
+# `cog` discovers `cog.toml` and nothing else. Measured on the pinned binary,
+# cocogitto 7.0.0, with a config declaring `scopes = ["allowed"]` present in
+# each candidate file and `feat(bad): x` piped to `cog verify --file -`:
+#
+#     .cog.toml            -> exit 0   (never opened)
+#     cocogitto.toml       -> exit 0   (never opened)   <-- this file
+#     cog.yml              -> exit 0   (never opened)
+#     .cocogitto.toml      -> exit 0   (never opened)
+#     cog/config.toml      -> exit 0   (never opened)
+#     cocogitto.yaml       -> exit 0   (never opened)
+#     cog.toml             -> exit 1   (rejected)       <-- the only one
+#     cog.toml, from a subdirectory -> exit 1 (walks up to the root)
+#
+# So a bare `cog verify` here would parse nothing, accept every scope, and
+# report success — the worst failure mode a gate has: a green light on an
+# unexamined message. The `commit-msg` job in `lefthook.yml` therefore passes
+# `--config cocogitto.toml` on every invocation, and every command below does
+# too. The filename is fixed by the repository's convention and the org's
+# naming; the flag is what makes it real. Renaming this file to `cog.toml` is
+# the other valid fix, and is a one-line change in two places.
+#
+# ---------------------------------------------------------------------------
+# THE SCHEMA BELOW IS 7.0.0'S, NOT AN ONLINE EXAMPLE'S
+#
+# There is no `git` table. There is no `unlisted_scope_behavior` key. `scopes`
+# is a TOP-LEVEL ARRAY, not a table. `cog init` on an empty repository emits
+# `cog.toml` with the keys below and nothing else; this file is that file
+# under the name the repository uses. Anything not written here is not a key
+# 7.0.0 reads, and a key it does not read is a comment in a config file —
+# the exact "rule that is never enforced" failure this file exists to prevent.
+#
+# `cog check -l` (list-scope check) is deliberately NOT wired into any hook:
+# it diffs commit scopes against a TAG, and a repository with no tag yet has
+# nothing to diff against. A history comparison is not a message validator.
+# `cog verify --file -` validates the message being written, and that is the
+# check a `commit-msg` hook wants.
+#
+# ---------------------------------------------------------------------------
+# PROOF THIS FILE WAS PARSED — cocogitto 7.0.0, the pinned binary
+#
+# Run from the repository root, `set -euo pipefail`:
+#
+#     cog --version
+#     # -> cog 7.0.0
+#
+#     echo "feat(identity): a valid scoped message" | cog --config cocogitto.toml verify --file -
+#     echo "exit=$?"     # -> exit=0
+#
+#     echo "feat(not-a-scope): x" | cog --config cocogitto.toml verify --file - ; echo "exit=$?"
+#     # -> Error: Commit scope `not-a-scope` not allowed
+#     # -> exit=1
+#
+#     echo "nonsense" | cog --config cocogitto.toml verify --file - ; echo "exit=$?"
+#     # -> Error: Missing commit type separator `:`
+#     # -> exit=1
+#
+#     echo "feat(identity): a valid scoped message" | cog verify --file - ; echo "exit=$?"
+#     # -> exit=0 WITH NO SCOPE ENFORCED — the filename note above, live.
+#
+# Without the `--config` flag the file is never opened. With it, a listed
+# scope passes, an unlisted scope fails non-zero, and a message that is not a
+# conventional commit at all fails non-zero. All four were run; the exit codes
+# are above.
+# ---------------------------------------------------------------------------
+
+# ---- the scope vocabulary -------------------------------------------------
+# One entry per moon project in `.moon/workspace.yml`, plus the scopes that
+# name no project. Keep this list identical to the one in
+# `commitlint.config.mjs`; if they ever disagree, the message that passed one
+# tier and failed the other is the bug report, and both files move together.
+scopes = [
+  # crates/
+  "identity-domain",
+  "identity-application",
+  "identity-oidc",
+  "identity-security",
+  "identity-cloudflare",
+  "identity-testkit",
+  # apps/ — the three Workers and the two web apps, named as the deployable
+  # aliases the root `moon.yml` defines, because a commit header is read by
+  # humans and by nothing else.
+  "identity",
+  "identity-admin",
+  "identity-jobs",
+  "identity-web",
+  "identity-admin-web",
+  # repository-level — changes no single project owns
+  "arch",
+  "ci",
+  "contracts",
+  "db",
+  "deps",
+  "docs",
+  "infra",
+  "release",
+  "repo",
+  "security",
+]
+
+# ---- behaviour 7.0.0 actually reads --------------------------------------
+# A squash/rebase lands a commit nobody wrote by hand. The message a human
+# wrote is the one that was validated, so refusing `fixup!`/`squash!` would
+# block the autosquash workflow while validating a message that does not exist
+# yet. A merge commit is git's, not the author's.
+ignore_fixup_commits = true
+ignore_merge_commits = true
+
+# The conventional-commit string that suppresses a pipeline on a merge.
+skip_ci = "[skip ci]"
+
+[changelog]
+# `release-please` writes CHANGELOG.md for the three production versions, not
+# Cocogitto (`docs/operations/release-process.md` — release is not deployment,
+# and Cocogitto owns the message, not the changelog). The path is named so a
+# future `cog changelog` reads a real file rather than reporting a missing
+# one; the generation itself belongs to the release job in
+# `.github/workflows/`, not to a developer's commit hook.
+path = "CHANGELOG.md"

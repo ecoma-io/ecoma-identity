@@ -1,0 +1,53 @@
+[package]
+name = "identity-cloudflare"
+description = "The Cloudflare Workers adapters: D1, Queues, KV-free secret access, service bindings, rate limiting, request context, error envelopes and logging."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# The ONLY crate that may depend on the `worker` crate, and the only one that
+# may know a binding name. This is the adapter boundary: above it, nothing
+# knows what D1 or a Queue is; below it, nothing is allowed to be platform
+# specific. A Worker composition root in `apps/` also names bindings directly
+# — it is wiring, not policy — but no other crate may.
+[dependencies]
+identity-domain = { workspace = true }
+identity-application = { workspace = true }
+identity-oidc = { workspace = true }
+identity-security = { workspace = true }
+worker = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+http = { workspace = true }
+thiserror = { workspace = true }
+# `crypto.rs` calls WebCrypto through the `#[wasm_bindgen]` extern bindings
+# rather than through a typed `web-sys` wrapper for every algorithm. Two reasons,
+# both architectural rather than stylistic: `web-sys` gates each algorithm
+# behind a feature, and a missing feature is a *compile* error only at the call
+# site that needed it, whereas the `SubtleCrypto` surface here is one object
+# whose dictionary parameters this crate builds with `js_sys::Reflect`. These are
+# the wasm-bindgen ecosystem crates `worker` itself re-exports; taking them as
+# direct dependencies is what makes the `#[wasm_bindgen]` attribute usable
+# (the macro resolves the crate by path, and a re-export is not a path it can
+# find). None of them is a cryptography crate — every primitive still comes
+# from the platform's WebCrypto, and no algorithm is implemented here.
+futures-util = "0.3.34"
+wasm-bindgen = "0.2.129"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["Crypto", "SubtleCrypto", "CryptoKey"] }
+
+[dev-dependencies]
+# The WebCrypto tests in `crypto.rs` need `#[wasm_bindgen_test]`, which is a
+# no-op on a non-wasm target and a real test harness on `wasm32-unknown-unknown`.
+# It is a dev-dependency only: nothing in the shipped library references it, and
+# a dependency the production build pulls in for its test harness is a
+# dependency the production build can fail on for no reason.
+wasm-bindgen-test = "0.3"
+futures-util = "0.3.34"
+
+[lints]
+workspace = true

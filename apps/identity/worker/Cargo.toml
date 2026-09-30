@@ -1,0 +1,28 @@
+[package]
+name = "identity-worker"
+description = "The Identity Worker: OIDC, authentication, sessions, self-service, and the sole owner of Identity D1."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# The composition root for `identity`. It is allowed to name the `worker`
+# crate and the binding names, because that is what wiring *is*. It is not
+# allowed to contain policy: the health routes, the OIDC route table, the
+# error envelope and the request-id plumbing all come from
+# `identity-cloudflare` so the three Workers cannot drift apart on any of
+# them.
+[dependencies]
+identity-domain = { workspace = true }
+identity-application = { workspace = true }
+identity-oidc = { workspace = true }
+identity-security = { workspace = true }
+identity-cloudflare = { workspace = true }
+worker = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

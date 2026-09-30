@@ -1,0 +1,14 @@
+[package]
+name = "identity-jobs-worker"
+version = "0.0.0"
+edition = "2024"
+
+# VIOLATION (check 2, dependency half): §4 says Jobs must not depend on
+# identity-domain or identity-application. The edge is a plain path dependency,
+# so `cargo metadata` reports it as a resolved graph edge — the check reads the
+# graph, and a `[workspace = true` indirection would hide the same edge from a
+# manifest grep.
+[dependencies]
+identity-domain = { path = "../../../crates/identity-domain" }
+identity-security = { path = "../../../crates/identity-security" }
+worker = { version = "0.8.7", features = ["d1", "queue"] }
