@@ -1,0 +1,40 @@
+# A STAND-IN for the `worker` crate, for one reason: this fixture must resolve
+# with no network and no registry.
+#
+# The workspace's own comment above claims "every dependency below is a path
+# dependency, so `cargo metadata` resolves this tree with no network and no
+# registry". That claim was false — six manifests took `worker = { version =
+# "0.8.7" }` from crates.io, so the canary needed a warm Cargo registry cache
+# to run at all. On a developer machine that cache is always warm, and the
+# canary was 21/21 green there for weeks. On a CI runner it is cold, and four
+# of the twenty-one tests failed with:
+#
+#     cargo metadata failed: error: no matching package named `worker` found;
+#     location searched: crates.io index; ... note: offline mode
+#
+# The violation the fixture needs is an EDGE TO A CRATE CALLED `worker`, and
+# this crate is that: a path dependency named `worker`, which `cargo metadata`
+# reports as an external edge named `worker` — the same shape the real
+# registry crate produces, from the real `cargo metadata` resolve graph.
+# The guard reads `dep.name` from that graph, never the source, so nothing
+# downstream can tell the difference and nothing downstream should.
+#
+# No source file is needed: `cargo metadata` resolves dependencies, it does not
+# compile them, and the fixture is never built.
+[package]
+name = "worker"
+version = "0.8.7"
+edition = "2024"
+
+# The three features this repository's real manifests request, declared so the
+# fixture resolves. `cargo metadata` requires a requested feature to exist, so
+# a stand-in without them fails to resolve for a reason that has nothing to do
+# with the violation under test. The union of what the fixture asks for
+# (`d1`, `queue`) and what the real workspace asks for
+# (`d1`, `queue`, `http` — root Cargo.toml) is declared, so adding a feature
+# upstream cannot silently turn this into a resolution error instead of a
+# boundary violation.
+[features]
+d1 = []
+http = []
+queue = []

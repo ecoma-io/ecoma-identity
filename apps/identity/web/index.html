@@ -1,0 +1,20 @@
+<!doctype html>
+<!--
+  The static shell the Identity Worker serves for the end-user identity UI.
+
+  It contains no markup beyond the mount point on purpose: every screen is
+  rendered by Vue, and anything baked into this file would be a second source
+  of truth for what the app is. The title says what this is and does not
+  claim a working sign-in.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ecoma Identity</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

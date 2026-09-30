@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // The project ESLint and the typecheck task both read.
+  //
+  // It covers `tests/` as well as `src/`, and it emits nothing. That is not a
+  // convenience: vitest transpiles without typechecking, so a test file that
+  // stopped typechecking would still pass `pnpm test` and only be caught if
+  // something happened to run `tsc` over it. Including it here is what makes
+  // "tests are not optional at any layer" true for the test code itself.
+  //
+  // The build config is ./tsconfig.build.json, which narrows to `src/` and
+  // emits declarations for the two Vue apps to consume. A test file is outside
+  // that `rootDir`, which is exactly what `rootDir` exists to reject.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "moduleDetection": "force",
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+
+    // The org's strictness bar, matching the two Vue apps.
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "useUnknownInCatchVariables": true
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts", "vitest.config.ts"]
+}

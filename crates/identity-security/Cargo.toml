@@ -1,0 +1,23 @@
+[package]
+name = "identity-security"
+description = "Authenticator gates: OTP, TOTP, passkey, session, token, PKCE, nonce, CSRF and secret-cipher interfaces. Interfaces only."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# Depends on the domain for the types its gates operate on (an AAL, a
+# session, an authenticator). May NOT depend on identity-cloudflare: a
+# security gate that reached for a Worker binding would be untestable off the
+# platform, and "we could not test the token verifier without deploying" is
+# not a position an identity system's security layer may be in.
+[dependencies]
+identity-domain = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

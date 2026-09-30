@@ -1,0 +1,91 @@
+# identity-cloudflare — the Cloudflare Workers adapters: D1, Queues, KV-free
+# secret access, service bindings, rate limiting, request context, error
+# envelopes, logging.
+#
+# THE DEPENDENCY LAW: this is the ONLY crate that may depend on `worker`, and
+# the only one that may know a binding name. Above it, nothing knows what D1 or
+# a Queue is; below it, nothing is allowed to be platform specific. A Worker
+# composition root in `apps/` also names bindings directly — that is wiring, not
+# policy — but no other crate may.
+#
+# The opposite direction is the error this crate exists to prevent: a use case
+# in identity-application that takes a `D1Database` is a use case that cannot be
+# tested without a D1, and `identity-testkit`'s in-memory doubles become
+# impossible. `tooling/scripts/check-architecture.mjs` judges the graph from
+# `cargo metadata`, so the direction cannot be inverted by a Cargo.toml edit.
+
+$schema: https://moonrepo.dev/schemas/moon.json
+
+tags:
+  - rust
+  - crate
+  - adapter
+  - platform
+
+tasks:
+  format:
+    command: "cargo fmt -p identity-cloudflare"
+    options:
+      cache: false
+
+  # `format-check`, not `format:check` — moon 2.5.6 rejects a colon in a
+  # project-level task id. See the note in crates/identity-domain/moon.yml.
+  format-check:
+    command: "cargo fmt -p identity-cloudflare -- --check"
+    options:
+      cache: false
+
+  lint:
+    command: "cargo clippy -p identity-cloudflare --all-targets -- -D warnings"
+    options:
+      cache: false
+
+  typecheck:
+    command: "cargo check -p identity-cloudflare --all-targets"
+    options:
+      cache: false
+
+  test:
+    command: "cargo test -p identity-cloudflare --locked"
+    options:
+      cache: false
+
+  test-unit:
+    command: "cargo test -p identity-cloudflare --locked --lib"
+    options:
+      cache: false
+
+  # ---------------------------------------------------------------------------
+  # HOST TARGET — and here `worker` is a real dependency, which is the whole
+  # point of the difference from the other five.
+  #
+  # `worker` 0.8.7 compiles for the host as well as for wasm32, so this still
+  # would not fail. It stays on the host for the same reason the other five do:
+  # a change in an adapter recompiles one crate instead of the three Workers
+  # that pull it in, and the wasm32 compile happens once, in `identity:build`.
+  # The wasm32 build of THIS crate is a real requirement, because the Workers
+  # link it and it names their bindings — that build is their `build` task, not
+  # this crate's.
+  # ---------------------------------------------------------------------------
+  build:
+    command: "cargo build -p identity-cloudflare --locked"
+    options:
+      cache: false
+
+  dev:
+    # `options.runInCI: false`, not the root file's `local: 'only'` — moon 2.5.6
+    # has no `local` field on a task. Verified: `moon ci` skips this task.
+    command: "cargo run -p identity-cloudflare --locked"
+    options:
+      runInCI: false
+    inputs: []
+    outputs: []
+
+  package:
+    command: "cargo build -p identity-cloudflare --locked --release"
+    options:
+      cache: false
+
+  wrangler-validate:
+    inputs: []
+    outputs: []

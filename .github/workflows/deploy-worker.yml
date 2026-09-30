@@ -1,0 +1,1334 @@
+name: deploy-worker
+
+# REUSABLE: build, upload, smoke test and PROMOTE one Cloudflare Worker
+# Version. Called by `deploy.yml` (staging, every merge to main) and by
+# `deploy-production.yml` (on a release tag), and it is where the two commands
+# that must never be confused are kept apart:
+#
+#   wrangler versions upload                                  -> creates a Version. NO traffic.
+#   wrangler versions deploy --version-id <id> --percentage <p> -> creates a Deployment. Traffic moves.
+#
+# The four stages, and the order `needs` enforces rather than the order they are
+# written in:
+#
+#   1. build_and_upload      upload only; never moves traffic
+#   2. smoke                 the version must answer the contract ITS deployable
+#                            declares: /health and /ready for an Identity Worker,
+#                            the landing page and a generated asset for home-web
+#   3. canary                1% -> 10%, with a health gate between (automatic)
+#   4. promote_to_*          the final percentage — 50% and 100% each behind
+#                            their own `environment: production` approval
+#
+# ---------------------------------------------------------------------------
+# FOUR DEPLOYABLES, THREE SHAPES, ONE PIPELINE
+# ---------------------------------------------------------------------------
+# `home-web` (ADR-0016) is the fourth deployable and the first one that is not
+# an Identity Worker: a Nuxt/Nitro application uploaded to Workers + Assets
+# rather than a Rust Worker compiled to wasm. Three steps in this file therefore
+# branch on the deployable instead of deriving behaviour from the component
+# name, and each branch says which deployable it is for:
+#
+#   the Rust toolchain       Identity Workers only; home-web has no crate
+#   the build step           `identity`/`identity-admin` build a SPA first;
+#                            `identity-jobs` builds the Worker alone;
+#                            `home-web` runs `moon run home-web:package` alone
+#   the smoke test           /health + /ready, or `/` plus a `/_nuxt/` asset
+#
+# The derived convention this file used to apply — "every deployable except
+# identity-jobs has a `@ecoma-io/<component>-web` SPA" — was true only because
+# every deployable happened to be an Identity Worker. Deriving it from the
+# component name meant a fourth deployable inherited a frontend it does not
+# have, and the deploy failed at `pnpm --filter` on a package that was never
+# going to exist. An explicit case fails closed at review time instead.
+#
+# Everything else — the generated config copy, the dry run, the immutable
+# `wrangler versions upload --no-bundle`, the version-id lookup, the promotion
+# jobs and the `always()` cleanup — is SHARED, because those steps concern a
+# Cloudflare Version rather than a language or a framework.
+#
+# ADR-0013 makes that separation a constraint on the SHAPE of this file, not a
+# habit: the upload step and every promotion step are separate steps, the
+# version id is captured between them and passed by name, and there is no code
+# path in this file that builds and promotes in one step. A version that was
+# uploaded and never promoted serves nothing, costs nothing and is still there —
+# which is what makes abandoning a failed canary non-destructive.
+#
+# NO STEP IN THIS FILE CHECKS OUT, BUILDS, TESTS OR PACKAGES ANYTHING DURING A
+# ROLLBACK, because a rollback does not come through here. It comes through
+# `rollback.yml`, whose entire job is the other two commands. If you are reading
+# this file during an incident looking for a way to build, you are in the wrong
+# file, and the reason is ADR-0013: a rebuild is a forward fix, it takes minutes
+# during which the bad version keeps serving, and it re-runs the pipeline you
+# least trust.
+#
+# ---------------------------------------------------------------------------
+# WHAT A GREEN RUN OF THIS WORKFLOW DOES AND DOES NOT MEAN
+# ---------------------------------------------------------------------------
+# It means: a Worker was built from a named commit, uploaded as an immutable
+# Version, smoke-tested, and sent a stated percentage of traffic.
+#
+# It does NOT mean an authentication service works. At platform bootstrap the
+# three Worker composition roots are one-line placeholders (`docs/README.md`,
+# "The three Worker composition roots — DEFERRED"), so a version built today
+# serves no protocol route at all and the smoke test below is written to expect
+# exactly that. The smoke test is therefore NOT an assertion that the Worker
+# serves requests; it is an assertion that the version is reachable and that it
+# answers the way THIS repository's own route table says it answers. When a
+# Worker gains a real /health and /ready, this check starts asserting their
+# content too, and that is the change to make in the same commit that makes the
+# routes answer.
+#
+# A check that cannot run exits non-zero. There is no "skip the smoke test until
+# the Worker exists" branch in this file, and adding one would produce a green
+# run meaning nothing at all.
+
+on:
+  workflow_call:
+    inputs:
+      # The wrangler worker name, which is also the moon project id, the
+      # release-please component and the git tag prefix. One string, four
+      # meanings, deliberately: a tag, a version id and a worker name that can
+      # be compared by eye are worth more than a consistent naming scheme that
+      # includes the language a project happens to be written in.
+      #
+      # "the moon project id" rather than "an alias for it", which is what this
+      # said until the staging deploy failed at `moon run "$WORKER:package"`
+      # with `project_graph::unknown_id`. The three names used to be aliases
+      # declared in the root `moon.yml`, which moon 2.5.6 does not implement;
+      # the deployables are now REGISTERED under these names in
+      # `.moon/workspace.yml`. If you ever see a moon project id spelled
+      # `identity-worker`, that is the crate name and no command will resolve it.
+      #
+      # `home-web` (ADR-0016) is registered in the same file and matches the
+      # same three rules, and it is NOT an Identity Worker — see the header on
+      # what branches on it. The list is spelled out because GitHub Actions has
+      # no enum input type: a `choice`-shaped description is the only
+      # enumeration available, so it has to be the complete one.
+      worker:
+        description: "Repository component name (identity | identity-admin | identity-jobs | home-web): the moon project id, the config directory, and the release tag prefix"
+        required: true
+        type: string
+
+      # The Cloudflare SCRIPT name, which is NOT always the component name.
+      # Production and development use `identity`; staging uses
+      # `identity-staging`, `identity-admin-staging` and `identity-jobs-staging`
+      # (see `environments.*.resources.*.worker` in
+      # `infra-topology/topology.json`). The
+      # suffix is what stops a staging deploy from overwriting production's
+      # default environment, and it is why this cannot be derived from
+      # `worker` inside this file.
+      #
+      # `--name "$WORKER_NAME"` is how every promotion names the Worker it
+      # creates a Deployment against, so getting this wrong promotes the wrong
+      # environment — which is why it is a required input with no default
+      # rather than a computed value. The caller reads it off the config.
+      worker-name:
+        description: "Cloudflare Worker script name, e.g. identity or identity-staging"
+        required: true
+        type: string
+
+      # `development` | `staging` | `production` — the block of
+      # `infra-topology/topology.json` describing this environment, and the
+      # subdirectory the renderer writes it to.
+      environment:
+        description: "topology environment to deploy"
+        required: true
+        type: string
+
+      # The git tag that triggered this run, e.g. `identity-v0.1.0`. This is
+      # the version's identity: it becomes the Cloudflare Version tag, so
+      # "which version had tag X" is a lookup rather than an inference, and a
+      # rollback decision is decidable (docs/operations/deployment-model.md).
+      tag:
+        description: "The release tag being deployed (becomes the Cloudflare Version tag)"
+        required: true
+        type: string
+
+      # The lane name, recorded in every run summary so a person reading a log
+      # during an incident knows which environment a run touched without
+      # inferring it from the Worker name.
+      #
+      # It is a free string rather than an enum because GitHub Actions has no
+      # enum input type, and a `choice`-shaped input that silently accepted any
+      # string anyway would be a fake constraint. It does NOT select
+      # credentials — the caller passes `secrets:` explicitly, which is what
+      # actually stops a staging run from holding the production token
+      # (`docs/security/secrets-management.md`: a staging token must not be able
+      # to write to production).
+      #
+      # It used to claim it prefixed the secret names. It does not, and a
+      # required input that nothing reads is worse than no input: it looks like
+      # a control and is not one.
+      lane:
+        description: "Lane name, recorded in the run summary (staging | production)"
+        required: true
+        type: string
+
+      # Canary ladder for `identity`; ignored for the other two. The caller
+      # passes the percentages it wants WALKED, and this file does not promote
+      # past `requires-approval` without the approval — the steps that need it
+      # are the ones carrying `environment: production`, which is a gate the
+      # runner refuses to pass without a named approver, not an `if:` somebody
+      # can delete in the same pull request.
+      #
+      # Empty for admin and jobs, whose entire ladder is 100% (ADR-0014
+      # constraint 20: they are not on the end-user request path, and their
+      # smoke test is their gate).
+      #
+      # A JSON ARRAY AS A STRING, not `type: array` — GitHub Actions does not
+      # have one. `workflow_call` inputs are `boolean | number | string`, and
+      # an actionlint run against this organisation's other reusable workflows
+      # says so at the definition rather than at the call site, which is the
+      # place it is cheapest to find. `[]` therefore means "no ladder" and
+      # `[1, 10]` means 1% then 10%.
+      canary:
+        description: "JSON array of traffic percentages to walk, e.g. [1,10] (identity only; [] = straight to the final percentage)"
+        required: false
+        default: "[]"
+        type: string
+
+      # The first percentage that needs a human. 50 for `identity` in
+      # production (ADR-0014); unused for everything else.
+      #
+      # It is a separate input rather than the second element of `canary`
+      # because it belongs to a DIFFERENT KIND of step: the canary ladder runs
+      # on this file's own judgement, while this percentage runs on somebody
+      # clicking Approve. Putting an approval-gated percentage in the same array
+      # as the automatic ones would make the boundary a matter of array
+      # ordering, and array ordering is exactly the thing a later commit
+      # rewrites without noticing what it changed.
+      policy-limit-percentage:
+        description: "First percentage that requires a production-environment approval (50 for identity; unused otherwise)"
+        required: false
+        default: 0
+        type: number
+
+      # The percentage this call ends at. 100 for everything, and for `identity`
+      # in production it is the SECOND human gate — the 100% job waits on the
+      # 50% job, so approving 50% is not approving 100% (ADR-0014 step 7).
+      final-percentage:
+        description: "Traffic percentage to end at"
+        required: true
+        type: number
+
+      # Whether a human approves the FINAL step. True only for `identity` in
+      # production, and the approval is enforced by the `environment:`
+      # key on the job below — the input is here so the caller's intent is
+      # visible in one place rather than inferred from which steps ran.
+      requires-approval:
+        description: "Final promotion requires approval on the production environment"
+        required: false
+        default: false
+        type: boolean
+
+      # Cloudflare resource ids, placeholder token -> real value, substituted
+      # into the generated config copy.
+      #
+      # KEPT, AND IT IS ON THE LIST TO DELETE. The config the renderer produces
+      # resolves D1, KV and queue ids by exact logical name against the
+      # Cloudflare API, so after Phase 3 nothing needs a value passed in here:
+      # `reconcile-infra.mjs` writes a descriptor and the renderer consumes it.
+      #
+      # Until then the placeholder mechanism is still the only thing that makes
+      # these ids available at all, and removing it without replacing it would
+      # leave a production deploy binding to literally nothing. The two steps
+      # are one change and Phase 3 makes both.
+      #
+      # A JSON OBJECT AS A STRING, for the same reason `canary` is one:
+      # `workflow_call` has no `object` input type.
+      injections:
+        description: "JSON object of placeholder token -> replacement value, applied to the generated config copy only"
+        required: false
+        default: "{}"
+        type: string
+
+      # The public host the `home-web` smoke test probes, for THIS lane —
+      # `HOME_WEB_STAGING_SMOKE_PROBE_BASE_URL` in staging and
+      # `HOME_WEB_PRODUCTION_SMOKE_PROBE_BASE_URL` in production, passed
+      # through from `vars` by the caller rather than read from this file's own
+      # namespace.
+      #
+      # WHY IT IS AN INPUT AND NOT A REPOSITORY VARIABLE READ HERE. The Identity
+      # Workers read `vars.SMOKE_PROBE_BASE_URL` directly, and a single variable
+      # is the right shape for one deployable: there is one Identity host per
+      # lane. There are now TWO deployables with a public host per lane, so
+      # reading one namespace would send home-web's landing-page check to
+      # whatever host Identity is deployed on. That check would then report a
+      # green run for a public site it never touched, which is the specific
+      # falsehood this repository's honesty rule exists to prevent.
+      #
+      # WHY IT IS NOT A DEFAULT. An empty default that falls back to
+      # `SMOKE_PROBE_BASE_URL` is the same bug wearing a disguise. It fails
+      # loudly instead: an Identity caller leaves it empty and is unaffected; a
+      # `home-web` caller that has not configured its own host gets a non-zero
+      # exit and a message naming the variable to set.
+      #
+      # It is not validated as a URL here. What consumes it validates it, and
+      # `workflow_call` has no way to fail at definition time anyway — so the
+      # honest place for that check is the step that would be misled by a
+      # malformed value.
+      home-smoke-base-url:
+        description: "Public base URL of the home-web deployment in this lane, e.g. the value of HOME_WEB_STAGING_SMOKE_PROBE_BASE_URL; required for home-web, ignored for the Identity Workers"
+        required: false
+        default: ""
+        type: string
+
+    secrets:
+      # The CI deploy token. The ONLY Cloudflare credential this repository
+      # holds, it is what `docs/security/secrets-management.md` calls a "CI
+      # deploy token" and rates as "deploy arbitrary code to production, which
+      # is arbitrary code execution" if leaked. Note WHICH environments hold
+      # it: a token for staging must not be the token that can write to
+      # production, or "staging is a rehearsal" (ADR-0014 step 6) stops being
+      # true.
+      CLOUDFLARE_API_TOKEN:
+        description: "Cloudflare API token for the lane named in `lane`"
+        required: true
+      CLOUDFLARE_ACCOUNT_ID:
+        description: "Cloudflare account id for the lane named in `lane`"
+        required: true
+
+    outputs:
+      version-id:
+        description: "The Cloudflare Version id that was uploaded (and, if promoted, promoted)"
+        value: ${{ jobs.build_and_upload.outputs.version-id }}
+      # Both promotion variants report `percentage`, and BOTH have to be read:
+      # `promote_to_final.outputs` is an empty string on the approval path, and
+      # an output that silently reads empty on half the runs is a caller that
+      # learns to ignore it.
+      final-percentage:
+        description: "The traffic percentage this call actually ended at"
+        value: ${{ jobs.promote_to_final.outputs.percentage || jobs.promote_to_full_percentage.outputs.percentage }}
+
+# `permissions: contents: read` is the only grant this workflow needs as a
+# whole. `build_and_upload` and `promote_to_final` re-declare it at job level
+# because a job-level block REPLACES this one rather than merging with it, and
+# omitting it there would cost those jobs their read access. Nothing here
+# writes to the repository, opens a pull request, or pushes a tag: a deploy
+# that also pushed would be a release (ADR-0012), and those are two acts.
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Stage 1 of 4: build, then upload. This job's last command is
+  # `wrangler versions upload`, which sends NO TRAFFIC — ever — and the job
+  # says so in its own summary so a reader who lands here does not have to know
+  # that to find out. Everything downstream depends on the version id it
+  # outputs, and no promotion can happen without one (ADR-0012 step 5: there is
+  # no path that builds and promotes in one step, because that path would make
+  # every promotion a rebuild and destroy the meaning of a version id).
+  # ---------------------------------------------------------------------------
+  build_and_upload:
+    name: Build and upload ${{ inputs.worker }} (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    outputs:
+      # The Version id, read back from Cloudflare by the tag we just applied
+      # rather than scraped from wrangler's log line. `wrangler versions
+      # upload` has no `--json`; it prints `Worker Version ID: <id>` on stdout
+      # among colour codes and timing output. `wrangler versions list --json`
+      # DOES emit structured output — an array whose elements carry `id`,
+      # `metadata.created_on` and `annotations["workers/tag"]` — so resolving
+      # the id by tag is both unambiguous and the same lookup an operator does
+      # when they need to roll back (docs/operations/rollback.md, "The version
+      # that carried a known-good tag").
+      version-id: ${{ steps.resolve.outputs.version-id }}
+    env:
+      WORKER: ${{ inputs.worker }}
+      LANE: ${{ inputs.lane }}
+      ENVIRONMENT: ${{ inputs.environment }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      # wrangler reads the token from the environment. Passed through `env`
+      # rather than a `--var` so the token never appears in a command line, in
+      # a process listing, or in a log line.
+      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      # The wasm target is named explicitly rather than left to whatever the
+      # image ships, because a runner whose default host target happened to
+      # match would build a native binary that wrangler then refuses to upload —
+      # and the failure would read as a config error rather than a missing
+      # target. No `rust-toolchain.toml` exists in this repository by org
+      # convention: the ambient stable toolchain IS the toolchain, and the MSRV
+      # is enforced by `rust-version` in the workspace Cargo.toml.
+      #
+      # NOT INSTALLED FOR `home-web`. ADR-0016 makes home-web a Nuxt/Nitro
+      # application with no crate, and there is no `apps/home-web/worker/` to
+      # compile — so a Rust toolchain here would install ~200MB, warm a cargo
+      # cache that nothing reads, and, worse, imply that home-web is a Rust
+      # deployable in the one place a reader is checking exactly that. The
+      # guard is the component name for the same reason the build step below
+      # is: three shapes, one list of names, checked at review time.
+      - name: Set up the Rust toolchain (Identity Workers only)
+        if: inputs.worker != 'home-web'
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+      - name: Cache the Rust build (Identity Workers only)
+        if: inputs.worker != 'home-web'
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: ". -> target"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Build through the task graph, never through `wrangler deploy` or a
+      # direct cargo invocation: CI and a laptop then produce the same artifact
+      # from the same task, and the moon project that owns a task is the moon
+      # project that answers for it.
+      #
+      # `package`, not `build`: the per-Worker `package` task is the release
+      # wasm artefact (`cargo build --release --target wasm32-unknown-unknown`),
+      # and a version that gets promoted must be the release build, not a debug
+      # one. `build` is the same target without `--release`.
+      #
+      # The web app is built FIRST and deliberately by name. `assets.directory`
+      # points the Worker at `apps/<app>/web/dist`, so a version built before
+      # the SPA exists is a version that serves an API and no UI — a half of
+      # the release unit ADR-0015 says may not exist. `identity` ships the
+      # end-user SPA and `identity-admin` the operator console; `identity-jobs`
+      # has no frontend, and asking for one it does not have is a typo, not a
+      # no-op.
+      #
+      # A moon task, because both web apps have their own `moon.yml` now. The
+      # reason it is one rather than `pnpm --filter` is recorded on the same
+      # line in ci.yml, and it applies here with more force: `identity-web:build`
+      # carries `deps: ["^build"]`, which is what compiles
+      # `@ecoma-io/shared-i18n`. Without it a deploy runs on a clean runner
+      # where that package's gitignored `dist/` does not exist, and the build
+      # dies on `Rolldown failed to resolve import "@ecoma-io/shared-i18n"` —
+      # after two approvals, at whatever hour the promotion was run.
+      #
+      # ---- `home-web` (ADR-0016) ------------------------------------------
+      # The third case, and the reason the first two are not derived from the
+      # component name. home-web is a Nuxt/Nitro application: its release
+      # artefact is the `.output/` tree that `home-web:package` builds and
+      # verifies, and there is no Rust Worker and no separate SPA to build
+      # before it. So the SPA branch is skipped and exactly one moon task runs.
+      #
+      # What home-web must NOT do here is inherit the `@ecoma-io/<component>-
+      # web` convention: `@ecoma-io/home-web-web` is not a package, and a
+      # `pnpm --filter` on a name that resolves to nothing fails the deploy
+      # before a version exists. The `case` also turns an unknown component
+      # into a loud failure rather than a deploy that quietly built nothing and
+      # uploaded whatever the previous step left behind.
+      - name: Build the release unit (one deployable, one artefact)
+        env:
+          # An explicit `case` on a validated list, rather than the boolean
+          # chain this used to derive. GitHub Actions has no `switch`, so the
+          # shell is where the three shapes have to be spelled out — and a
+          # shell `case` with a `*)` arm that exits non-zero is the only version
+          # of this that fails closed on a fifth deployable.
+          #
+          # Each arm echoes what it is about to build, so a run summary says
+          # which shape ran without anybody reading the branch.
+          IS_HOME_WEB: ${{ inputs.worker == 'home-web' && 'true' || 'false' }}
+          HAS_WEB_APP: ${{ inputs.worker != 'identity-jobs' && inputs.worker != 'home-web' && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          case "$WORKER" in
+            home-web)
+              echo "home-web is a Nuxt/Nitro application (ADR-0016) — building .output/ only, no Rust Worker and no separate SPA."
+              pnpm exec moon run home-web:package
+              ;;
+            identity|identity-admin|identity-jobs)
+              if [ "$HAS_WEB_APP" = "true" ]; then
+                pnpm exec moon run "$WORKER-web:build"
+              else
+                echo "::notice::$WORKER ships no frontend (ADR-0015) — building the Worker only."
+              fi
+              pnpm exec moon run "$WORKER:package"
+              ;;
+            *)
+              echo "::error::unknown deployable '$WORKER'. This workflow deploys identity, identity-admin, identity-jobs and home-web — a fifth needs an ADR and a case in this file, per ADR-0002 as amended by ADR-0016."
+              exit 1
+              ;;
+          esac
+
+      # ---- the generated config copy -------------------------------------
+      # Never committed, never uploaded as an artefact. It exists only for the
+      # lifetime of this job, in the runner's temp directory, and it is the
+      # only place a real Cloudflare id ever appears (constraint 27). The
+      # substitution is a literal `PLACEHOLDER` -> value replacement over the
+      # text, deliberately NOT a JSON re-serialisation: the tracked configs are
+      # JSONC with comments that carry the boundary rules as data, and parsing
+      # and re-emitting them would strip the very comment that says "there is
+      # no `d1_databases` block here, and adding one needs an ADR".
+      #
+      # The script exits non-zero if a declared placeholder is still present
+      # after substitution, and also if the result is not loadable by wrangler.
+      # A config that silently kept a `PRODUCTION_...` token would upload bytes
+      # bound to nothing and then get promoted, and the failure would surface
+      # as a Worker that serves errors at 100% of production traffic.
+      - name: Render the wrangler config from the topology
+        env:
+          INJECTIONS_JSON: ${{ inputs.injections }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          DEPLOYABLE: ${{ inputs.worker }}
+        run: |
+          set -euo pipefail
+          # There is no tracked config to copy. `pnpm infra:render` projects
+          # infra-topology/topology.json into this lane's directory, and wrangler
+          # resolves `main` and `assets.directory` relative to the config it is
+          # given — so the renderer already writes them relative to the repo
+          # root and the file has to stay where it was put.
+          #
+          # `--stage offline`, because at this point the placeholders are still
+          # the source of every real id (see the `injections` input). What this
+          # job validates is therefore the SHAPE: the name, the routes, the
+          # bindings, the placement and the compatibility settings are exactly
+          # what a later deploy uploads, and only the ids are pending.
+          node tooling/scripts/render-wrangler-config.mjs \
+            --stage offline \
+            --environment "$ENVIRONMENT" \
+            --deployable "$DEPLOYABLE" \
+            --out-dir ".generated" \
+            --write
+          CONFIG_DIR=".generated/cloudflare/$ENVIRONMENT/$DEPLOYABLE"
+          GENERATED="$CONFIG_DIR/wrangler.jsonc"
+
+          if [ "$INJECTIONS_JSON" != "{}" ] && [ -n "$INJECTIONS_JSON" ]; then
+            python3 - "$GENERATED" "$INJECTIONS_JSON" <<'PY'
+          import json, sys
+          path, raw = sys.argv[1], sys.argv[2]
+          text = open(path, encoding="utf-8").read()
+          for placeholder, value in json.loads(raw).items():
+              if not isinstance(value, str) or not value:
+                  # An empty value would leave a syntactically valid config
+                  # with an empty id, which Cloudflare accepts and which
+                  # points at nothing. Refusing here is the difference between
+                  # a failed deploy and a deployed Worker bound to a blank.
+                  sys.exit(f"::error::no value supplied for placeholder {placeholder!r}")
+              text = text.replace(placeholder, value)
+          leftovers = sorted(
+              w for w in text.replace('"', " ").replace(",", " ").split()
+              if w.isupper() and w.startswith(("PRODUCTION_", "STAGING_", "DEVELOPMENT_"))
+          )
+          if leftovers:
+              sys.exit("::error::unsubstituted placeholders remain: " + ", ".join(leftovers))
+          open(path, "w", encoding="utf-8").write(text)
+          print("injected and verified")
+          PY
+          else
+            echo "::notice::no injections for this lane; the rendered config declares no unresolved id."
+          fi
+
+          # `wrangler deploy --dry-run` compiles and runs wrangler's own
+          # validation against the generated copy WITHOUT uploading and
+          # WITHOUT changing any traffic. If the config is unreadable or
+          # inconsistent, this fails here — before a version exists — rather
+          # than at a promotion two approvals later.
+          pnpm exec wrangler deploy --dry-run -c "$GENERATED" || {
+            echo "::error::the generated wrangler config did not pass wrangler's own validation."
+            exit 1
+          }
+
+      # ---- the upload ------------------------------------------------------
+      # THE COMMAND THAT CREATES A VERSION AND SENDS NO TRAFFIC. Not
+      # `wrangler deploy`, which creates a Deployment and immediately sends
+      # 100% of traffic — the one command in this file that would put an
+      # unreviewed binary on the production request path.
+      #
+      # `--tag` is the git tag, which is the whole traceability story: a
+      # version's Cloudflare tag is its git tag, so "which version had tag X"
+      # is a lookup and a rollback decision is decidable. `--message` carries
+      # the same string plus the commit, so the version describes itself in the
+      # Cloudflare dashboard without a git checkout.
+      #
+      # `--no-bundle` is load-bearing. The build already happened through moon
+      # in the step above; without it wrangler would run the config's
+      # `build.command` a second time — a `cargo install` plus a fresh
+      # `worker-build --release` — producing a SECOND set of bytes from the
+      # same source, and uploading the one nobody reviewed. The bytes that get
+      # promoted must be the bytes that got tested.
+      - name: Upload a version (NO TRAFFIC)
+        id: upload
+        env:
+          CONFIG_PATH: .generated/cloudflare/${{ inputs.environment }}/${{ inputs.worker }}/wrangler.generated.jsonc
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler versions upload \
+            --config "$CONFIG_PATH" \
+            --no-bundle \
+            --tag "$RELEASE_TAG" \
+            --message "$RELEASE_TAG ($GITHUB_SHA) uploaded by .github/workflows/deploy-worker.yml"
+          {
+            echo "### Uploaded a version — no traffic was sent"
+            echo ""
+            echo "A Cloudflare **Version** now exists. Nothing serves it yet."
+            echo "Promoting it is a separate act, below and in the promotion jobs,"
+            echo "and a version that is uploaded and never promoted is the normal"
+            echo "state of a version that failed its smoke test."
+            echo ""
+            echo "- Worker: \`$WORKER\`"
+            echo "- Environment: \`$ENVIRONMENT\` (lane \`$LANE\`)"
+            echo "- Version tag: \`$RELEASE_TAG\`"
+            echo "- Commit: \`$GITHUB_SHA\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Resolve the Version id from the tag, as documented above.
+      - name: Resolve the version id from its tag
+        id: resolve
+        run: |
+          set -euo pipefail
+          JSON="$(pnpm exec wrangler versions list \
+            --config ".generated/cloudflare/$ENVIRONMENT/$WORKER/wrangler.generated.jsonc" \
+            --json)"
+          VERSION_ID="$(printf '%s' "$JSON" | python3 -c '
+          import json, sys
+          tag = sys.argv[1]
+          versions = json.load(sys.stdin)
+          for version in versions:
+              annotations = version.get("annotations") or {}
+              if annotations.get("workers/tag") == tag:
+                  print(version["id"])
+                  break
+          ' "$RELEASE_TAG")"
+          if [ -z "$VERSION_ID" ]; then
+            echo "::error::no uploaded version carries the tag $RELEASE_TAG. The upload step reported success, so this is a version-listing problem rather than a build problem — and the run is failing rather than proceeding with an empty id."
+            exit 1
+          fi
+          echo "version-id=$VERSION_ID" >> "$GITHUB_OUTPUT"
+          echo "Resolved $RELEASE_TAG -> $VERSION_ID"
+          {
+            echo ""
+            echo "- Version id: \`$VERSION_ID\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The generated copy carries real Cloudflare ids. Deleting it in the same
+      # job means it never reaches the runner's artefact upload, the runner's
+      # cache, or a post-job shell history — and `always()` is correct here
+      # because the copy exists from the moment it is written, so a failure
+      # between writing it and reaching this step is exactly when leaving it
+      # behind would matter.
+      - name: Delete the generated config copy
+        if: always()
+        run: rm -rf ".generated/cloudflare/$ENVIRONMENT/$WORKER"
+
+  # ---------------------------------------------------------------------------
+  # Stage 2 of 4: the automatic canary ladder, walked one percentage at a time.
+  #
+  # The first job in this file that can change what a Worker serves, and
+  # every step in it is `wrangler versions deploy --version-id <id>
+  # --percentage <p>` — never a build. A failed ladder is abandoned by
+  # promoting a different version id, and an uploaded-but-not-promoted version
+  # costs nothing and is still there (ADR-0013).
+  # ---------------------------------------------------------------------------
+  canary:
+    name: Canary ${{ inputs.worker }} (${{ inputs.environment }})
+    # No canary steps for the direct-to-100% lane. `identity-admin` and
+    # `identity-jobs` are uploaded, smoke tested and promoted at 100% with no
+    # manual approval at any point (ADR-0014 constraint 20), and a job named
+    # "Canary" that runs zero steps would be a name claiming a ladder that
+    # does not exist.
+    #
+    # `fromJson(inputs.canary) != fromJson('[]')` rather than a length test:
+    # `length()` does not exist in the expression language actionlint enforces
+    # here, and `inputs.canary != '[]'` would be a string comparison pretending
+    # to be a collection one. Comparing the parsed collection against a parsed
+    # empty array is the honest test and needs no helper.
+    if: ${{ fromJson(inputs.canary) != fromJson('[]') }}
+    # `needs: smoke`, not just `build_and_upload`. ADR-0014's ladder is
+    # upload -> smoke test -> 1%, and `needs` is the only thing that enforces
+    # that order. With `needs: [build_and_upload]` alone, GitHub would run this
+    # job in parallel with `smoke` — two runners racing, and nothing stopping
+    # the 1% promotion from finishing first. A canary that starts before the
+    # version has answered /health has not been smoke-tested at the moment it
+    # began serving, which is the one thing the smoke test exists to guarantee.
+    needs: [build_and_upload, smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      WORKER: ${{ inputs.worker }}
+      LANE: ${{ inputs.lane }}
+      WORKER_NAME: ${{ inputs.worker-name }}
+      ENVIRONMENT: ${{ inputs.environment }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      VERSION_ID: ${{ needs.build_and_upload.outputs.version-id }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # The Identity Workers' live host, and home-web's own. Same two-variable
+      # rule as the smoke job and for the same reason: the health gate observes
+      # a MIX of old and new bytes, so pointing home-web's gate at Identity's
+      # host would measure the wrong deployment's traffic and report the result
+      # as home-web's.
+      SMOKE_HOST: ${{ vars.SMOKE_PROBE_BASE_URL }}
+      HOME_SMOKE_BASE_URL: ${{ inputs.home-smoke-base-url }}
+      IS_HOME_WEB: ${{ inputs.worker == 'home-web' && 'true' || 'false' }}
+    steps:
+      # Checkout and toolchain for wrangler only. No moon task, no web app, no
+      # cargo: this job names an already-uploaded Version, and the guarantee it
+      # rests on is that the bytes it sends traffic to are the bytes that were
+      # built, uploaded and smoke-tested. Building here would make every canary
+      # step a rebuild (ADR-0013).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Promote each step of the ladder, with a health gate between
+        env:
+          LADDER: ${{ inputs.canary }}
+        run: |
+          set -euo pipefail
+
+          # Which host this lane's gate observes. Resolved ONCE, before the
+          # ladder starts, and it fails closed: a canary that cannot be gated
+          # must not run at all, because the alternative is a ladder that
+          # promotes percentages with nothing observing them.
+          #
+          # And which ROUTE. home-web has no /health (ADR-0016: it is a public
+          # site, not an Identity Worker), so probing it there would fail a
+          # correct deployment at 1% and abandon a good version. Its gate is
+          # `/`, which is the same liveness question one path deeper: does the
+          # host answer at all while serving this percentage.
+          #
+          # The gate is a LIVENESS gate, not the smoke test. It answers "is the
+          # host responding", not "did we deploy the right bytes" — the smoke
+          # job and the version-id lookup answer that, and ADR-0014 step 1 is
+          # explicit that a failed probe is an answer, not a delay.
+          if [ "$IS_HOME_WEB" = "true" ]; then
+            if [ -z "$HOME_SMOKE_BASE_URL" ]; then
+              echo "::error::no home-web health-gate host is configured for the '$LANE' lane (expected the repository variable passed as home-smoke-base-url). The ladder is not walked: a canary with no gate is not a canary. Set the variable and dispatch again; nothing has been promoted."
+              exit 1
+            fi
+            PROBE_BASE_URL="${HOME_SMOKE_BASE_URL%/}"
+            PROBE_ROUTE="/"
+          else
+            if [ -z "$SMOKE_HOST" ]; then
+              echo "::error::no smoke-probe host is configured for this lane, so the health gate cannot run. A gate that cannot run is not a pass; the ladder stops here rather than promoting blind."
+              exit 1
+            fi
+            PROBE_BASE_URL="${SMOKE_HOST%/}"
+            PROBE_ROUTE="/health"
+          fi
+          echo "Health gate probes ${PROBE_BASE_URL}${PROBE_ROUTE}"
+
+          printf '%s' "$LADDER" | python3 -c '
+          import json, sys
+          for percentage in json.load(sys.stdin):
+              print(percentage)
+          ' | while read -r PERCENTAGE; do
+              echo "::group::promoting $WORKER to ${PERCENTAGE}% of traffic (version $VERSION_ID)"
+              # `--name`, not `--config`: see `promote_to_final`. A Deployment
+              # is a routing rule over a Worker name and an already-uploaded
+              # Version id; the bindings went into the version at upload and
+              # cannot be changed here. Naming a config would also mean carrying
+              # a file with real Cloudflare ids across a job boundary for an
+              # operation that never reads them.
+              pnpm exec wrangler versions deploy \
+                --name "$WORKER_NAME" \
+                --version-id "$VERSION_ID" \
+                --percentage "$PERCENTAGE" \
+                --message "release $RELEASE_TAG at ${PERCENTAGE}%" \
+                --yes
+              echo "::endgroup::"
+
+              # THE HEALTH GATE. It runs between steps and ABORTS the ladder on
+              # a failed probe, because a failed probe is an answer and not a
+              # delay (ADR-0014 step 1). The failures it exists to catch are
+              # the ones that only appear with real traffic: a cache that was
+              # warm in staging and is cold here, a rate limiter that behaves
+              # differently at production volume.
+              #
+              # It probes `$PROBE_BASE_URL` — the lane's LIVE host — and NOT the
+              # version preview URL, and the distinction is the honest one: at a
+              # canary percentage the host is genuinely serving a mix of the
+              # new and old version, and that mix is precisely what the gate
+              # exists to observe. A probe against a preview URL would measure
+              # only the new version and would pass for a deployment that fails
+              # the moment it carries production-shaped traffic, which is the
+              # failure the ladder is built to catch.
+              #
+              # `sleep` before the first probe is not politeness. Cloudflare
+              # propagates a Deployment change at the edge over a short
+              # window, and a probe fired in the first second can hit a POP
+              # still routing to the old version and report a false green —
+              # which is the exact failure a health gate must not have.
+              echo "::group::health gate at ${PERCENTAGE}%"
+              sleep 20
+              ATTEMPTS=12
+              OK=0
+              for attempt in $(seq 1 "$ATTEMPTS"); do
+                if curl --fail --silent --show-error --max-time 10 \
+                     -H 'Cache-Control: no-cache' \
+                     "${PROBE_BASE_URL}${PROBE_ROUTE}" > /dev/null; then
+                  echo "  ${PROBE_ROUTE} answered on attempt ${attempt}"
+                  OK=1
+                  break
+                fi
+                echo "  ${PROBE_ROUTE} did not answer on attempt ${attempt}; retrying"
+                sleep 10
+              done
+              if [ "$OK" -ne 1 ]; then
+                echo "::error::health gate failed at ${PERCENTAGE}% after $ATTEMPTS attempts. Abandoning the ladder — the uploaded version is NOT promoted further and is still there, un-promoted, for inspection (ADR-0013). Rolling back is `rollback.yml`; it is a promotion of an existing version id and never rebuilds."
+                exit 1
+              fi
+              echo "::endgroup::"
+            done
+
+          # The percentage the ladder ended at, not the ladder itself: `$LADDER`
+          # is the JSON array `[1,10]`, and printing "$LADDER%" would put
+          # `[1,10]%` in a summary a human reads during an incident.
+          ENDED_AT="$(printf '%s' "$LADDER" | python3 -c 'import json, sys; print(json.load(sys.stdin)[-1])')"
+          {
+            echo "### Canary complete"
+            echo ""
+            echo "- \`$WORKER\` is at **${ENDED_AT}%** on version \`$VERSION_ID\`"
+            echo "- The ladder stops here. Promotion past this point is a separate"
+            echo "  job with its own approval, because the decision to make a new"
+            echo "  version the majority of production traffic is a human's."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # The smoke test. Separate from the canary job on purpose: it must be able to
+  # run against a version that is NOT serving any traffic, which is the only
+  # state in which a smoke test is safe to run at all. It therefore runs
+  # between the upload and every promotion, and a failure here stops the
+  # pipeline before anything serves.
+  #
+  # ---------------------------------------------------------------------------
+  # WHAT THIS PROBES, AND WHAT IT DOES NOT
+  # ---------------------------------------------------------------------------
+  # It probes `$SMOKE_HOST`, which is the LANE'S LIVE HOST (`vars.SMOKE_PROBE_
+  # BASE_URL`), NOT the version preview URL. Two consequences, and this file
+  # states both rather than letting a reader assume the stronger one:
+  #
+  #   1. This job is not a preview test. It cannot tell a freshly uploaded,
+  #      unpromoted version from whatever the host was serving a moment ago.
+  #      The upload is verified by `wrangler versions upload` exiting zero and
+  #      by the version-id resolving from its tag — not by this probe.
+  #   2. The canary health gate below is the one that DOES observe new bytes,
+  #      because a canary percentage routes a real share of requests to them.
+  #
+  # That division is deliberate and pre-existing. The comment this replaces
+  # claimed the smoke test probed the preview URL, which the code beneath it
+  # never did; the code is the truthful part and the comment was the defect.
+  # Fixing the comment rather than the code is not a judgement that the live
+  # host is the right probe — it is the smaller change, and the alternative is a
+  # rewrite of Identity Workers' deployment-verification behaviour that belongs
+  # in its own decision. It is reported as a defect rather than absorbed here;
+  # see `docs/operations/deployment-model.md`.
+  #
+  # ---------------------------------------------------------------------------
+  # TWO CONTRACTS, ONE PER DEPLOYABLE SHAPE
+  # ---------------------------------------------------------------------------
+  #   Identity Workers: /health and /ready must both answer 200
+  #   home-web:        / must answer 200 with the landing page, and one
+  #                    emitted `/_nuxt/` client asset must be served
+  #
+  # home-web serves no /health and no /ready — it is a public site, not an
+  # Identity Worker (ADR-0016), and it holds no readiness state to report.
+  # Probing it for those routes would fail a correct deployment for the crime
+  # of not being a different deployable.
+  #
+  # The home-web branch is the REMOTE mirror of
+  # `apps/home-web/tests/worker-smoke.test.mjs`, which asserts the same three
+  # things against a local Worker runtime. A weaker remote check would let a
+  # deployment pass here that the repository's own test rejects locally, and
+  # the two drifting apart is how a green pipeline starts meaning less than its
+  # test suite.
+  # ---------------------------------------------------------------------------
+  smoke:
+    name: Smoke test ${{ inputs.worker }} (${{ inputs.environment }})
+    needs: build_and_upload
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      WORKER: ${{ inputs.worker }}
+      LANE: ${{ inputs.lane }}
+      ENVIRONMENT: ${{ inputs.environment }}
+      VERSION_ID: ${{ needs.build_and_upload.outputs.version-id }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # The Identity Workers' live host. Read from the repository's own
+      # namespace here rather than passed by the caller, because it predates
+      # the second deployable and changing it would touch all three Identity
+      # callers for no reason.
+      SMOKE_HOST: ${{ vars.SMOKE_PROBE_BASE_URL }}
+      # home-web's own host, per lane, passed by the caller. It is NOT a
+      # fallback to `SMOKE_HOST`: an absent value is a non-zero exit in the
+      # step below, because probing the Identity host with a landing-page
+      # assertion would report a green run for a site it never reached.
+      HOME_SMOKE_BASE_URL: ${{ inputs.home-smoke-base-url }}
+      IS_HOME_WEB: ${{ inputs.worker == 'home-web' && 'true' || 'false' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: The version must answer this deployable's smoke contract
+        run: |
+          set -euo pipefail
+
+          # ---- which host, and why the absence is fatal -------------------
+          # Two variables, two deployables, and no fallback between them. The
+          # Identity Workers read the lane's live host; home-web reads the host
+          # its own caller passed. An empty value in EITHER case exits
+          # non-zero, because a check that cannot run is not a pass (AGENTS.md),
+          # and because an empty home-web value that silently became
+          # `$SMOKE_HOST` would assert a landing page against Identity's host
+          # and report a green run for a public site it never reached.
+          if [ "$IS_HOME_WEB" = "true" ]; then
+            if [ -z "$HOME_SMOKE_BASE_URL" ]; then
+              echo "::error::no home-web smoke host is configured for the '$LANE' lane. Set the repository variable this job's caller passes as home-smoke-base-url (HOME_WEB_STAGING_SMOKE_PROBE_BASE_URL for staging, HOME_WEB_PRODUCTION_SMOKE_PROBE_BASE_URL for production) and dispatch again. This check will NOT fall back to SMOKE_PROBE_BASE_URL: that host belongs to the Identity Workers, and probing it would make this check report on a deployment it did not test."
+              exit 1
+            fi
+            HOST="$HOME_SMOKE_BASE_URL"
+          else
+            if [ -z "$SMOKE_HOST" ]; then
+              # Loudly, and non-zero. A missing probe host is a check that cannot
+              # run, and AGENTS.md is explicit that one exits non-zero rather than
+              # reporting a success it did not earn. The fix is a repository
+              # variable, not an edit to this check.
+              echo "::error::no smoke-probe host is configured for this lane (expected the SMOKE_PROBE_BASE_URL repository variable to be set). This check cannot run, and a check that cannot run is not a pass."
+              exit 1
+            fi
+            HOST="$SMOKE_HOST"
+          fi
+          # A trailing slash would make "${HOST}/health" a double slash, which
+          # some hosts 404 and some redirect. Normalised here rather than
+          # documented as a requirement on the variable's author.
+          HOST="${HOST%/}"
+          echo "Probing $HOST for $WORKER version $VERSION_ID (lane $LANE)"
+
+          # ---- home-web: the landing page and an emitted client asset -----
+          # These three assertions are the remote mirror of
+          # `apps/home-web/tests/worker-smoke.test.mjs`, and they are
+          # deliberately the same three, not a reduced remote edition:
+          #
+          #   1. `/` answers 200
+          #   2. the HTML carries the landing page's stable markers
+          #   3. an emitted `/_nuxt/` asset is served, as nonempty JavaScript
+          #
+          # (2) is what makes this a smoke test rather than a reachability
+          # check: a 200 from an error page, a redirect to a login wall, or an
+          # empty shell all satisfy (1). The markers are the document `<title>`
+          # and the one line of copy that identifies the product; if the landing
+          # page is redesigned and those change, THIS step fails in the same
+          # commit that changes them, which is the intended coupling.
+          #
+          # (3) is the assertion that catches the failure mode nobody tests for:
+          # an `.output/public` that did not make it into the uploaded asset
+          # bundle. The HTML would still render — it is server-rendered — while
+          # every client script 404s, so the site would be navigable and inert.
+          # That is exactly the half-built state that produces no error in any
+          # other check in this workflow.
+          if [ "$IS_HOME_WEB" = "true" ]; then
+            # `|| true`, NOT `|| echo 000`. `curl --write-out '%{http_code}'`
+            # already prints `000` when it cannot connect, so the `|| echo 000`
+            # this replaced appended a SECOND 000 and reported the failure as
+            # `HTTP 000000` — a status no server produced. It failed closed
+            # either way, so this was never a wrong verdict; it was a wrong
+            # diagnostic in the exact line an operator reads during an incident.
+            STATUS="$(curl --silent --show-error --max-time 20 \
+              -o /dev/null --write-out '%{http_code}' \
+              -H 'Cache-Control: no-cache' \
+              "${HOST}/" || true)"
+            echo "  / -> HTTP ${STATUS}"
+            if [ "$STATUS" != "200" ]; then
+              echo "::error::home-web answered / with HTTP ${STATUS}, not 200. The version is uploaded but NOT promoted. Fix the landing page and cut a new release — do not promote this one (ADR-0013: a rebuild is a forward fix, not a rollback)."
+              exit 1
+            fi
+
+            # Two temp files, both removed on every exit path including the
+            # error ones: the HTML is needed twice (markers, then the asset
+            # path) and the headers are read after the body is fetched.
+            LANDING_HTML="$(mktemp)"
+            ASSET_BODY="$(mktemp)"
+            ASSET_HEADERS="$(mktemp)"
+            cleanup() { rm -f "$LANDING_HTML" "$ASSET_BODY" "$ASSET_HEADERS"; }
+            trap cleanup EXIT
+
+            curl --silent --show-error --fail --max-time 20 \
+              -H 'Cache-Control: no-cache' \
+              -o "$LANDING_HTML" "${HOST}/"
+
+            # Asserted BY NAME, so a failure says which marker is missing rather
+            # than only that the body did not match. These are the same two
+            # markers `apps/home-web/tests/worker-smoke.test.mjs` asserts, and
+            # the two must change together.
+            for MARKER in '<title>Ecoma</title>' 'Fair-code labor OS'; do
+              if ! grep -qF -- "$MARKER" "$LANDING_HTML"; then
+                echo "::error::home-web's landing page did not contain the marker ${MARKER}. The page answered 200, so it is being served — but it is not the landing page this repository ships. If the landing page was redesigned, update this check and apps/home-web/tests/worker-smoke.test.mjs in the same commit (docs/operations/deployment-model.md owns the contract)."
+                exit 1
+              fi
+            done
+            echo "  landing page markers present"
+
+            # Extract the FIRST emitted client asset path from the rendered
+            # HTML, exactly as the local test's regex does (`<script src=...>`
+            # only — an asset referenced from a stylesheet or a preload would
+            # answer with a content type this check does not accept, and the
+            # JavaScript assertion below is the point of the whole step).
+            #
+            # `head -n 1` closes the pipe, which under `set -o pipefail` makes
+            # grep exit 141 (SIGPIPE) — so `|| true` is required here rather
+            # than defensive, and the emptiness check below is what actually
+            # decides pass or fail. A `pipefail` mistake in this step would
+            # otherwise abort a run over a successful probe.
+            ASSET_PATH="$(grep -oE '<script[^>]+src="[^"]*/_nuxt/[^"]+"' "$LANDING_HTML" \
+              | head -n 1 | sed -E 's/.*src="([^"]*)".*/\1/' || true)"
+            if [ -z "$ASSET_PATH" ]; then
+              echo "::error::home-web's landing page contained no emitted Nuxt client asset (a <script src=\".../_nuxt/...\"> tag). The HTML rendered, so the server is up, but the client bundle is missing from the asset bundle — which is a deployment that serves an inert page."
+              exit 1
+            fi
+            echo "  emitted client asset: ${ASSET_PATH}"
+
+            ASSET_STATUS="$(curl --silent --show-error --max-time 20 \
+              -o "$ASSET_BODY" --dump-header "$ASSET_HEADERS" \
+              --write-out '%{http_code}' "${HOST}${ASSET_PATH}" || true)"
+            echo "  ${ASSET_PATH} -> HTTP ${ASSET_STATUS}"
+            if [ "$ASSET_STATUS" != "200" ]; then
+              echo "::error::home-web's emitted client asset ${ASSET_PATH} answered HTTP ${ASSET_STATUS}, not 200. The landing page renders but its JavaScript does not load. The version is uploaded but NOT promoted."
+              exit 1
+            fi
+
+            CONTENT_TYPE="$(grep -i '^content-type:' "$ASSET_HEADERS" | tail -n 1 | tr -d '\r')"
+            if ! printf '%s' "$CONTENT_TYPE" | grep -qi 'javascript'; then
+              echo "::error::home-web's emitted client asset ${ASSET_PATH} was served as '${CONTENT_TYPE:-no content type}', not JavaScript. An empty 200 on an asset request is not an asset."
+              exit 1
+            fi
+            ASSET_BYTES="$(wc -c < "$ASSET_BODY" | tr -d ' ')"
+            if [ "$ASSET_BYTES" -eq 0 ]; then
+              echo "::error::home-web's emitted client asset ${ASSET_PATH} was served as an empty 200. The asset exists in the bundle but has no bytes."
+              exit 1
+            fi
+            echo "  content-type: ${CONTENT_TYPE#*: }"
+            echo "  bytes: ${ASSET_BYTES}"
+            echo "home-web served its landing page and a nonempty JavaScript client asset on version $VERSION_ID."
+            exit 0
+          fi
+
+          # ---- Identity Workers: /health and /ready ------------------------
+          # What is asserted, and why it is not more: `Route::is_implemented()`
+          # in crates/identity-oidc returns true for /health and /ready and
+          # false for every protocol route, and the identity Worker dispatches
+          # on that same table. So a 2xx from /health and /ready is the contract
+          # this repository makes TODAY; anything stronger would be a test
+          # asserting a capability that does not exist, which is the one thing
+          # AGENTS.md forbids outright.
+          #
+          # A 200 from /ready means the Worker is up and answered. It does NOT
+          # mean the instance can authenticate anyone: /ready's body carries
+          # `ready: false` and `authentication: "not_implemented"` alongside its
+          # 200, and that distinction is the point of the endpoint.
+          #
+          # What this deliberately does NOT do is treat a 501 as a pass. A 501
+          # on /health is a broken health endpoint. For `identity-admin` and
+          # `identity-jobs` this step currently FAILS, because those two Worker
+          # composition roots are still one-line placeholders and serve no route
+          # at all — which is the correct, honest state for deployables that have
+          # not been built yet.
+          #
+          # `home-web` never reaches this loop: it has no /health and no /ready,
+          # and it exited above.
+          for ROUTE in /health /ready; do
+            # `|| true`, not `|| echo 000`: curl's `--write-out '%{http_code}'`
+            # prints `000` itself on a connection failure, so the fallback
+            # appended a second one. See the note on the home-web branch above.
+            STATUS="$(curl --silent --show-error --max-time 15 \
+              -o /dev/null --write-out '%{http_code}' \
+              -H 'Cache-Control: no-cache' \
+              "${HOST}${ROUTE}" || true)"
+            echo "  ${ROUTE} -> HTTP ${STATUS}"
+            if [ "$STATUS" != "200" ]; then
+              echo "::error::${WORKER} answered ${ROUTE} with HTTP ${STATUS}, not 200. The version is uploaded but NOT promoted; nothing has been sent to it. Fix the Worker and cut a new release — do not promote this one (ADR-0013: a rebuild is a forward fix, not a rollback)."
+              exit 1
+            fi
+          done
+          echo "$WORKER answered /health and /ready on version $VERSION_ID."
+
+  # ---------------------------------------------------------------------------
+  # The final promotion. Two jobs, not one, and the split is the decision.
+  #
+  # `promote_to_final` carries NO `environment:` key and runs automatically —
+  # it is the stage of the ladder that policy has already approved, and for
+  # admin and jobs it is the only promotion there is. `promote_to_final_with_
+  # approval` carries `environment: production` and the runner will not pass it
+  # without a named approver. That asymmetry is ADR-0014's central mechanical
+  # point: a gate enforced by an `if:` in a workflow file can be deleted by the
+  # same pull request that would benefit from deleting it, whereas an
+  # environment's required reviewers are repository settings a pull request
+  # cannot change. Neither job can be reached without a version id from
+  # `build_and_upload`, so no promotion can build.
+  # ---------------------------------------------------------------------------
+  promote_to_final:
+    name: Promote ${{ inputs.worker }} to ${{ inputs.final-percentage }}% (${{ inputs.environment }})
+    needs: [build_and_upload, smoke]
+    # The automatic lane, and the ONLY promotion `identity-admin` and
+    # `identity-jobs` ever get (ADR-0014 constraint 20, step 4). Also reached
+    # by any `identity` call whose ladder ends below the policy limit — a
+    # rehearsal lane, where a human gate would buy nothing because staging is
+    # not production traffic.
+    #
+    # Never reached for `identity` in production: `promote_to_policy_limit` and
+    # `promote_to_full_percentage` supersede it whenever a policy limit is
+    # configured, and running this as well would be three promotions racing for
+    # one Deployment. `!inputs.requires-approval` alone would not have caught
+    # that — hence the `inputs.policy-limit-percentage` clause, which is the
+    # real test for "is this the gated lane".
+    if: ${{ !inputs.requires-approval && inputs.policy-limit-percentage == 0 }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      percentage: ${{ steps.promote.outputs.percentage }}
+    env:
+      WORKER: ${{ inputs.worker }}
+      LANE: ${{ inputs.lane }}
+      WORKER_NAME: ${{ inputs.worker-name }}
+      ENVIRONMENT: ${{ inputs.environment }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      VERSION_ID: ${{ needs.build_and_upload.outputs.version-id }}
+      FINAL_PERCENTAGE: ${{ inputs.final-percentage }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      # Checkout and the toolchain are here for wrangler itself, NOT for a build.
+      # No `moon run`, no `pnpm build`, no web app — `wrangler versions deploy`
+      # names an already-uploaded Version and creates a Deployment pointing at
+      # it, and the whole safety of the operation is that the bytes promoted are
+      # the bytes that were uploaded and smoke-tested. Building here would make
+      # every promotion a rebuild (ADR-0013).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `--name` and NOT `--config`, and that is deliberate: a Deployment is a
+      # routing rule, and it needs the Worker's name and a Version id and
+      # nothing else. Naming a config here would mean carrying a generated file
+      # carrying real Cloudflare resource ids across a job boundary to perform
+      # an operation that never reads them — the ids are BINDINGS, they are
+      # frozen into the version at upload, and re-supplying them at promotion
+      # time would suggest (falsely) that a promotion can change a version's
+      # bindings. It cannot; a version is immutable.
+      - name: Promote the uploaded version (the only thing that moves traffic)
+        id: promote
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler versions deploy \
+            --name "$WORKER_NAME" \
+            --version-id "$VERSION_ID" \
+            --percentage "$FINAL_PERCENTAGE" \
+            --message "release $RELEASE_TAG at ${FINAL_PERCENTAGE}%" \
+            --yes
+          echo "percentage=$FINAL_PERCENTAGE" >> "$GITHUB_OUTPUT"
+          pnpm exec wrangler deployments list --name "$WORKER_NAME" \
+            || echo "::warning::could not list deployments; the promotion above reported success."
+          {
+            echo "### Promoted"
+            echo ""
+            echo "- \`$WORKER\` ($ENVIRONMENT) now sends **$FINAL_PERCENTAGE%** of traffic to \`$VERSION_ID\`"
+            echo "- Released as \`$RELEASE_TAG\`. A version that is promoted can be"
+            echo "  rolled back by promoting an older version id — \`rollback.yml\`, no rebuild."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # THE FIRST HUMAN GATE, at the policy limit (ADR-0014 step 2).
+  #
+  # A separate job from the 100% one, and the separation is the point rather
+  # than tidiness: ADR-0014 step 7 says approving 50% and not approving 100% is
+  # legitimate, so the two decisions cannot live in one job. One job with two
+  # approval-bearing steps is one approval, one record and one approver — which
+  # is precisely the thing ADR-0014 rejected when it declined to make 100%
+  # automatic on the argument that a human's judgement is spent where it
+  # changes the outcome.
+  #
+  # It needs `canary`, so the automatic ladder has finished its health-gated
+  # walk before a human is asked. Asking somebody to approve traffic they
+  # cannot yet see evidence about is how an approval stops meaning approval.
+  # ---------------------------------------------------------------------------
+  promote_to_policy_limit:
+    name: Promote ${{ inputs.worker }} to ${{ inputs.policy-limit-percentage }}% — HUMAN APPROVAL REQUIRED (${{ inputs.environment }})
+    needs: [build_and_upload, smoke, canary]
+    # `policy-limit-percentage != 0` is the whole test. Zero is the "no gated
+    # lane" sentinel rather than a percentage, because 0% traffic is a
+    # deployment that serves nobody and `> 0` would read as "the limit is set
+    # but at zero", which is a state nobody wants and no caller produces.
+    if: ${{ inputs.requires-approval && inputs.policy-limit-percentage != 0 }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # THE GATE. `production` is a GitHub environment whose required-reviewer
+    # rules live in repository settings, NOT in this file and NOT in any pull
+    # request. This `environment:` key is the only thing in this repository
+    # that makes the gate real; a comment above it would not be.
+    #
+    # ADR-0014 records the enforcement as not yet built at the time of writing:
+    # the environment's required-reviewer rule is repository configuration, and
+    # `.github/repository-settings.json` carries no environment entry yet. Until
+    # an administrator adds the reviewers, this job passes on click-through —
+    # the key still names the gate, and it becomes a real gate the moment the
+    # setting exists. That gap is stated here rather than papered over, because
+    # a comment claiming the gate is enforced would be the exact kind of claim
+    # AGENTS.md forbids.
+    environment: production
+    permissions:
+      contents: read
+    outputs:
+      percentage: ${{ steps.promote.outputs.percentage }}
+    env:
+      WORKER: ${{ inputs.worker }}
+      LANE: ${{ inputs.lane }}
+      WORKER_NAME: ${{ inputs.worker-name }}
+      ENVIRONMENT: ${{ inputs.environment }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      VERSION_ID: ${{ needs.build_and_upload.outputs.version-id }}
+      POLICY_LIMIT_PERCENTAGE: ${{ inputs.policy-limit-percentage }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      # Checkout and toolchain for wrangler only. No build, no moon task, no web
+      # app — a promotion names an already-uploaded Version, and the guarantee
+      # this job relies on is that the bytes it sends traffic to are the bytes
+      # that were canaried and smoke-tested. Building here would make every
+      # promotion a rebuild (ADR-0013).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `--name` rather than `--config`, for the reason in `promote_to_final`:
+      # a Deployment needs the Worker's name and a Version id, and the bindings
+      # are already frozen into the version. Naming a config here would suggest
+      # a promotion can rebind a version, and a version is immutable.
+      - name: Promote the uploaded version to the policy limit
+        id: promote
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler versions deploy \
+            --name "$WORKER_NAME" \
+            --version-id "$VERSION_ID" \
+            --percentage "$POLICY_LIMIT_PERCENTAGE" \
+            --message "release $RELEASE_TAG at ${POLICY_LIMIT_PERCENTAGE}% (approved, gate 1 of 2)" \
+            --yes
+          echo "percentage=$POLICY_LIMIT_PERCENTAGE" >> "$GITHUB_OUTPUT"
+          pnpm exec wrangler deployments list --name "$WORKER_NAME" \
+            || echo "::warning::could not list deployments; the promotion above reported success."
+          {
+            echo "### Gate 1 passed — $WORKER at ${POLICY_LIMIT_PERCENTAGE}%"
+            echo ""
+            echo "- Version \`$VERSION_ID\` now carries **${POLICY_LIMIT_PERCENTAGE}%** of traffic."
+            echo "- This is the policy limit (ADR-0014). The 100% promotion is a"
+            echo "  SEPARATE job with its own approval, still pending: approving"
+            echo "  this one is not approving that one."
+            echo "- To abandon instead: promote a previous version id. The bad"
+            echo "  version stays uploaded and immutable either way (ADR-0013)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # THE SECOND HUMAN GATE, at 100% (ADR-0014 step 2).
+  #
+  # `needs: promote_to_policy_limit`, which is what makes the two approvals
+  # genuinely sequential and separable: it cannot start until the 50% job has
+  # been approved AND completed. This is the gate ADR-0014 predicts will be the
+  # first one removed under schedule pressure — "50% is already most of the
+  # traffic" — and it is the hardest to remove by accident precisely because
+  # it is a distinct environment approval with a distinct job.
+  # ---------------------------------------------------------------------------
+  promote_to_full_percentage:
+    name: Promote ${{ inputs.worker }} to ${{ inputs.final-percentage }}% — HUMAN APPROVAL REQUIRED (${{ inputs.environment }})
+    needs: [build_and_upload, smoke, promote_to_policy_limit]
+    if: ${{ inputs.requires-approval && inputs.policy-limit-percentage != 0 }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Same gate, second time. Two jobs, two records, two approvers — the reason
+    # ADR-0014 refused to fold them into one.
+    environment: production
+    permissions:
+      contents: read
+    outputs:
+      percentage: ${{ steps.promote.outputs.percentage }}
+    env:
+      WORKER: ${{ inputs.worker }}
+      LANE: ${{ inputs.lane }}
+      WORKER_NAME: ${{ inputs.worker-name }}
+      ENVIRONMENT: ${{ inputs.environment }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      VERSION_ID: ${{ needs.build_and_upload.outputs.version-id }}
+      FINAL_PERCENTAGE: ${{ inputs.final-percentage }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      # Checkout and toolchain for wrangler only — no build, no moon task, no
+      # web app, for the same reason as `promote_to_policy_limit`.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Promote the uploaded version to the final percentage
+        id: promote
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler versions deploy \
+            --name "$WORKER_NAME" \
+            --version-id "$VERSION_ID" \
+            --percentage "$FINAL_PERCENTAGE" \
+            --message "release $RELEASE_TAG at ${FINAL_PERCENTAGE}% (approved, gate 2 of 2)" \
+            --yes
+          echo "percentage=$FINAL_PERCENTAGE" >> "$GITHUB_OUTPUT"
+          pnpm exec wrangler deployments list --name "$WORKER_NAME" \
+            || echo "::warning::could not list deployments; the promotion above reported success."
+          {
+            echo "### Gate 2 passed — $WORKER at ${FINAL_PERCENTAGE}%"
+            echo ""
+            echo "- \`$WORKER\` ($ENVIRONMENT) now sends **$FINAL_PERCENTAGE%** of traffic to \`$VERSION_ID\`."
+            echo "- Released as \`$RELEASE_TAG\`. A version that is promoted can be"
+            echo "  rolled back by promoting an older version id — \`rollback.yml\`, no rebuild."
+            echo "- What this run does NOT establish: that authentication works."
+            echo "  It establishes that these bytes are serving. See the Worker"
+            echo "  composition roots in \`docs/README.md\`."
+          } >> "$GITHUB_STEP_SUMMARY"

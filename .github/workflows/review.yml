@@ -1,0 +1,425 @@
+name: Review
+
+# AI semantic code review — the third leg of this repository's pull-request
+# triage, and the only one that is neither deterministic nor a static analyser.
+#
+# Why its own file rather than a job in `ci.yml` or `analysis.yml`:
+#
+#   ci.yml        answers "is this tree internally consistent?" — tests, the
+#                 boundary law, wrangler configs. Pure function of the diff,
+#                 and `ci-gate` is a REQUIRED status check.
+#   analysis.yml  answers "what does this code do that it must not?" — CodeQL,
+#                 Semgrep, Gitleaks. `analysis-gate` is a REQUIRED status check.
+#   review.yml    answers "is this change correct in intent?" — a judgement
+#                 call no compiler and no rule engine makes. NOT required.
+#
+# The separation is the point, and it is not tidiness. The first two are merge
+# blockers, so an LLM outage, a provider rate limit or a bad prompt must not be
+# able to red them — otherwise "the LLM was down" becomes a reason to merge
+# unreviewed code, which inverts what this workflow is for. The third is
+# evidence a human reads, never a gate: OCR reporting three `low` findings is
+# not a merge blocker, and OCR's execution failing is not a merge blocker
+# either. Two different things, and only one of them is a decision.
+#
+# Nothing here feeds `ci-gate` or `analysis-gate`, and no rule in
+# `.github/repository-settings.json` requires a check from this file. Making
+# OCR a required check is a decision to take AFTER it has been dogfooded, in
+# its own commit, on its own evidence — never as a side effect of adding it.
+#
+# ---------------------------------------------------------------------------
+# THE SECURITY MODEL — read this before changing anything below
+# ---------------------------------------------------------------------------
+#
+# `pull_request_target` runs with THIS repository's secrets and a
+# `pull-requests: write` token while the pull request is attacker-controlled.
+# The two ways that combination is normally turned into credential theft are
+# both closed here, structurally rather than by discipline:
+#
+#   1. Executing the pull request's code. A contributor can change
+#      `package.json`, a `pnpm` script, a `postinstall` hook, a build script, or
+#      add any executable at all. So this job has NO step that installs
+#      dependencies, compiles, tests, builds, or runs a script — and there is no
+#      `actions/checkout` of the pull request head anywhere in it. The action
+#      checks out the trusted BASE and separately fetches the head commit's
+#      git OBJECTS (`git fetch origin pull/N/head`), which makes the blobs
+#      resolvable for a diff without ever writing them into the working tree.
+#      Untrusted content is read as data by the review; it is never executed.
+#   2. Command injection. GitHub substitutes `${{ }}` into a `run:` script
+#      BEFORE the shell parses it, so any attacker-reachable expression spliced
+#      into a script is a command-injection sink. The rules in
+#      `.github/semgrep/` police exactly this (and CodeQL's `actions` language
+#      re-checks it independently). This job contains no `run:` step AT ALL —
+#      its two steps are `uses:`-only, and the one script in the file is the
+#      `with:` payload of `github-script`, which is workflow-authored text that
+#      reads its variable out of the environment rather than interpolating one.
+#
+# What a contributor CAN do: make the LLM read a diff they wrote. That is the
+# prompt-injection surface, and it is accepted deliberately — the model is the
+# reviewer, so reading the reviewer's input IS the job. What bounds it is that
+# the token lives in the review PROCESS's environment, not in the prompt, and
+# no reviewed text can move it there: the only path from prompt content back to
+# a credential would be the model printing one, and the model is never told it
+# holds a key. A review that says "here is your API key" is a wrong comment on
+# a pull request, not a stolen credential — it cannot leak a value the model
+# was never given. The diff also cannot reach a shell, a path, or a permission
+# decision anywhere in this job.
+#
+# The credential reaches exactly one place — `llm_auth_token`, below — and is
+# never placed in a workflow- or job-level `env:`, so it is not in the
+# environment of any step other than the one that needs it.
+#
+# `workflow-dangerous-trigger` in `.github/semgrep/workflows.yaml` excludes
+# exactly this file, with the invariants that make the exclusion worth taking
+# written down in that rule. CodeQL's `actions` language still analyses this
+# file on every pull request, so the coverage is duplicated rather than lost.
+
+on:
+  # `pull_request_target`, not `pull_request`: the LLM credential is a secret,
+  # and `pull_request` withholds secrets from every fork pull request — so a
+  # `pull_request` trigger would silently review nothing the moment this
+  # repository takes its first external contribution. The price is the whole
+  # job's privilege, which is why the security model above is a property of what
+  # this job DOES rather than a property of its trigger.
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      # A draft becoming reviewable is the moment a human starts reading it.
+      # Without this, converting a draft would post no summary, because
+      # `synchronize` does not fire for the draft transition.
+      - ready_for_review
+  # Manual entry point. It exists for exactly two jobs: re-reviewing a pull
+  # request from its merge-base (`full_review`), and recovering a run whose
+  # checkpoint was invalidated. It is NOT how the normal lifecycle starts — a
+  # workflow a human has to remember to trigger is not a review.
+  #
+  # On this event the payload carries no `pull_request`, so the base ref, head
+  # SHA and number are resolved from `pr_number` below before the action sees
+  # them. The dispatch also deliberately runs an ACTION that does nothing on
+  # this event rather than gating the workflow: an `if:` that skips a run makes
+  # a skipped run indistinguishable from a green one, which is the hole
+  # `ci-gate` exists to close in the other direction.
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Pull request to review (the number alone)"
+        type: string
+        required: true
+      full_review:
+        description: "Re-review from the merge-base instead of from the last checkpoint"
+        type: boolean
+        required: false
+        default: false
+
+# Least privilege, stated once. A job-level `permissions:` block REPLACES this
+# one rather than merging with it, so anything added below must restate what it
+# still needs rather than assume this survives.
+#
+# `contents: read` is the ceiling and `pull-requests: write` the only
+# elevation: the token creates review comments, updates the sticky summary, and
+# reads threads. `contents: write` is deliberately NOT granted — see the
+# `resolve_outdated` comment on the action step for the one capability it would
+# have bought, and why this repository declines to buy it.
+permissions:
+  contents: read
+  pull-requests: write
+
+# One review per pull request, newest wins. Without this, two pushes a minute
+# apart run two full reviews that race each other to write the same sticky
+# summary, burn twice the LLM budget for one pull request, and can interleave
+# their inline comments — the second run's checkpoint then races the first run's
+# and whichever finishes last decides what the next run reviews.
+#
+# `github.event.pull_request.number || inputs.pr_number` covers both triggers:
+# the first is the pull-request payload, the second is the dispatch input, and
+# only one of the two is ever populated.
+concurrency:
+  group: ocr-pr-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: AI review (OpenCodeReview)
+    runs-on: ubuntu-latest
+    # A ceiling, not an expectation. `review_task_timeout` below bounds a single
+    # review task at 15 minutes; this bounds the job including the CLI install
+    # and the posting step, so a hung provider fails the run instead of holding a
+    # runner until the six-hour platform default.
+    timeout-minutes: 45
+    steps:
+      # Resolve the pull request for the dispatch trigger. Reads only the
+      # pull-request API and writes three values to this step's outputs.
+      #
+      # `pr_number` arrives as an untyped string and this is a `pull_request_target`
+      # job, so it is validated as a positive integer BEFORE it reaches the API
+      # rather than trusted: it is a maintainer-typed dispatch input today, and
+      # a check is cheaper than trusting that to stay true. The integer form is
+      # what goes to the API, so no caller-controlled string is ever part of a
+      # request path.
+      #
+      # Every value crosses the step boundary through `env:`. That is the org's
+      # own `workflow-expression-interpolated-into-run` rule in practice: the
+      # value is read by Node out of the environment and never interpolated into
+      # script text.
+      - name: Resolve the pull request (manual runs only)
+        id: pr
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const requested = (process.env.PR_NUMBER || '').trim();
+            if (!/^[1-9][0-9]*$/.test(requested)) {
+              core.setFailed(`pr_number must be a pull request number alone; got ${JSON.stringify(requested)}.`);
+              return;
+            }
+            const { data: pullRequest } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(requested),
+            });
+            core.setOutput('base_ref', pullRequest.base.ref);
+            core.setOutput('head_sha', pullRequest.head.sha);
+
+      # The whole review, in one action and one LLM invocation.
+      #
+      # ONE RUN IS THE ARCHITECTURE. The alternative — running OCR a second time
+      # with `--format sarif` and uploading that through
+      # `github/codeql-action/upload-sarif` — is not implemented here, and the
+      # reason is the cost rather than the difficulty: it spends a second full
+      # review's tokens on the same diff, produces a second independent set of
+      # findings that can disagree with the first, doubles the wall clock, and
+      # leaves the pull request carrying two answers to the same question. The
+      # action publishes its result JSON as a workflow artifact, which is a
+      # stable, documented way to read what it found; a future SARIF
+      # publication should transform THAT artifact in a follow-up step rather
+      # than re-ask the model. Publishing to Code Scanning stays `analysis.yml`'s
+      # territory — that file owns the analysers and their SARIF categories, and
+      # a third `security-events: write` job would not be reviewing the code, it
+      # would be duplicating the review.
+      - name: Review the pull request
+        id: ocr
+        uses: alibaba/open-code-review@a758d9cbfb689937c7857ad64b2dd66adb58c0c2 # v1.12.11
+        with:
+          # The action performs its own checkout of the trusted base and fetches
+          # the head as git objects. There is deliberately no `actions/checkout`
+          # in this job before it — the one checkout that could be pointed at
+          # untrusted code is the one that is absent.
+          #
+          # `base_ref`/`head_sha`/`pr_number` are only populated on the dispatch
+          # trigger; on `pull_request_target` they resolve to empty strings and
+          # the action reads the same values from the event payload itself.
+          #
+          # `full_review` is the fourth dispatch input, and it has to be passed
+          # down or the dispatch input is decoration: on a pull-request event
+          # `inputs.full_review` is empty, which the action reads as 'false' —
+          # exactly the value a manual run wants when the flag is off, and the
+          # reason this line costs nothing on the normal path.
+          #
+          # Passing it unconditionally (rather than only under a dispatch `if:`)
+          # keeps one code path for the action: the action compares this against
+          # the literal string 'true', and an unquoted YAML boolean would not
+          # match that comparison — the same class of bug `upload_artifacts`' own
+          # description warns about.
+          base_ref: ${{ steps.pr.outputs.base_ref }}
+          head_sha: ${{ steps.pr.outputs.head_sha }}
+          pr_number: ${{ inputs.pr_number }}
+          full_review: ${{ inputs.full_review }}
+
+          # The SECOND secret, and the only one this workflow stores anywhere durable:
+          # the action prints its result JSON and stderr to the job log and
+          # uploads both as artifacts, and the resolved endpoint appears in the
+          # result's config echo and in the checkpoint fingerprint. That is
+          # accepted, and the reasoning is that an endpoint is not a credential:
+          # it carries no authority on its own, and anyone who can read this
+          # repository's Actions artifacts can already read the workflow that
+          # names the secret. What would NOT be acceptable is the API key
+          # below landing in the same place, which is why it is passed through
+          # `auth_token_cmd` rather than as a stored config value.
+          llm_url: ${{ secrets.ECOMA_LLM_BASE_URL }}
+          # The credential, and the reason this trigger is
+          # `pull_request_target`. Reaches one action input, from which the
+          # action maps it to `OCR_LLM_TOKEN` for the review process alone. Not
+          # in a workflow-level or job-level `env:`, so it is absent from the
+          # environment of every other step — and there are no other steps with
+          # a shell.
+          llm_auth_token: ${{ secrets.ECOMA_LLM_API_KEY }}
+          llm_model: glm-5.3-flash
+          # This action's `llm_use_anthropic` is `required: true` and is a
+          # declared BOOLEAN, so it cannot be omitted the way an optional input
+          # can: GitHub fails the step on a missing required input. The
+          # instruction cannot be dropped. `false` is the value that selects the
+          # OpenAI-compatible protocol, and `llm_protocol` below is the same
+          # decision stated explicitly — it wins over this field when both are
+          # present, so the two can never disagree about which protocol runs.
+          llm_use_anthropic: false
+          llm_protocol: openai
+          # No `llm_extra_body`. The action's default is
+          # `{"thinking": {"type": "disabled"}}`, which is deliberate upstream
+          # provider-compatibility behaviour and is left alone: this
+          # repository has not verified `glm-5.3-flash`'s reasoning contract at
+          # this endpoint, and guessing it is how a working review becomes a
+          # failing one. Likewise no `llm_reasoning_effort` and no
+          # `llm_extra_headers` — nothing here is set on the strength of a guess
+          # about the endpoint.
+          language: English
+
+          # EXACT version. The action's own default is `latest`, which is a
+          # moving target inside a workflow whose entire security argument is
+          # that the code deciding what to trust is known. Pinned here, and the
+          # pinned action SHA above resolves the CLI binary for this step
+          # deterministically.
+          #
+          # The action also folds the RESOLVED version into its checkpoint
+          # fingerprint, so upgrading OCR invalidates the checkpoints the
+          # previous version recorded — the next run after a version bump is a
+          # full review rather than a checkpoint review against findings a
+          # different model produced.
+          ocr_version: 1.12.11
+
+          # Per-review-task ceiling in minutes (the action validates 1..120).
+          # `llm_timeout` below is the per-REQUEST ceiling in seconds. Both
+          # exist because a review is many requests: one hung request must not
+          # consume a whole task, and one slow task must not consume the job.
+          llm_timeout: "300"
+          review_task_timeout: "15"
+
+          # How deep the review thinks, as the action's `low`/`medium`/`high`
+          # preset. `high` is the right end of the range here for two reasons
+          # that point the same way: this repository's diffs are small and
+          # deliberate, so the extra depth costs little in wall clock; and a
+          # semantic review that skims is worse than no semantic review, because
+          # it still produces comments, and a shallow finding reads exactly like
+          # a real one. The preset is also part of the checkpoint fingerprint,
+          # so changing it retires the checkpoints rather than comparing
+          # findings across two different review depths.
+          effort: high
+
+          # Two files reviewed at a time. The ceiling here is this repository's
+          # pull-request size, not the provider's rate limit: a diff this
+          # repository produces is rarely more than a handful of files, so a
+          # higher number buys no latency and costs a provider-429 backoff
+          # storm plus a GitHub secondary-rate-limit on the comment writes that
+          # follow. `ocr` retries its own requests — the action adds no outer
+          # retry loop, because a second wrapper would multiply the cost of the
+          # failures it is trying to absorb.
+          review_concurrency: "3"
+
+          # Progress to the job log instead of a silent run. A reviewer watching
+          # a 45-minute job needs to see that it is working rather than stuck.
+          # Display only: the action deliberately keeps this out of the
+          # checkpoint fingerprint, so turning it on does not invalidate the
+          # next review.
+          stream_progress: "true"
+
+          # Raw result JSON and stderr. The JSON is the record of WHAT was
+          # found, and the stable handle a future SARIF publication would read
+          # rather than re-reviewing. (No artifact step is added here — the
+          # action uploads its own, and a second upload of the same paths would
+          # only add a second copy to reason about.)
+          #
+          # Both files are from the review process, and the credential is
+          # consumed by a child (`auth_token_cmd`, so the token is never
+          # written into OCR's own config file). That is the mechanism, not a
+          # guarantee: an artifact is readable by anyone with Actions read
+          # access, so if a future OCR release ever serialises the resolved
+          # endpoint or token into the result JSON, it becomes an
+          # access-control question rather than a non-issue. Worth checking in
+          # that release's notes — not worth a secret-scanner allowlist here,
+          # which would hide exactly the thing it should catch.
+          upload_artifacts: "true"
+
+          # -------------------------------------------------------------------------
+          # The review lifecycle. These four are what make the workflow usable
+          # across a pull request's life rather than only its first push.
+          # -------------------------------------------------------------------------
+          # One summary comment per pull request, edited in place. Every push
+          # rewriting the summary wholesale is what makes a pull request look
+          # like four reviews instead of one review of four commits — and
+          # `checkpoint_range` below is DEPENDENT on this: the checkpoint marker
+          # is recorded inside the sticky comment, so without this input the
+          # next run reads no checkpoint and silently reviews the full range
+          # every time.
+          sticky_summary: "true"
+
+          # Do not repost a finding over a line range an existing bot comment
+          # already covers. NON-DESTRUCTIVE by design: history is never deleted,
+          # so a resolved-then-reintroduced discussion is still there. Without
+          # it, every push to a file whose finding is still live would add a
+          # duplicate comment on the same lines.
+          incremental: "true"
+
+          # IoU above which two findings are "the same comment". This is the
+          # knob that decides between "silence a duplicate" and "silence a new
+          # finding that merely sits near an old one". The action's default is
+          # 0.6; 0.75 is deliberately stricter — this workflow's diffs are
+          # dense enough that a genuinely new finding often overlaps
+          # loosely with an old one's context lines, and at 0.6 those merge into
+          # silence. Failing toward one extra comment costs a reader a scroll;
+          # failing the other way hides a real finding, which is the more
+          # expensive mistake for a review.
+          #
+          # Not used by `resolve_outdated` below, which decides coverage by any
+          # shared line — a stricter test there would resolve a thread whose
+          # finding is still live.
+          incremental_overlap_threshold: "0.75"
+
+          # Review `<checkpoint>..<new head>` instead of
+          # `<merge-base>..<new head>`. This is what keeps a 20-commit pull
+          # request's last revision from costing what its first one did.
+          #
+          # It is FAIL-CLOSED by construction, which is the reason to use it
+          # rather than to approximate it: if the summary is missing, the marker
+          # is unreadable, the base moved, the configuration (model, protocol,
+          # language, effort, timeout, rules) changed, or git cannot prove the
+          # checkpoint is an ancestor of the new head, the action reviews the
+          # full range. Every one of those ways of being wrong produces MORE
+          # review rather than less, so the failure mode is cost, never a gap.
+          # The action's `range_reason` output names which one fired.
+          checkpoint_range: "true"
+
+          # -------------------------------------------------------------------------
+          # Outdated threads: 'false' — deliberately, and the reason is a
+          # permission this job does not hold.
+          #
+          # GitHub gates `resolveReviewThread` on repository WRITE access, not
+          # on the pull-request scope: a thread is conversation state, so
+          # `pull-requests: write` looks like the scope that covers it, and it
+          # does not. The action's own source documents the measurement — three
+          # jobs differing only in their permissions block, each resolving its
+          # own thread on a scratch PR, none of them hiding the failure:
+          #
+          #   contents: read  + pull-requests: write  -> FORBIDDEN
+          #   contents: write + pull-requests: read   -> resolved
+          #   contents: write + pull-requests: write  -> resolved
+          #
+          # So `resolve_outdated: 'true'` would require widening THIS job to
+          # `contents: write` — the ability to push to the repository, in a
+          # `pull_request_target` job, to clean up stale comments. 'report'
+          # does not help: it issues no mutation, so it cannot tell anyone
+          # whether 'true' would be permitted.
+          #
+          # Nothing breaks by declining. GitHub marks a thread outdated itself
+          # as soon as the lines it sits on leave the diff, so an obsolete
+          # finding reads as outdated without any mutation at all. What is
+          # given up is the tidying, not the correctness: a reader who wants the
+          # thread closed can close it, and the human-replied and
+          # manually-resolved threads this capability must never touch stay
+          # untouched for the same reason.
+          #
+          # If this is ever revisited, the capability belongs in a SEPARATE job
+          # with `contents: write` that does nothing but resolve threads — so
+          # that the elevation is attached to the narrowest possible job and this
+          # one never widens.
+          resolve_outdated: "false"
+
+          # Coarse review noise is evidence, not a blocker: it belongs in the
+          # summary a human skims rather than in an inline thread that reads as
+          # a call to action. `low` routes low-severity findings (and only
+          # those) to the summary. It is fail-open by construction — an empty or
+          # unknown severity keeps its normal inline placement, so a finding is
+          # never dropped by this policy.
+          route_severity_below: low

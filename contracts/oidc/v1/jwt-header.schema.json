@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/oidc/v1/jwt-header.schema.json",
+  "title": "JwtHeader",
+  "description": "The header of a JWT this provider issues, derived from identity_oidc::jwt::JwtHeader. `typ` carries #[serde(rename = \"typ\")] — the rename is a no-op against the wire name but is written out so the spelling is explicit and a reader does not have to know that `type` would have been the same. The `use` rename in the JWKS is NOT like this: that one changes the wire name, because the Rust field is `use_` (see json-web-key.schema.json).",
+  "type": "object",
+  "x-rust-type": "identity_oidc::jwt::JwtHeader",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; no JWT is signed anywhere in the bootstrap phase",
+  "required": ["alg", "kid"],
+  "additionalProperties": false,
+  "properties": {
+    "alg": {
+      "type": "string",
+      "const": "RS256",
+      "description": "The signing algorithm. RS256 only. Two constants exist on purpose — JwtHeader::ALGORITHM is what the provider emits, JwtHeader::ACCEPTED_ALGORITHM is what it verifies with, and they are separate so a future second algorithm cannot silently widen what is accepted. A single shared constant is how 'alg: none' gets accepted.",
+      "x-serde": "pub alg: String",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "identity_oidc::jwt::JwtHeader::ALGORITHM == \"RS256\"; JwtHeader::ACCEPTED_ALGORITHM == \"RS256\"",
+        "constraining": "the field is a String in Rust",
+        "test": "identity_oidc::jwt::tests::only_rs256_is_offered_and_only_rs256_is_accepted"
+      }
+    },
+    "typ": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The token type, when the token is not an ID token. Declared values: 'JWT' (JwtHeader::TYPE_ID_TOKEN) and 'at+jwt' (JwtHeader::TYPE_ACCESS_TOKEN). Omitted when absent.",
+      "x-serde": "#[serde(rename = \"typ\", skip_serializing_if = \"Option::is_none\")] pub typ: Option<String>",
+      "x-serde-status": "optional, omitted when absent",
+      "x-rename": {
+        "rust": "typ",
+        "wire": "typ",
+        "note": "the rename here does not change the wire name; it is recorded because the attribute is present and a reader should not assume every rename in this crate is load-bearing"
+      },
+      "x-accepted-values": {
+        "source": "identity_oidc::jwt::JwtHeader::TYPE_ID_TOKEN == \"JWT\", TYPE_ACCESS_TOKEN == \"at+jwt\"",
+        "constraining": "the field is an Option<String> in Rust"
+      }
+    },
+    "kid": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The key identifier — which key in the JWKS signed this. A JWT header naming a kid the JWKS does not carry is a verification failure, not a reason to try every key.",
+      "x-serde": "pub kid: String",
+      "x-serde-status": "required"
+    }
+  },
+  "x-boundary-note": "identity-oidc can write this header and can parse a JWK set. It cannot sign, verify, or check an expiry — there is no function in crates/identity-oidc/src/jwt.rs that takes a secret or a key, by construction. Anything in this file that implies a token is valid is a lie.",
+  "x-phase": "Phase 4 — OIDC provider"
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "pull-request-title-pattern": "chore: release${component} ${version}",
+  "packages": {
+    "apps/identity/worker": {
+      "release-type": "simple",
+      "package-name": "identity"
+    },
+    "apps/identity-admin/worker": {
+      "release-type": "simple",
+      "package-name": "identity-admin"
+    },
+    "apps/identity-jobs/worker": {
+      "release-type": "simple",
+      "package-name": "identity-jobs"
+    },
+    "apps/home-web": {
+      "release-type": "simple",
+      "package-name": "home-web",
+      "component": "home-web"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+# Prettier formats what the repository OWNS. Everything below is either
+# generated, vendored, or a scratch checkout that is not part of the tree.
+#
+# `.claude/worktrees/` is here for the same reason it is in `eslint.config.mjs`:
+# a worktree is a full checkout of this repository nested inside it. Formatting
+# one rewrites an agent's in-flight work behind its back, and a single scratch
+# checkout accounted for 1186 of the 1187 files `pnpm format:check` complained
+# about — which means the check had stopped being able to say anything about
+# the code it exists to judge.
+
+# `pnpm-lock.yaml` is the second case, and a quieter one: it is not scratch, it
+# is the file `AGENTS.md` names when it says no lock file may be edited by hand.
+# Its owner is pnpm, and pnpm 12 writes single-quoted keys where prettier wants
+# double. The two cannot both be right, and the tie is not a matter of taste:
+# prettier's only remedy is `--write`, which produces a lockfile pnpm has never
+# emitted — and the next `pnpm install` rewrites it, so the gate fails again on
+# whatever branch touched a dependency. Verified: `pnpm install --lockfile-only`
+# reproduces the committed bytes exactly, and prettier still rejects them.
+#
+# Ignoring it keeps `format:check` able to say something. Left in, it is the one
+# file that can turn a green pipeline red for a change that is not a style
+# change, which is the failure mode a formatting gate exists to prevent.
+# `Cargo.lock` needs no entry: prettier infers no parser for it and skips it.
+
+.claude/
+pnpm-lock.yaml
+node_modules/
+dist/
+target/
+coverage/
+.moon/
+.wrangler/

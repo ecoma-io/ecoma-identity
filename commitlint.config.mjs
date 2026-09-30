@@ -1,0 +1,86 @@
+/**
+ * Conventional Commits with this repository's scopes.
+ *
+ * The scope list IS the module map: one scope per moon project in
+ * `.moon/workspace.yml`, plus the scopes that name no project (the repository
+ * itself, CI, the architecture guard, the database, the contracts). A commit
+ * that changes two modules carries the one that owns the change; a commit that
+ * changes none of them carries a repository-level scope.
+ *
+ * The rule this file exists to serve: A NEW MODULE BRINGS ITS SCOPE IN THE SAME
+ * COMMIT. A module the commit vocabulary does not name is a module with no law
+ * — the reviewer reading a `feat(widgets)` header has nothing to check the
+ * diff against, and a scope added three commits later fixes nothing.
+ * `AGENTS.md` §"Before you change anything" states it as a four-file commit
+ * (directory + `moon.yml`, `module-boundaries.config.mjs` row,
+ * `check-architecture.mjs` check, and the scope here); this file is the
+ * fourth of the four.
+ *
+ * @type {import("@commitlint/types").UserConfig}
+ */
+export default {
+  extends: ["@commitlint/config-conventional"],
+  rules: {
+    // A scope is not optional. An unscoped `feat: thing` is a commit whose
+    // diff this repository's law cannot place, and this repository is a
+    // boundary-enforcing one.
+    "scope-empty": [2, "never"],
+    "scope-enum": [
+      2,
+      "always",
+      [
+        // ---- crates/ — one per project in .moon/workspace.yml ----------
+        "identity-domain",
+        "identity-application",
+        "identity-oidc",
+        "identity-security",
+        "identity-cloudflare",
+        "identity-testkit",
+        // ---- apps/ — the three Workers and the two web apps ---------------
+        // These are the moon PROJECT IDS, and since the deployables were
+        // registered under their own names they ARE the deployable names,
+        // not aliases for the crate names. A deployable is called `identity`,
+        // `identity-admin` and `identity-jobs` everywhere a human reads a name
+        // (wrangler worker names, release-please components, git tags, Cloudflare
+        // version tags), and a commit header is a human-readable surface. The
+        // Worker crates behind them are `identity-worker`,
+        // `identity-admin-worker` and `identity-jobs-worker`; the frontends are
+        // the two `*-web` names.
+        // No `-worker` scope exists, and that is deliberate: a commit that
+        // touched `apps/identity/worker/` says `identity`, because the scope
+        // names the deployable and not the crate it happens to be written as.
+        "identity",
+        "identity-admin",
+        "identity-jobs",
+        "identity-web",
+        "identity-admin-web",
+        "home-web", // the public-facing web application (ADR-0016)
+        // ---- packages/ — shared libraries ---------------------------------
+        "shared-i18n", // shared i18n utilities and types
+        // ---- repository-level — changes no single project owns ----------
+        "arch", // the boundary law itself (pnpm arch, the config, the prose)
+        "ci", // .github/workflows and the CI matrix
+        "contracts", // contracts/** — the four API contracts
+        "db", // database/** — migrations, seeds, fixtures
+        "deps", // dependency additions, bumps and the lockfiles they move
+        "docs", // docs/** — anything a reader reads to learn the system
+        // `infra` is the deployment law and the tooling that enforces it:
+        // `infra-topology/**`, the renderer, the topology validator, the
+        // architecture gate, and the `pnpm infra:*` entry points. It is separate
+        // from `topology` because the distinction is the point: `topology` is
+        // the manifest that DECLARES the topology, `infra` is the machinery that
+        // turns a declaration into something deployable and then judges whether
+        // the result is lawful. The scopes name law, not directories.
+        "infra",
+        "release", // release automation, versions, tags, changelog
+        "repo", // the repository itself: root config, toolchain, this file
+        "security", // SECURITY.md, secrets handling, threat model, an ADR
+        // `topology` is the manifest itself and only it: `infra-topology/**`,
+        // nothing else. A commit that changes what a binding IS says `topology`;
+        // a commit that changes how a declaration becomes configuration says
+        // `infra`. See the comment above.
+        "topology",
+      ],
+    ],
+  },
+};

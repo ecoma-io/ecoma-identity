@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/oidc/v1/authorization-response.schema.json",
+  "title": "AuthorizationResponse",
+  "description": "A SUCCESSFUL authorization response is a redirect, not a body. The endpoint answers 302 with a Location header carrying the code; the JSON object below is the query-parameter set inside that Location, and identity_oidc::response::AuthorizationResponse is the type that builds it. There is no route that emits this object as a JSON response body. The 501 envelope is the only body a DEFERRED authorize route produces today (see not-implemented-envelope.schema.json).",
+  "type": "object",
+  "x-rust-type": "identity_oidc::response::AuthorizationResponse",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; the endpoint that would emit the redirect is DEFERRED to phase 4 (OIDC provider)",
+  "x-wire-form": "the query parameters of the 302 Location header, built by AuthorizationResponse::location",
+  "required": ["code", "state", "iss"],
+  "additionalProperties": false,
+  "properties": {
+    "code": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The authorization code. Single-use, short-lived, and bound to the redirect_uri and PKCE challenge it was issued against. URL-encoded into the Location by AuthorizationResponse::location.",
+      "x-serde": "pub code: String",
+      "x-serde-status": "required"
+    },
+    "state": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The state echoed from the request, present because the client's own check depends on it. URL-encoded: a state carrying '&' and unencoded would make the client parse the wrong parameters back.",
+      "x-serde": "pub state: String",
+      "x-serde-status": "required"
+    },
+    "iss": {
+      "type": "string",
+      "description": "The iss parameter of RFC 9207, which mitigates mix-up attacks in a multi-provider setup. Always this provider's issuer, and identical to the discovery document's 'issuer'. URL-encoded into the Location.",
+      "x-serde": "pub issuer: String",
+      "x-serde-status": "required",
+      "x-rename": {
+        "rust": "issuer",
+        "wire": "iss",
+        "note": "NOT a serde rename. The Rust field is `issuer` and serde serialises it as `issuer`; `iss` is the name AuthorizationResponse::location writes into the query string. The ID token's own claim is a different type (IdTokenClaims.iss) and is also spelled `iss` on the wire because that struct's Rust field is already named `iss`."
+      }
+    }
+  },
+  "x-location-form": {
+    "template": "{redirect_uri}{separator}code={code}&state={state}&iss={iss}",
+    "separator": "'&' when redirect_uri already contains '?', otherwise '?'",
+    "encoding": "each of code, state and iss is passed through urlencoding::encode"
+  },
+  "x-phase": "Phase 4 — OIDC provider"
+}

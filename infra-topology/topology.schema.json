@@ -1,0 +1,234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ecoma.io/schemas/deployment-topology-v1.json",
+  "title": "Ecoma Identity deployment topology",
+  "description": "The declaration from which Cloudflare Worker configurations and preview lifecycle state are derived. It is LOGICAL: it names resources, and carries no Cloudflare-generated identifier and no indirection for obtaining one. Real identifiers exist only in an ephemeral reconciliation descriptor and in generated wrangler configuration, neither of which is tracked.",
+  "type": "object",
+  "required": [
+    "version",
+    "account",
+    "limits",
+    "naming",
+    "services",
+    "bindings",
+    "cookie_namespaces",
+    "environments",
+    "preview"
+  ],
+  "$defs": {
+    "commented": {
+      "type": "object",
+      "description": "Every block in this manifest carries its own `$comment`. The comments are the reasoning — a ceiling with no stated reason is a number nobody dares change, and a deletion rule with no stated consequence is one nobody dares rely on. `additionalProperties: false` is what keeps a new key from appearing without anyone writing down why.",
+      "properties": {
+        "$comment": {
+          "type": ["array", "string"],
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "email": {
+      "description": "The outbound email service for this environment. `service: null` means the environment has none and the renderer omits the binding; `provisioned: false` means a Worker IS named but does not exist, which is a different and louder failure.",
+      "required": ["mode", "service", "provisioned"],
+      "properties": {
+        "mode": { "enum": ["real", "stub", "none"] },
+        "service": {
+          "type": ["string", "null"],
+          "description": "A Worker NAME, not an id. Null only where `mode` is \"none\"."
+        },
+        "provisioned": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "mode": { "const": "none" } } },
+          "then": { "properties": { "service": { "type": "null" } } }
+        },
+        {
+          "if": { "properties": { "mode": { "enum": ["real", "stub"] } } },
+          "then": { "properties": { "service": { "type": "string" } } }
+        }
+      ]
+    },
+    "environment": {
+      "type": "object",
+      "required": [
+        "lifecycle",
+        "cookie_prefix",
+        "issuer_base_url",
+        "workers_dev",
+        "api_origin",
+        "email",
+        "hosts",
+        "ratelimits",
+        "resources"
+      ],
+      "properties": {
+        "lifecycle": { "enum": ["long-lived", "local", "ephemeral-per-pr"] },
+        "host_prefix": { "type": ["string", "null"] },
+        "cookie_prefix": { "type": "string" },
+        "issuer_base_url": { "type": "string" },
+        "workers_dev": { "type": "boolean" },
+        "api_origin": { "enum": ["self"] },
+        "email": { "$ref": "#/$defs/email" },
+        "hosts": {
+          "type": "object",
+          "description": "Hostname per deployable; null for one that serves none. `identity-jobs` is a queue consumer and is null in every environment.",
+          "required": [
+            "identity",
+            "identity-admin",
+            "home-web",
+            "identity-jobs"
+          ]
+        },
+        "ratelimits": { "type": "object" },
+        "resources": { "type": "object" },
+        "never_binds_production": { "type": "boolean" }
+      }
+    }
+  },
+  "allOf": [{ "$ref": "#/$defs/commented" }],
+  "unevaluatedProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 1 },
+    "account": {
+      "description": "The one Cloudflare account and the zone it serves. `id` is account context, not a generated resource id: Cloudflare does not mint it and it does not change. It is written here rather than resolved from GitHub so that no workflow, variable or secret can become a second source of truth for it.",
+      "required": ["id", "zone"],
+      "properties": {
+        "id": {
+          "const": "406bdb82319b162b09bf5f137a156600"
+        },
+        "zone": { "const": "ecoma.io" }
+      }
+    },
+    "limits": {
+      "required": [
+        "custom_domains_per_zone",
+        "workers_per_account",
+        "custom_domains_reserved_fixed",
+        "custom_domains_per_preview",
+        "workers_per_preview",
+        "max_active_previews",
+        "preview_max_age_hours"
+      ],
+      "properties": {
+        "custom_domains_per_zone": { "const": 100 },
+        "workers_per_account": { "const": 500 },
+        "custom_domains_reserved_fixed": { "const": 6 },
+        "custom_domains_per_preview": { "const": 3 },
+        "workers_per_preview": { "const": 4 },
+        "max_active_previews": { "type": "integer", "minimum": 1 },
+        "preview_max_age_hours": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "naming": {
+      "description": "Name templates. Every name in every environment derives from one of these.",
+      "required": [
+        "worker_fixed",
+        "worker_staging",
+        "worker_development",
+        "worker_preview",
+        "d1_production",
+        "d1_staging",
+        "d1_preview",
+        "kv_production",
+        "kv_staging",
+        "kv_preview",
+        "queue_production",
+        "queue_staging",
+        "queue_preview",
+        "dlq_preview",
+        "ratelimit_production",
+        "ratelimit_staging",
+        "ratelimit_preview",
+        "host_production",
+        "host_staging",
+        "host_preview"
+      ]
+    },
+    "services": {
+      "required": ["identity", "identity-admin", "identity-jobs", "home-web"]
+    },
+    "bindings": {
+      "description": "Binding SLOT NAMES per deployable. These are the strings a Worker reads through `env`; they are not Cloudflare resource ids.",
+      "required": ["identity", "identity-admin", "identity-jobs", "home-web"]
+    },
+    "cookie_namespaces": {
+      "description": "Complete locale-cookie NAMES per environment. A prefix, not a full name, would leave the name with two owners.",
+      "required": ["production", "staging", "preview", "development"]
+    },
+    "environments": {
+      "description": "Every environment declares the SAME set of keys, including `email`. The development block shipped without one, which nothing caught: the manifest's own comment says the topology checker fails when declarations disagree, and it did not — because there was nothing to disagree with. `email.service` may be null (an environment with no email service); the key itself may not be absent.",
+      "required": ["production", "staging", "preview", "development"],
+      "properties": {
+        "production": { "$ref": "#/$defs/environment" },
+        "staging": { "$ref": "#/$defs/environment" },
+        "preview": { "$ref": "#/$defs/environment" },
+        "development": { "$ref": "#/$defs/environment" }
+      }
+    },
+    "preview": {
+      "required": [
+        "grammar",
+        "pr_number",
+        "max_pr_number",
+        "never_delete",
+        "not_deletable",
+        "deletion_order",
+        "evidence"
+      ],
+      "properties": {
+        "grammar": {
+          "description": "Anchored regular expressions matching the whole name. No prefix matching: a `startsWith('identity-pr-')` somewhere in the delete path would eventually match a production name.",
+          "required": [
+            "worker",
+            "d1",
+            "kv",
+            "queue",
+            "dlq",
+            "hostname",
+            "rate_limit",
+            "cookie",
+            "email_provider"
+          ]
+        },
+        "pr_number": { "type": "string" },
+        "max_pr_number": {
+          "required": ["value", "on_exceed"],
+          "properties": {
+            "value": { "type": "integer", "minimum": 1 },
+            "on_exceed": { "const": "refuse" }
+          }
+        },
+        "never_delete": {
+          "description": "Tested as literal set membership before every delete, in addition to the grammar. The backstop that does not depend on the grammar being correct.",
+          "required": ["workers", "d1", "kv", "queue"]
+        },
+        "not_deletable": {
+          "required": ["rate_limit_namespaces"]
+        },
+        "deletion_order": {
+          "required": ["steps"],
+          "properties": {
+            "steps": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "evidence": {
+          "required": ["states", "on_unknown", "on_open", "on_closed"],
+          "properties": {
+            "states": {
+              "type": "array",
+              "items": { "enum": ["closed", "open", "unknown"] }
+            },
+            "on_unknown": { "const": "do-not-delete" },
+            "on_open": { "const": "do-not-delete" },
+            "on_closed": { "const": "delete" }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "meta": {
+    "title": "Ecoma Identity"
+  },
+  "auth": {
+    "login": {
+      "title": "Sign in to your account",
+      "email": "Email address",
+      "password": "Password",
+      "submit": "Sign in",
+      "forgot": "Forgot password?",
+      "signup": "Don't have an account? Sign up"
+    },
+    "register": {
+      "title": "Create your account",
+      "email": "Email address",
+      "password": "Password",
+      "confirmPassword": "Confirm password",
+      "submit": "Create account",
+      "login": "Already have an account? Sign in"
+    },
+    "mfa": {
+      "title": "Two-factor authentication",
+      "code": "Verification code",
+      "submit": "Verify"
+    }
+  },
+  "profile": {
+    "title": "Profile",
+    "email": "Email",
+    "name": "Name",
+    "sessions": "Active sessions",
+    "revokeSession": "Revoke"
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "An error occurred"
+  },
+  "locale": {
+    "select": "Language",
+    "en": "English",
+    "vi": "Tiếng Việt"
+  }
+}

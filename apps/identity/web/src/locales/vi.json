@@ -1,0 +1,44 @@
+{
+  "meta": {
+    "title": "Ecoma Identity"
+  },
+  "auth": {
+    "login": {
+      "title": "Đăng nhập vào tài khoản của bạn",
+      "email": "Địa chỉ email",
+      "password": "Mật khẩu",
+      "submit": "Đăng nhập",
+      "forgot": "Quên mật khẩu?",
+      "signup": "Chưa có tài khoản? Đăng ký"
+    },
+    "register": {
+      "title": "Tạo tài khoản của bạn",
+      "email": "Địa chỉ email",
+      "password": "Mật khẩu",
+      "confirmPassword": "Xác nhận mật khẩu",
+      "submit": "Tạo tài khoản",
+      "login": "Đã có tài khoản? Đăng nhập"
+    },
+    "mfa": {
+      "title": "Xác thực hai yếu tố",
+      "code": "Mã xác thực",
+      "submit": "Xác nhận"
+    }
+  },
+  "profile": {
+    "title": "Hồ sơ",
+    "email": "Email",
+    "name": "Tên",
+    "sessions": "Phiên hoạt động",
+    "revokeSession": "Thu hồi"
+  },
+  "common": {
+    "loading": "Đang tải...",
+    "error": "Đã xảy ra lỗi"
+  },
+  "locale": {
+    "select": "Ngôn ngữ",
+    "en": "English",
+    "vi": "Tiếng Việt"
+  }
+}

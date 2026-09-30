@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/admin/v1/update-application-request.schema.json",
+  "title": "UpdateApplication",
+  "description": "The body of an administrative change to a registration, derived from identity_application::applications::UpdateApplication. Every field that changes something is OPTIONAL and every one of them ADDS. Nothing here removes a redirect URI, and that asymmetry is the design: a removed URI takes live clients down instantly and silently, so removal is a separate, deliberate operation that this contract does not describe.",
+  "type": "object",
+  "x-rust-type": "identity_application::applications::UpdateApplication",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; UpdateApplicationCommand has no body and no route serves it",
+  "required": ["actor_id", "application_id", "add_redirect_uris", "add_scopes"],
+  "additionalProperties": false,
+  "properties": {
+    "actor_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The administrator making the change. A non-administrator is a Forbidden refusal.",
+      "x-serde": "pub actor_id: UserId",
+      "x-serde-status": "required"
+    },
+    "application_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The application being changed.",
+      "x-serde": "pub application_id: ApplicationId",
+      "x-serde-status": "required"
+    },
+    "display_name": {
+      "type": ["string", "null"],
+      "description": "A new display name, IF changing it. Absent means leave it alone — which is why this is Option<String> and not an empty string: an empty name is a refusal, and \"unchanged\" must be expressible.",
+      "x-serde": "pub display_name: Option<String>",
+      "x-serde-status": "optional",
+      "x-serde-note": "Option<String> with no skip_serializing_if, so the key is always present on the wire."
+    },
+    "add_redirect_uris": {
+      "type": "array",
+      "description": "Redirect URIs to ADD. Additive only, for the reason in the description above. An invalid URI in this list is a domain refusal and the whole update is refused — a partial application would leave a registration in a state nobody chose.",
+      "x-serde": "pub add_redirect_uris: Vec<String>",
+      "x-serde-status": "required",
+      "items": {
+        "type": "string",
+        "format": "uri",
+        "maxLength": 2048
+      }
+    },
+    "add_scopes": {
+      "type": "array",
+      "description": "Scopes to ADD. Additive only, same reasoning.",
+      "x-serde": "pub add_scopes: Vec<String>",
+      "x-serde-status": "required",
+      "items": { "type": "string" }
+    },
+    "status": {
+      "type": ["string", "null"],
+      "description": "A new status, IF changing it. retired is one-way: no later update can move a retired application back to active, so a caller that sets retired has made a one-way decision.",
+      "x-serde": "pub status: Option<ApplicationStatus>",
+      "x-serde-status": "optional",
+      "x-serde-note": "Option<ApplicationStatus> with no skip_serializing_if, so the key is always present on the wire.",
+      "x-accepted-values": {
+        "source": "identity_domain::application::ApplicationStatus, serde rename_all = \"snake_case\""
+      },
+      "enum": ["active", "suspended", "retired"]
+    }
+  },
+  "x-absent-fields": {
+    "remove_redirect_uris": "there is no such field, and its absence is the point. A removed URI takes live clients down instantly and silently; removal is a separate deliberate operation.",
+    "remove_scopes": "same reasoning — narrowing a client's registration is a breaking change to a deployed integration",
+    "confidential": "the confidential/public distinction is not editable. A client is registered as one or the other, and a secret-bearing client does not become public by a field write."
+  },
+  "x-response": "ApplicationView on success",
+  "x-phase": "Phase 5 — Applications, grants, and the self-service surface"
+}

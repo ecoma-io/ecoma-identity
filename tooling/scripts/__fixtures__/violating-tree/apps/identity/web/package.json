@@ -1,0 +1,7 @@
+{
+  "name": "@ecoma-identity/web",
+  "private": true,
+  "dependencies": {
+    "vue": "^3.5.0"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  // Fixture wrangler config for the Identity Worker, $ENV environment.
+  // Legal, with the KV and rate-limiter bindings the brief allows.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "identity",
+  "compatibility_date": "2026-08-05",
+  // A comment containing a brace } and quotes " to prove the stripper is
+  // comment-aware rather than a regex over slashes.
+  "d1_databases": [
+    {
+      "binding": "IDENTITY_DB",
+      "database_name": "identity-$ENV",
+      "database_id": "0000",
+    },
+  ],
+  "kv_namespaces": [{ "binding": "IDENTITY_KV", "id": "1111" }],
+  "queues": {
+    "producers": [{ "binding": "IDENTITY_QUEUE", "queue": "identity" }],
+  },
+  "vars": { "ENVIRONMENT": "development" },
+}

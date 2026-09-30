@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/self-service/v1/session-view.schema.json",
+  "title": "SessionView",
+  "description": "One of the caller's own sessions, as the user sees it in their own list, derived from identity_application::sessions::SessionView. Note what is ABSENT: no secret, no token, no hash, no cookie value, no security_version. The session_id is a handle, not a credential — knowing it is not enough to authenticate, because the transport also carries a secret the server stores hashed. The administrative view of a user's sessions is a different type (UserSessionSummary), reached through a different trait that takes a user_id.",
+  "type": "object",
+  "x-rust-type": "identity_application::sessions::SessionView",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; ListSessionsQuery has no body and no route serves it",
+  "required": [
+    "session_id",
+    "created_at_ms",
+    "expires_at_ms",
+    "aal",
+    "label",
+    "current"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The session's identifier. A transparent newtype over a UUID in Rust. A handle, not a credential: presenting it is not authentication.",
+      "x-serde": "pub session_id: SessionId",
+      "x-serde-status": "required",
+      "x-serde-note": "SessionId is #[serde(transparent)] over a Uuid."
+    },
+    "created_at_ms": {
+      "type": "integer",
+      "description": "When it was created, in milliseconds since the Unix epoch. A signed 64-bit integer in Rust; negative values are representable and are not meaningful dates.",
+      "x-serde": "pub created_at_ms: i64",
+      "x-serde-status": "required"
+    },
+    "expires_at_ms": {
+      "type": "integer",
+      "description": "When it expires, in milliseconds since the Unix epoch. Absolute, not a duration: a duration stored on the row would make 'when does this expire' depend on when you asked. The domain refuses to construct a session whose expiry does not follow its creation.",
+      "x-serde": "pub expires_at_ms: i64",
+      "x-serde-status": "required"
+    },
+    "aal": {
+      "type": "string",
+      "description": "The assurance level the session was ESTABLISHED at. Distinct from whether a step-up happened later: Aal is a floor for the session's lifetime, while a step-up is a property of a moment.",
+      "x-serde": "pub aal: Aal",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "identity_domain::security::Aal with #[serde(rename_all = \"snake_case\")]",
+        "constraining": "an enum in Rust; wire values \"aal1\" | \"aal2\", matching Aal::as_wire()"
+      },
+      "enum": ["aal1", "aal2"]
+    },
+    "label": {
+      "type": ["string", "null"],
+      "description": "A COARSE label for where the session came from. Never a user-agent string stored verbatim: it is displayed in a list an account-takeover attacker will be reading, and an unescaped user-agent is a stored-XSS vector. Serialised as null when absent, not omitted.",
+      "x-serde": "pub label: Option<String>",
+      "x-serde-status": "required on the wire, nullable",
+      "x-serde-note": "Option<String> with no skip_serializing_if, so the key is always present."
+    },
+    "current": {
+      "type": "boolean",
+      "description": "Whether this session is the one making the request. The current session is marked so the UI can offer 'this device' separately. Client-computed from the request context, not a stored column.",
+      "x-serde": "pub current: bool",
+      "x-serde-status": "required"
+    }
+  },
+  "x-omission-rule": {
+    "rule": "every field is always present. `label` is the only nullable one.",
+    "source": "no skip_serializing_if on SessionView",
+    "test": "identity_application::sessions::tests::a_session_view_exposes_no_secret_material asserts the serialised view contains no 'secret', 'token', 'hash', 'cookie' or 'security_version'"
+  },
+  "x-phase": "Phase 1 — Sessions and the request context for the record; Phase 5 — Applications, grants, and the self-service surface for the screen that renders it"
+}

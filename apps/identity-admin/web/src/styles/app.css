@@ -1,0 +1,338 @@
+/*
+  The app's own styles.
+
+  What this is: the layout and component styles for the class names the screens
+  and components use. It depends only on `tokens.css` — no framework, no
+  utility library, no imported design system.
+
+  Accessibility rules enforced here rather than left to each screen:
+  - A visible focus ring on every interactive element, via `:focus-visible`,
+    with a fallback `:focus` for browsers that do not support it. Nothing in
+    this app removes an outline without replacing it.
+  - `.visually-hidden`, which clips rather than `display: none` — a
+    `display: none` element is removed from the accessibility tree, so a
+    visually-hidden label that used it would be invisible to everyone.
+  - Minimum touch target sizing on nav links and badges.
+*/
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  /* No `user-scalable=no`. A pinch-zoom a user cannot control is an
+     accessibility failure, and the viewport meta tag in `index.html` already
+     permits scaling. */
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--colour-canvas);
+  color: var(--colour-text);
+  font-family: var(--font-body);
+  font-size: var(--size-base);
+  line-height: 1.55;
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: var(--size-small);
+}
+
+/* ---- focus -------------------------------------------------------------- */
+
+:focus-visible {
+  outline: var(--focus-ring) solid var(--colour-focus);
+  outline-offset: var(--focus-offset);
+  border-radius: 2px;
+}
+
+/* Older engines without `:focus-visible` still get a ring; this is the
+   `:focus` half of the pair, not a replacement. */
+@supports not selector(:focus-visible) {
+  :focus {
+    outline: var(--focus-ring) solid var(--colour-focus);
+    outline-offset: var(--focus-offset);
+  }
+}
+
+/* ---- visually hidden ---------------------------------------------------- */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- skip link ---------------------------------------------------------- */
+
+/* Off-screen until focused, then pinned to the top-left. `transform` rather
+   than `top: -100%` so the element is never scrolled out of reach in a way
+   that surprises a browser's own scrolling on focus. */
+.skip-link {
+  position: absolute;
+  left: var(--space-2);
+  top: -3rem;
+  z-index: 10;
+  padding: var(--space-2) var(--space-3);
+  background: var(--colour-accent);
+  color: var(--colour-accent-contrast);
+  border-radius: var(--radius);
+  text-decoration: none;
+  transition: top 120ms ease-out;
+}
+
+.skip-link:focus {
+  top: var(--space-2);
+}
+
+/* ---- header and navigation ---------------------------------------------- */
+
+.app-header {
+  padding: var(--space-4) var(--space-3) var(--space-2);
+  border-bottom: 1px solid var(--colour-border);
+  max-width: 60rem;
+  margin: 0 auto;
+}
+
+.app-header__brand {
+  margin: 0 0 var(--space-3);
+}
+
+.app-header__brand-link {
+  color: var(--colour-text);
+  font-size: var(--size-heading);
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.app-header__brand-link:hover,
+.app-header__brand-link:focus-visible {
+  text-decoration: underline;
+}
+
+.app-nav__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.app-nav__link {
+  /* A 44px minimum target: the link's text is one line, so the height comes
+     from padding rather than a fixed height, and it still grows with the
+     badge. */
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 2.75rem;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--colour-border);
+  border-radius: var(--radius);
+  color: var(--colour-text);
+  text-decoration: none;
+  font-size: var(--size-small);
+}
+
+.app-nav__link:hover {
+  border-color: var(--colour-border-strong);
+}
+
+/* The deferred treatment is the *whole* link, not an appended badge: a user
+   should be able to see at a glance which parts of their account exist. */
+.app-nav__link--deferred {
+  color: var(--colour-text-muted);
+  border-style: dashed;
+}
+
+.app-nav__badge {
+  padding: 0 var(--space-1);
+  border-radius: var(--radius);
+  background: var(--colour-deferred-surface);
+  color: var(--colour-deferred-text);
+  border: 1px solid var(--colour-deferred-border);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+/* ---- main and screens ---------------------------------------------------- */
+
+.app-main {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: var(--space-4) var(--space-3) var(--space-5);
+}
+
+.app-main:focus {
+  /* The skip link's target takes focus; it should not also draw a ring around
+     the whole page. Focus inside it still does. */
+  outline: none;
+}
+
+.screen__heading {
+  margin: 0 0 var(--space-2);
+  font-size: var(--size-heading);
+  line-height: 1.25;
+}
+
+.screen__lede {
+  margin: 0 0 var(--space-3);
+  color: var(--colour-text-muted);
+  max-width: 46rem;
+}
+
+.screen__note {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--colour-surface);
+  border-left: 3px solid var(--colour-border-strong);
+  border-radius: var(--radius);
+}
+
+.screen__footnote {
+  margin: var(--space-4) 0 0;
+  color: var(--colour-text-muted);
+  font-size: var(--size-small);
+  max-width: 46rem;
+}
+
+/* ---- panels and the deferred state -------------------------------------- */
+
+.panel {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--colour-border);
+  border-radius: var(--radius);
+  background: var(--colour-surface-raised);
+}
+
+.panel__heading {
+  margin: 0 0 var(--space-1);
+  font-size: var(--size-large);
+}
+
+.panel__lede {
+  margin: 0 0 var(--space-3);
+  color: var(--colour-text-muted);
+}
+
+/* The deferred panel's whole point is that it reads as a deliberate state, not
+   a broken one: amber surface, amber border, and never a red. */
+.deferred {
+  background: var(--colour-deferred-surface);
+  border-color: var(--colour-deferred-border);
+}
+
+.deferred__heading {
+  margin: 0 0 var(--space-2);
+  font-size: var(--size-large);
+  color: var(--colour-deferred-text);
+}
+
+.deferred__detail {
+  margin: 0 0 var(--space-2);
+  max-width: 46rem;
+}
+
+.deferred__backend,
+.deferred__request-id {
+  margin: var(--space-2) 0 0;
+  font-size: var(--size-small);
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.deferred__label {
+  color: var(--colour-text-muted);
+  /* A real label, not a pseudo-element `::before` with a `content` string:
+     generated content is not reliably announced, and this text is the only
+     explanation of what the endpoint does. */
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.75rem;
+}
+
+/* ---- badges -------------------------------------------------------------- */
+
+.badge {
+  display: inline-block;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius);
+  font-size: var(--size-small);
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.badge--ok {
+  background: var(--colour-surface);
+  border-color: var(--colour-border-strong);
+}
+
+.badge--pending {
+  background: var(--colour-deferred-surface);
+  border-color: var(--colour-deferred-border);
+  color: var(--colour-deferred-text);
+}
+
+/* ---- capability table ---------------------------------------------------- */
+
+.capability-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.capability-table th,
+.capability-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--colour-border);
+}
+
+.capability-table thead th {
+  font-size: var(--size-small);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--colour-text-muted);
+}
+
+.capability-table__route,
+.capability-table__behaviour,
+.capability-table__phase {
+  display: block;
+}
+
+.capability-table__behaviour {
+  color: var(--colour-text-muted);
+  font-size: var(--size-small);
+}
+
+.capability-table__phase {
+  color: var(--colour-deferred-text);
+  font-size: var(--size-small);
+  font-weight: 600;
+}
+
+/* ---- the console suffix -------------------------------------------------- */
+
+/* "Ecoma Identity" followed by "Console", so a tab and a browser title never
+   look like the end-user app. Colour alone would not distinguish them for a
+   low-vision operator, so the word is real text, not a tint. */
+.app-header__brand-suffix {
+  margin-left: var(--space-2);
+  color: var(--colour-text-muted);
+  font-weight: 400;
+}

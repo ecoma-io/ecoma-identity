@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/admin/v1/admin-user-row.schema.json",
+  "title": "AdminUserRow",
+  "description": "One row of the operator console's user table, derived from identity_application::administration::AdminUserRow. This is a DIFFERENT type from the self-service AccountView for the same account, and the difference is the point: an administrative read is not a self-service read, and the two are separate so that a field cannot be added to one and appear in the other by accident.",
+  "type": "object",
+  "x-rust-type": "identity_application::administration::AdminUserRow",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; SearchUsersQuery has no body and no route serves it",
+  "required": [
+    "user_id",
+    "display_name",
+    "role",
+    "status",
+    "active_sessions",
+    "last_authenticated_at_ms",
+    "created_at_ms"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The user. A transparent UUID newtype in Rust.",
+      "x-serde": "pub user_id: UserId",
+      "x-serde-status": "required"
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The display name.",
+      "x-serde": "pub display_name: String",
+      "x-serde-status": "required"
+    },
+    "role": {
+      "type": "string",
+      "description": "The platform role. Decides what an administrator may do to an ACCOUNT — never consulted about a merge in another repository (ADR-0005). may_assign_roles() is true for support and administrator and false for member and service: support moderates, it does not promote.",
+      "x-serde": "pub role: PlatformRole",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "identity_domain::user::PlatformRole with #[serde(rename_all = \"snake_case\")]",
+        "constraining": "an enum in Rust"
+      },
+      "enum": ["member", "support", "administrator", "service"]
+    },
+    "status": {
+      "type": "string",
+      "description": "The account's status. Only active permits authentication (UserStatus::permits_authentication), and the status is the authoritative gate — a stale session must still be refused. pending_verification means the user can complete a challenge but has no session.",
+      "x-serde": "pub status: UserStatus",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "identity_domain::user::UserStatus with #[serde(rename_all = \"snake_case\")]",
+        "constraining": "an enum in Rust"
+      },
+      "enum": ["active", "suspended", "deactivated", "pending_verification"]
+    },
+    "active_sessions": {
+      "type": "integer",
+      "description": "How many live sessions the user holds. A COUNT, not a list: an administrative view of session state is a number for a table, and the session identifiers are the self-service surface's business.",
+      "x-serde": "pub active_sessions: u32",
+      "x-serde-status": "required",
+      "minimum": 0
+    },
+    "last_authenticated_at_ms": {
+      "type": ["integer", "null"],
+      "description": "When they last signed in, in milliseconds since the Unix epoch. Null means never. Serialised as null, not omitted.",
+      "x-serde": "pub last_authenticated_at_ms: Option<i64>",
+      "x-serde-status": "required on the wire, nullable",
+      "x-serde-note": "Option<i64> with no skip_serializing_if, so the key is always present."
+    },
+    "created_at_ms": {
+      "type": "integer",
+      "description": "When the account was created, in milliseconds since the Unix epoch.",
+      "x-serde": "pub created_at_ms: i64",
+      "x-serde-status": "required"
+    }
+  },
+  "x-on-suspension": "Suspension is a POST and not a field write on purpose: it is a command with an effect the server records in the audit trail, and modelling it as an edit-status control would invite a console that offers a generic field. It also revokes the user's sessions server-side, so the effect is NOT complete when the call returns a user row — a console must report what the server said, not what it assumed.",
+  "x-phase": "Phase 6 — Administration"
+}

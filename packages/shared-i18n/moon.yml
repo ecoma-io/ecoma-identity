@@ -1,0 +1,46 @@
+# Moon configuration for shared-i18n package.
+#
+# This package provides shared i18n utilities for all frontend applications.
+#
+# See packages/shared-i18n/README.md for the architecture and usage.
+
+tags:
+  - shared-i18n
+
+tasks:
+  format-check:
+    script: '"$MOON_WORKSPACE_ROOT/node_modules/.bin/prettier" --check --ignore-unknown .'
+    inputs:
+      - "**/*.{js,mjs,cjs,ts,vue,json,jsonc,yml,yaml,md}"
+    outputs: []
+
+  lint:
+    script: '"$MOON_WORKSPACE_ROOT/node_modules/.bin/eslint" .'
+    inputs:
+      - "**/*.{js,mjs,cjs,ts,vue}"
+    outputs: []
+
+  typecheck:
+    script: 'cd "$MOON_PROJECT_ROOT" && "$MOON_PROJECT_ROOT/node_modules/.bin/tsc" --noEmit'
+    inputs:
+      - "src/**/*.ts"
+      - "tests/**/*.ts"
+      - "tsconfig.json"
+    outputs: []
+
+  test:
+    script: 'cd "$MOON_PROJECT_ROOT" && "$MOON_PROJECT_ROOT/node_modules/.bin/vitest" run'
+    inputs:
+      - "src/**/*.ts"
+      - "tests/**/*.ts"
+    outputs: []
+
+  build:
+    script: 'cd "$MOON_PROJECT_ROOT" && "$MOON_PROJECT_ROOT/node_modules/.bin/tsc" -p tsconfig.build.json'
+    inputs:
+      - "src/**/*.ts"
+      - "tsconfig.json"
+      - "tsconfig.build.json"
+      - "package.json"
+    outputs:
+      - "dist/**/*"

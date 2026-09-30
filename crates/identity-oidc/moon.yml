@@ -1,0 +1,85 @@
+# identity-oidc — the OAuth 2.1 and OIDC wire types: the route table, request
+# and response shapes, JWT handling, the discovery document.
+#
+# THE DEPENDENCY LAW: `identity-oidc` → `identity-domain`, and nothing else
+# internal. The route table here (`Route::ALL`) is the single list the Identity
+# Worker dispatches from AND the list `contracts/oidc/v1/` is checked against,
+# which is why a route cannot exist in one place and be missing from the other.
+#
+# `Route::is_implemented()` is false for every protocol route in this phase and
+# `/ready` reports that truthfully. Do not "fix" the flag without the handler.
+
+$schema: https://moonrepo.dev/schemas/moon.json
+
+tags:
+  - rust
+  - crate
+  - oidc
+
+tasks:
+  format:
+    command: "cargo fmt -p identity-oidc"
+    options:
+      cache: false
+
+  # `format-check`, not `format:check` — moon 2.5.6 rejects a colon in a
+  # project-level task id. See the note in crates/identity-domain/moon.yml.
+  format-check:
+    command: "cargo fmt -p identity-oidc -- --check"
+    options:
+      cache: false
+
+  lint:
+    command: "cargo clippy -p identity-oidc --all-targets -- -D warnings"
+    options:
+      cache: false
+
+  typecheck:
+    command: "cargo check -p identity-oidc --all-targets"
+    options:
+      cache: false
+
+  test:
+    command: "cargo test -p identity-oidc --locked"
+    options:
+      cache: false
+
+  test-unit:
+    command: "cargo test -p identity-oidc --locked --lib"
+    options:
+      cache: false
+
+  # ---------------------------------------------------------------------------
+  # HOST TARGET, DELIBERATELY — this crate does not depend on `worker`.
+  #
+  # `worker` 0.8.7 compiles for the host as well as for wasm32, so a wasm32
+  # build here would not fail; it would just make every change to a wire type
+  # recompile for a target no test runs on. The host build is what keeps the
+  # affected-first loop fast, and the wasm32 compile happens once, in
+  # `identity:build`, where the Workers need it.
+  #
+  # Same reasoning, same wording, on identity-domain, identity-application,
+  # identity-security and identity-testkit.
+  # ---------------------------------------------------------------------------
+  build:
+    command: "cargo build -p identity-oidc --locked"
+    options:
+      cache: false
+
+  dev:
+    # `options.runInCI: false`, not the root file's `local: 'only'` — moon 2.5.6
+    # has no `local` field on a task. Verified: `moon ci` skips this task.
+    command: "cargo run -p identity-oidc --locked"
+    options:
+      runInCI: false
+    inputs: []
+    outputs: []
+
+  package:
+    command: "cargo build -p identity-oidc --locked --release"
+    options:
+      cache: false
+
+  wrangler-validate:
+    inputs: []
+    outputs: []

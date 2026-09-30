@@ -1,0 +1,284 @@
+# ROLLBACK. Promote an EXISTING version id. Never build.
+#
+# This file exists because `docs/operations/rollback.md` is a document, and a
+# document is the wrong thing to be holding during an incident. Every command in
+# that document is also here as a typed input, so the rollback an engineer
+# performs at 03:00 is a form with the version id in it rather than a command
+# line assembled from a markdown table.
+#
+# ---------------------------------------------------------------------------
+# WHAT THIS FILE WILL NOT DO (ADR-0013)
+# ---------------------------------------------------------------------------
+# It does not check out a commit, build, test, package or upload anything, and
+# there is no branch in this workflow where one of those happens. A Cloudflare
+# Version is immutable: a version id names exactly one set of bytes forever,
+# which is what makes it a trustworthy rollback target — and that trust is the
+# whole reason a rollback can be minutes rather than an hour. Building during a
+# rollback would spend that advantage re-deriving bytes that already exist,
+# while the bad version keeps serving for every second of it.
+#
+# A rebuild is a NEW version and is deliberately not reachable from here. It is
+# a forward fix (Path 3 in `docs/operations/rollback.md`), and it goes through
+# `deploy-production.yml` and the canary ladder like any other release.
+#
+# `permissions: contents: read` and NO checkout step at all: this workflow does
+# not read the repository, which is the mechanical proof that it cannot build.
+#
+# ---------------------------------------------------------------------------
+# WHICH PATH IS WHICH
+# ---------------------------------------------------------------------------
+#   Path 1  `wrangler rollback <version-id>`        the documented normal path
+#   Path 2  `wrangler versions deploy --version-id <id> --percentage <p>`
+#                                                       the partial path
+#
+# They are the same operation with different ergonomics — `rollback` is Path 1's
+# spelling and Path 2's spelling is the one that also lets you move the
+# percentage. Both are promotions of an existing version id. This file offers
+# both because `rollback.md` recommends Path 2 as cheaper in the common case,
+# and a tool that only implemented the recommendation would push an operator
+# toward the slower spelling during an incident.
+
+on:
+  # Rollback is NEVER automatic. There is no trigger here that fires on its own,
+  # and the absence is the point: `rollback.md`'s constraint table records a
+  # rollback as "No — a human, always", and a push-to-main or schedule trigger
+  # would make it automatic by accident of configuration.
+  workflow_dispatch:
+    inputs:
+      # `home-web` (ADR-0016) rolls back through this file exactly as the three
+      # Identity Workers do. A Cloudflare Version is immutable whatever built
+      # it, so there is nothing about a Nuxt/Nitro version that needs a
+      # different rollback — and if promoting an existing version id is
+      # correct for three deployables, the fourth is not a special case.
+      #
+      # What IS deployable-specific is the post-rollback probe at the end of this
+      # job, and it is the only place the difference shows up.
+      worker:
+        description: "Component to roll back (identity | identity-admin | identity-jobs | home-web)"
+        required: true
+        type: string
+
+      # The version id being promoted. Required and free-form, because naming
+      # the exact version is what makes the action reviewable afterwards —
+      # `rollback.md` says explicitly that the bare `wrangler rollback` form
+      # "is convenient and is the wrong tool in an incident where you need to
+      # name exactly which version".
+      version-id:
+        description: "The version id to promote (e.g. 1a2b3c4d-…)"
+        required: true
+        type: string
+
+      # Path 1 or Path 2. Both promote an existing version; the difference is
+      # that Path 2 states the percentage explicitly and Path 1 does not.
+      path:
+        description: "1 = wrangler rollback (documented default), 2 = versions deploy at an explicit percentage"
+        required: false
+        default: "1"
+        type: string
+
+      # Only read for Path 2. 100 is the default because Path 2 is described as
+      # the "send 0% to the bad version" move, which is a percentage and almost
+      # always 100.
+      percentage:
+        description: "Traffic percentage, Path 2 only"
+        required: false
+        default: 100
+        type: string
+
+      # Why. Free text, required, and recorded in the Cloudflare deployment
+      # message: an incident is reconstructed from these, and "rollback" with no
+      # reason is not a record.
+      reason:
+        description: "Why this rollback is happening (recorded in the deployment message)"
+        required: true
+        type: string
+
+      environment:
+        description: "staging | production"
+        required: false
+        default: production
+        type: string
+
+# One rollback at a time per worker, and NEVER cancelled in progress. A rollback
+# cancelled halfway is a Worker sitting at a percentage nobody chose to leave it
+# at. Superseding a rollback is a decision, and a decision is a dispatch.
+concurrency:
+  group: rollback-${{ inputs.worker }}-${{ inputs.environment }}
+  cancel-in-progress: false
+
+# `contents: read` is the ceiling and is arguably a grant this workflow does not
+# need at all — it never touches the repository. It is declared rather than
+# omitted because `contents: none` at workflow level reads as an accident, and
+# an explicit read says "this reads the repository and nothing more", which is
+# true.
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    name: Roll back ${{ inputs.worker }} (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      # The script name, which is NOT the component name in staging — the same
+      # distinction `deploy.yml` and `deploy-production.yml` carry.
+      #
+      # Resolved ONCE here rather than in a step. Every `run:` block is a
+      # separate shell with a separate environment, so a variable a step sets is
+      # gone by the next step; deriving this in the job-level `env:` is what
+      # makes it visible to all three steps below. `staging` is the only lane
+      # that differs, and an unrecognised environment resolves to the
+      # production name and is then rejected by the step that checks it.
+      WORKER_NAME: ${{ inputs.environment == 'staging' && format('{0}-staging', inputs.worker) || inputs.worker }}
+      ENVIRONMENT: ${{ inputs.environment }}
+      VERSION_ID: ${{ inputs.version-id }}
+      ROLLBACK_PATH: ${{ inputs.path }}
+      PERCENTAGE: ${{ inputs.percentage }}
+      REASON: ${{ inputs.reason }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      # NO CHECKOUT. There is no source tree on this runner, which is why no
+      # build can happen here even by accident — the strongest form of the
+      # ADR-0013 constraint, since a build cannot be a step that has nothing to
+      # build.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      # Validate the environment BEFORE anything touches Cloudflare, so a typo
+      # in the dispatch form cannot promote the wrong lane's Worker.
+      - name: Refuse an environment this workflow cannot roll back
+        run: |
+          set -euo pipefail
+          if [ "$ENVIRONMENT" != "staging" ] && [ "$ENVIRONMENT" != "production" ]; then
+            echo "::error::unknown environment '$ENVIRONMENT'. Expected staging or production; 'development' has no deployed environment to roll back."
+            exit 1
+          fi
+
+      # The Worker's live deployments, BEFORE anything is promoted. `rollback.md`
+      # asks for verification with `wrangler deployments list` and this is it —
+      # printed before the change so that "what was serving before" is in the
+      # run log even if the promotion goes wrong afterwards.
+      - name: What is live right now
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler deployments list --name "$WORKER_NAME" \
+            || echo "::warning::could not list deployments before promoting."
+
+      - name: Promote the named version (the only thing this file does)
+        run: |
+          set -euo pipefail
+          {
+            echo "### Rolling back \`$WORKER_NAME\` ($ENVIRONMENT)"
+            echo ""
+            echo "- Promoting version \`$VERSION_ID\`"
+            echo "- Reason: $REASON"
+            echo ""
+            echo "This workflow uploaded nothing and built nothing. The version id"
+            echo "above names bytes that already existed; promoting it cannot produce"
+            echo "different bytes (ADR-0013)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          case "$ROLLBACK_PATH" in
+            1)
+              # Path 1, the documented normal path. `wrangler rollback` is
+              # itself a promotion of an existing version id — it does not
+              # upload, build or repackage.
+              pnpm exec wrangler rollback "$VERSION_ID" \
+                --name "$WORKER_NAME" \
+                --message "$REASON (rollback, Path 1)" \
+                --yes
+              ;;
+            2)
+              # Path 2, the partial path: change the Deployment's percentage
+              # rather than the version, so the bad version stays uploaded and
+              # can be promoted again once it is understood.
+              pnpm exec wrangler versions deploy \
+                --name "$WORKER_NAME" \
+                --version-id "$VERSION_ID" \
+                --percentage "$PERCENTAGE" \
+                --message "$REASON (rollback, Path 2 at ${PERCENTAGE}%)" \
+                --yes
+              ;;
+            *)
+              echo "::error::unknown path '$ROLLBACK_PATH'. Expected 1 (wrangler rollback) or 2 (versions deploy at an explicit percentage)."
+              exit 1
+              ;;
+          esac
+
+      # Verification, AFTER. `rollback.md`'s second command, and the run log
+      # ends with evidence rather than an assertion.
+      - name: What is live now
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler deployments list --name "$WORKER_NAME" \
+            || echo "::warning::the promotion reported success but the deployment list could not be read; confirm with 'wrangler deployments list' before closing the incident."
+
+      # `rollback.md` says the probe is part of the procedure, and it is here
+      # rather than left to the operator's memory. A failure is a WARNING and not
+      # an error on purpose: the rollback itself succeeded, the probe may be
+      # failing for a reason this workflow cannot see, and turning a successful
+      # rollback into a red run during an incident costs more than the signal is
+      # worth. The warning is loud and the summary says so.
+      #
+      # The ROUTE and the HOST are both deployable-specific, for the same reason
+      # they are in `deploy-worker.yml`'s smoke job:
+      #
+      #   home-web  /  against its own lane host. It has no /health (ADR-0016),
+      #              and its landing page is the only route a rollback can assert.
+      #   Identity  /health  against vars.SMOKE_PROBE_BASE_URL, unchanged.
+      #
+      # A missing home-web host is a warning here rather than an error, matching
+      # the Identity arm above — during an incident, a warning that names what
+      # to configure is more useful than a red run that blocks nothing. It is
+      # still recorded in the summary as NOT PROBED.
+      - name: Probe the host (see note)
+        continue-on-error: true
+        env:
+          PROBE_BASE_URL: ${{ vars.SMOKE_PROBE_BASE_URL }}
+          HOME_SMOKE_BASE_URL: ${{ vars.HOME_WEB_STAGING_SMOKE_PROBE_BASE_URL && format('{0}', vars.HOME_WEB_STAGING_SMOKE_PROBE_BASE_URL) || vars.HOME_WEB_PRODUCTION_SMOKE_PROBE_BASE_URL }}
+          IS_HOME_WEB: ${{ inputs.worker == 'home-web' && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          if [ "$IS_HOME_WEB" = "true" ]; then
+            if [ -z "$HOME_SMOKE_BASE_URL" ]; then
+              echo "::warning::no home-web probe host configured for the '$ENVIRONMENT' lane, so the post-rollback probe was skipped. A skipped probe is not a passing probe."
+              {
+                echo "- Probe: **not run** — no home-web probe host is configured for the"
+                echo "  \`$ENVIRONMENT\` lane. The promotion succeeded; the public site was NOT"
+                echo "  verified. Configure HOME_WEB_${ENVIRONMENT^^}_SMOKE_PROBE_BASE_URL and"
+                echo "  probe by hand before closing the incident."
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            PROBE_BASE_URL="$HOME_SMOKE_BASE_URL"
+            PROBE_ROUTE="/"
+          else
+            if [ -z "$PROBE_BASE_URL" ]; then
+              echo "::warning::no smoke-probe host configured, so the post-rollback probe was skipped. A skipped probe is not a passing probe."
+              exit 0
+            fi
+            PROBE_ROUTE="/health"
+          fi
+          PROBE_BASE_URL="${PROBE_BASE_URL%/}"
+          STATUS="$(curl --silent --show-error --max-time 15 \
+            --output /dev/null --write-out '%{http_code}' \
+            -H 'Cache-Control: no-cache' \
+            "${PROBE_BASE_URL}${PROBE_ROUTE}" || true)"
+          echo "${PROBE_ROUTE} answered HTTP ${STATUS} after the rollback."
+          if [ "$STATUS" = "200" ]; then
+            {
+              echo "- Probe: \`${PROBE_ROUTE}\` on \`${PROBE_BASE_URL}\` answered **200** after the rollback."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::${PROBE_ROUTE} answered HTTP ${STATUS}, not 200. The promotion reported success, so the Worker is serving — but it is not healthy. Do not close the incident on this."
+            {
+              echo "- Probe: \`${PROBE_ROUTE}\` on \`${PROBE_BASE_URL}\` answered **${STATUS}**, not 200."
+              echo "  The rollback itself succeeded; the deployment is serving and is not healthy."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi

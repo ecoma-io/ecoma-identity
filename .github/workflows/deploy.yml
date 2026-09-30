@@ -1,0 +1,196 @@
+# STAGING. Every merge to the default branch, for all four deployables.
+#
+# This is the constraint-16 job: staging deploys AUTOMATICALLY after a merge to
+# `main`, with no approval anywhere in this file. There is no `environment:` key
+# on any job here and there never should be — `docs/operations/release-process.md`
+# makes the reason explicit. If production also deployed on merge, constraint 16
+# ("automatic") and constraint 19 ("two human gates") would be in direct
+# conflict, and the resolution would be whichever one somebody deleted.
+#
+# What makes staging worth having rather than a smaller production: it is
+# PRODUCTION-SHAPED (same bindings, same compatibility date, same
+# observability, same tier-sensitive settings — the configs say so at the top of
+# each file) and it runs the real authentication path. There is no dev-only code
+# path that could go stale, which is ADR-0009's point.
+#
+# ---------------------------------------------------------------------------
+# WHAT A GREEN RUN OF THIS WORKFLOW DOES AND DOES NOT MEAN
+# ---------------------------------------------------------------------------
+# It means: each of the four deployables was built from this commit, uploaded as
+# an immutable Version, smoke tested, and promoted to 100% OF STAGING TRAFFIC.
+#
+# It does NOT mean an authentication service works. At platform bootstrap the
+# three Identity Worker composition roots are one-line placeholders (`docs/README.md`),
+# every declared protocol route answers 501, and the smoke test is written to
+# expect exactly that — it asserts the version is reachable and answers the way
+# this repository's own route table says it answers, and nothing more. When a
+# Worker gains a real /health and /ready, that check starts asserting their
+# content in the same commit that makes the routes answer.
+#
+# `home-web` is an independent Nuxt/Nitro application; its smoke test probes `/`
+# and verifies the landing page and a generated asset, not `/health` + `/ready`.
+#
+# Concretely: this workflow's smoke tests will FAIL until the Workers are
+# implemented. That is the correct and honest state for a platform that has not
+# deployed yet, and it is why this file exists in a shape that is ready to run
+# rather than one that reports green before anything works.
+
+on:
+  # After the merge, never before. `push` to `main` means a merge landed through
+  # the merge queue — the ruleset in `.github/repository-settings.json` blocks
+  # direct pushes, so this trigger cannot fire on a direct one.
+  push:
+    branches: [main]
+  # Re-deploy staging without a new merge — after a Cloudflare-side change (a
+  # namespace, a rate-limit id) that lives outside this repository. It rebuilds
+  # whatever ref it was dispatched on, so it cannot introduce code that was
+  # never reviewed, and it is not an approval path: dispatching it is a
+  # deliberate act by someone with write access.
+  #
+  # No `inputs:` here. A dispatch input on a deploy workflow is a knob that
+  # changes what production runs, and this one would have been decorative —
+  # declared, documented, and read by nothing. The ref comes from GitHub's own
+  # dispatch UI, which is the honest source for it.
+  workflow_dispatch:
+
+# One staging deploy at a time. A newer push supersedes an in-flight run rather
+# than queueing behind it: staging is a rehearsal, and the useful rehearsal is
+# the newest commit — waiting behind a stale one only delays the evidence.
+#
+# `cancel-in-progress: true` is safe HERE and would be reckless in production,
+# which is the whole difference between this file and deploy-production.yml. A
+# cancelled staging deploy has promoted nothing that production depends on; a
+# cancelled production promotion is a half-finished ladder.
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: true
+
+# `contents: read` is the ceiling. Nothing in this workflow pushes a commit, cuts
+# a tag, opens a pull request or calls the GitHub API — the credentials that
+# matter here are Cloudflare's, passed per job below. A staging deploy that could
+# write to the repository would be able to ship code, which is a promotion
+# decision (ADR-0012).
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Three jobs rather than a matrix, and the reason is that each deployable's
+  # Cloudflare script name differs from its component name in staging
+  # (`identity` -> `identity-staging`). A matrix would carry that mapping as
+  # data in a `strategy.matrix` block, which is correct and is also a second
+  # place to forget an entry — and a forgotten entry is a deployable that
+  # silently stops being deployed. Three explicit jobs make "staging deploys all
+  # three" something a reader verifies by counting, not by trusting a matrix.
+  #
+  # They run in PARALLEL and that is deliberate: they are independent Workers on
+  # independent resources, and none of them waits on another. What does NOT run
+  # in parallel is anything inside a single Worker — deploy-worker.yml orders
+  # its own stages with `needs`.
+  # ---------------------------------------------------------------------------
+  identity:
+    name: Staging — identity
+    uses: ./.github/workflows/deploy-worker.yml
+    permissions:
+      contents: read
+    with:
+      worker: identity
+      # NOT `identity`: the staging script name carries a suffix, and using the
+      # production name here would promote the PRODUCTION default environment
+      # from a merge to main. That is the single most dangerous value in this
+      # file.
+      worker-name: identity-staging
+      environment: staging
+      tag: staging-${{ github.sha }}
+      lane: staging
+      # No ladder on staging. A canary percentage of staging traffic has no
+      # failure mode to catch that a 100% staging deploy does not also have,
+      # because staging has no end users to protect — and canarying here would
+      # make the rehearsal slower without making it more informative.
+      canary: "[]"
+      final-percentage: 100
+      # false, deliberately and visibly: staging has no human gate (constraint
+      # 16). This line exists so that a reader comparing this file with
+      # deploy-production.yml can see the ONE input that differs, rather than
+      # inferring the difference from what is absent.
+      requires-approval: false
+      # Staging configs carry their own real ids in the tracked file — the D1
+      # `database_id`, the KV namespace `id` and the queue names are
+      # infrastructure identifiers that are non-secret by the repository's own
+      # classification (`docs/security/secrets-management.md`, "Configuration,
+      # not a secret"), so there is nothing to inject and `injections: '{}'` is
+      # the honest value rather than a stub. The production lane is the one
+      # whose config carries placeholders.
+      injections: "{}"
+    secrets:
+      # THE staging token, and it must not be the production one. A staging
+      # credential that can write to production would make "staging is a
+      # rehearsal" (ADR-0014 step 6) untrue, because a rehearsal that can
+      # promote would promote.
+      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  identity-admin:
+    name: Staging — identity-admin
+    uses: ./.github/workflows/deploy-worker.yml
+    permissions:
+      contents: read
+    with:
+      worker: identity-admin
+      worker-name: identity-admin-staging
+      environment: staging
+      tag: staging-${{ github.sha }}
+      lane: staging
+      canary: "[]"
+      final-percentage: 100
+      requires-approval: false
+      injections: "{}"
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  identity-jobs:
+    name: Staging — identity-jobs
+    uses: ./.github/workflows/deploy-worker.yml
+    permissions:
+      contents: read
+    with:
+      worker: identity-jobs
+      worker-name: identity-jobs-staging
+      environment: staging
+      tag: staging-${{ github.sha }}
+      lane: staging
+      canary: "[]"
+      final-percentage: 100
+      requires-approval: false
+      injections: "{}"
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  home-web:
+    name: Staging — home-web
+    uses: ./.github/workflows/deploy-worker.yml
+    permissions:
+      contents: read
+    with:
+      worker: home-web
+      worker-name: home-web-staging
+      environment: staging
+      tag: staging-${{ github.sha }}
+      lane: staging
+      # home-web follows the ADR-0016/SC-19 gated ladder in production.
+      # Staging has no canary ladder (same rationale as Identity Workers).
+      canary: "[]"
+      final-percentage: 100
+      requires-approval: false
+      injections: "{}"
+      # The staging public host. SEPARATE from SMOKE_PROBE_BASE_URL, which is
+      # the Identity staging host, because a landing-page assertion made
+      # against Identity's host would pass for a public site it never
+      # requested. An unset variable fails the smoke job loudly rather than
+      # falling back to the Identity host.
+      home-smoke-base-url: ${{ vars.HOME_WEB_STAGING_SMOKE_PROBE_BASE_URL }}
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

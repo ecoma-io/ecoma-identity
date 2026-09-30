@@ -1,0 +1,276 @@
+-- ===========================================================================
+-- 0015_idempotency_keys.sql
+--
+-- WHAT THIS ADDS: `idempotency_keys` — a record that a given caller-supplied
+-- idempotency key has already been used, together with the response that was
+-- returned for it.
+--
+-- WHAT THIS IS **NOT**, and the confusion here is expensive enough to state in
+-- capitals: this is NOT the queue consumer's idempotency record. That one lives
+-- in `JOBS_KV` and is a cache of a consumer's own progress, per
+-- `event-model.md`: "The idempotency record lives in JOBS_KV, which is NOT
+-- authoritative... the outbox row in D1 *is* the record of the fact, and D1 is
+-- authoritative." This table is a different mechanism for a different axis:
+-- it deduplicates REPEATED CALLS by an HTTP client, not repeated DELIVERIES by
+-- a queue.
+--
+-- Why both exist, stated in one line each:
+--   this table            "the same HTTP request arrived twice; the second one
+--                          gets the first one's answer"
+--   JOBS_KV idempotency   "the same EVENT arrived twice; the second one does no
+--                          work"
+--
+-- A queue redelivery is not an HTTP request and a client retry is not a queue
+-- message. Keeping them apart is what stops one mechanism from being used to
+-- solve the other's problem, which is a bug where the second delivery silently
+-- skips an effect that was supposed to happen.
+--
+-- BACKWARD-COMPATIBILITY: additive only. CREATEs one table and two indexes,
+-- references no table, so its appearing cannot break a canaried Worker version.
+-- Full rule: 0001_schema_migrations.sql.
+-- ===========================================================================
+
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+    -- The composite primary key. TWO columns, because the key is only unique
+    -- WITHIN a scope.
+    --
+    -- The scope is the front half on purpose: two different callers may both
+    -- send `Idempotency-Key: 7f3a...` and those are two different
+    -- requests. A single global key column would have one of them receive the
+    -- other's response — a response containing somebody else's tokens, handed
+    -- to a caller who knows nothing about them.
+    --
+    -- WHY `text NOT NULL` AND NOT A NORMALISED SCOPE: the value is a literal
+    -- namespace string ("email_otp_verify") owned by the code that uses it, and
+    -- normalising it here would mean this table has to know the list of
+    -- namespaces. Adding a namespace is then a data change rather than a code
+    -- change, which is the right direction, and the risk is a typo creating a
+    -- second namespace — caught by the fact that a typo'd namespace simply has
+    -- no prior rows, so the second caller re-executes rather than being refused.
+    -- THESE TWO COLUMNS ARE THE COMPOSITE PRIMARY KEY, and the constraint
+    -- itself is declared at the foot of this CREATE TABLE rather than here.
+    --
+    -- THE SPELLING IS FORCED BY SQLITE, and it is worth knowing why before
+    -- anyone "tidies" it. A table constraint cannot appear between two columns
+    -- of the column list — the grammar reads a comma as "another column
+    -- follows" — so `PRIMARY KEY (scope, key_value)` written here is a syntax
+    -- error at offset 4634, not a style question. SQLite also allows at most ONE
+    -- PRIMARY KEY per table, so a composite key cannot be spelled by marking
+    -- two columns individually.
+    --
+    -- WHAT THAT COSTS is the one thing worth guarding: the constraint ends up
+    -- separated from the comment above that explains WHY the scope is the front
+    -- half. So the argument is repeated verbatim at the constraint, and this
+    -- cross-reference is bidirectional rather than a pointer into nowhere.
+    scope     TEXT NOT NULL CHECK (length(scope) BETWEEN 1 AND 64),
+    key_value TEXT NOT NULL CHECK (length(key_value) BETWEEN 8 AND 255),
+
+    -- The subject the key belongs to — normally the authenticated caller.
+    --
+    -- NULLABLE, and nullability here is a SECURITY property rather than a
+    -- convenience. Most of the endpoints that take an idempotency key are
+    -- reachable without a session (a failed-OTP attempt, a token refresh, a
+    -- registration), and for those the caller is anonymous. Refusing a NULL
+    -- caller would push every one of those endpoints toward inventing a session
+    -- it does not have.
+    --
+    -- The cost is that two anonymous callers can share a scope+key and collide.
+    -- That is accepted because the key is a caller-generated high-entropy
+    -- value, not a user-chosen one, and because the response stored below is the
+    -- only thing that can leak — see the SECURITY block at the end of this file,
+    -- which is the reason this column is nullable and what bounds the damage.
+    user_id TEXT REFERENCES users (id) ON DELETE CASCADE ON UPDATE RESTRICT,
+
+    -- A fingerprint of the request body this key was first used with.
+    --
+    -- THIS COLUMN IS WHY A KEY IS SAFE TO REPLAY A RESPONSE FOR. The Idempotency-
+    -- Key convention says the same key with a DIFFERENT body is a client bug and
+    -- must be refused (409), not answered with the first response. Without this
+    -- column, "create this application" and "suspend this user" sent under one
+    -- key would return the same answer, and the answer would be whichever of the
+    -- two arrived first.
+    --
+    -- A SHA-256 hex digest of the canonicalised body, 64 characters. Not a MAC:
+    -- the input is not secret, and the digest exists to detect an accidental or
+    -- malicious REUSE of the key, not to hide the body. Constraint §25 forbids
+    -- hand-rolled cryptography, and SHA-256 via WebCrypto is not hand-rolled.
+    request_fingerprint TEXT NOT NULL
+                       CHECK (length(request_fingerprint) BETWEEN 64 AND 64),
+
+    -- The response that was returned the first time.
+    --
+    -- STORED, because the alternative — re-executing the operation — is wrong
+    -- for exactly the operations that need an idempotency key. Re-running
+    -- "send me a login code" sends a second code and invalidates the first;
+    -- re-running "register this client" creates a second application. The
+    -- response is the answer, and the answer is what the retry must get.
+    --
+    -- STORED AS TEXT, HTTP STATUS AND BODY TOGETHER, because a client retrying
+    -- expects the same status code it got the first time. Storing only the body
+    -- would turn a 409 into a 200 for the retry, which is a different answer.
+    --
+    -- THE STORED BODY IS A CREDENTIAL FOR SOME OPERATIONS. An OTP verification
+    -- response contains a session id; a token endpoint response contains an
+    -- access token. That is the reason for the security block at the end of
+    -- this file and the reason `user_id` is nullable: this column can hold a
+    -- secret, which makes it a target rather than a convenience.
+    response_status INTEGER NOT NULL CHECK (response_status BETWEEN 100 AND 599),
+    response_body   TEXT NOT NULL CHECK (length(response_body) BETWEEN 0 AND 65536),
+
+    -- Generic created_at_ms / updated_at_ms, integer milliseconds since the
+    -- epoch (the rule is stated once in 0001).
+    --
+    -- `created_at_ms` IS the expiry here: the row is deleted once it is older
+    -- than the window, and there is no separate `expires_at_ms`. One column, one
+    -- meaning, and no way for the two to disagree. The window is `DEFERRED` —
+    -- the convention's own recommendation is at least as long as the longest
+    -- client retry window, and this platform has no client retry window yet
+    -- because it has no client.
+    created_at_ms INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    updated_at_ms INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+
+    -- THE COMPOSITE PRIMARY KEY. The argument for it is on the columns, above;
+    -- restated here because SQLite's grammar puts it HERE and a constraint
+    -- separated from its reasoning is a constraint nobody re-checks.
+    --
+    -- (scope, key_value) and not (key_value): "two different callers may both
+    -- send `Idempotency-Key: 7f3a...` and those are two different requests. A
+    -- single global key column would have one of them receive the other's
+    -- response — a response containing somebody else's tokens, handed to a
+    -- caller who knows nothing about them."
+    --
+    -- IT IS ALSO WHAT SETTLES THE RACE at the foot of this file: two concurrent
+    -- requests with the same key both INSERT, one is refused with a constraint
+    -- violation, and the loser re-reads the winner's stored response. Without
+    -- this constraint there is nothing for the two of them to collide on, and
+    -- the race would not be resolved by the database at all.
+    PRIMARY KEY (scope, key_value)
+);
+
+-- ---------------------------------------------------------------------------
+-- INDEXES
+-- ---------------------------------------------------------------------------
+
+-- NO INDEX BEYOND THE PRIMARY KEY, and the reason is that this table is written
+-- once and read once.
+--
+-- Every operation is a point lookup on (scope, key_value) — the primary key's
+-- B-tree — followed by a write on insert or a delete on expiry. There is no
+-- range query over this table in any plausible design, so an index would exist
+-- only to make a second write cost more.
+
+-- NO INDEX on created_at_ms, even though the sweep is a range query
+-- ("delete everything older than the window"). The sweep is periodic and
+-- off the request path, and this table's row count is bounded by
+-- (concurrent idempotent requests within the window), which is small by
+-- construction: every row is a client retry in flight. A full scan of the table
+-- during a sweep is cheaper than maintaining a second B-tree on every insert
+-- for a workload that is inserts and deletes in near-equal measure. If the
+-- table ever holds a large steady-state population, the sweep index is a pure
+-- ADD and can be added by a later migration.
+
+-- NO INDEX on user_id. No query asks "every idempotency key for this user" —
+-- it would be an enumeration of what a person has retried, which is
+-- reconnaissance about behaviour rather than about state, and nothing in the
+-- platform needs it.
+
+-- ===========================================================================
+-- THE RACE, because this table's insert is the same shape as the OTP consume
+-- ===========================================================================
+--
+-- Two concurrent requests carrying the same idempotency key is the normal case
+-- the convention is written for: a client on a slow connection retries while
+-- the first request is still running. Both look the key up, both find nothing,
+-- both execute the operation, and both INSERT.
+--
+-- The primary key resolves it, and it resolves it the same way
+-- `otp_challenges.consumed_at` does in 0007: ONE of the two INSERTs fails with
+-- a constraint violation, and that loser re-reads the row and returns the
+-- winner's stored response. A loser that does not do this second read returns
+-- its own freshly-computed response — which for a "register this client" is a
+-- second client, and which is the whole failure the mechanism exists to
+-- prevent.
+--
+-- The obligation is therefore the same shape as the OTP one, and it is an
+-- application-layer obligation: no repository implements this yet
+-- (`identity-application`'s command traits are `SCAFFOLDED`), so nothing
+-- enforces that the loser re-reads. It is stated here because the constraint
+-- violation is the easy half and the re-read is the half that gets forgotten.
+--
+-- THE TRANSACTION SHAPE, and it is the opposite of the audit rule. An audit
+-- event joins the caller's transaction because the two must not diverge. An
+-- idempotency key must NOT join it, for two reasons:
+--
+--   * if it rolled back with a failed operation, a retry of a FAILED request
+--     would re-execute, and the convention says a retry gets the same answer
+--     including the failure — a client that retried because it never saw a 500
+--     would get a different 500 with a different body;
+--   * the stored response is only available AFTER the operation completes, so
+--     there is nothing to store until after the commit anyway.
+--
+-- So: run the operation, commit, then record the key and the response, and
+-- handle the constraint violation as "someone else got there first". Written
+-- down because the natural instinct — "one transaction for the whole handler" —
+-- is wrong here and right for `audit_events`, and the two sit ten lines apart in
+-- the same command handler.
+
+-- SECURITY: what an attacker gets from this table.
+--
+-- THIS TABLE IS THE ONE PLACE IN THE SCHEMA WHERE A ROW MAY CONTAIN A LIVE
+-- CREDENTIAL, and it is the reason `user_id` is nullable and the reason the
+-- table deserves the scrutiny below.
+--
+-- READING it:
+--   - `response_body` for an OTP verification IS a session identifier plus the
+--     account it belongs to. A database read therefore yields a session, which
+--     is a credential the attacker can present until it expires. This is
+--     categorically different from every other table here, where a read yields
+--     information rather than access, and it is worth stating plainly rather
+--     than in a footnote: a read of this table is a partial authentication
+--     bypass.
+--   - for a token endpoint exchange it IS an access token, with the same
+--     consequence and a longer lifetime.
+--   - `request_fingerprint` reveals nothing on its own; it is a digest of a
+--     body, and the body is what an attacker with a fingerprint would want.
+--
+-- MITIGATING FACTS, stated so the finding is not overstated in either
+-- direction:
+--   * the rows are short-lived and deleted after the window, so the window of
+--     exposure is bounded rather than permanent;
+--   * a session identifier alone is not sufficient — `Session`'s doc says
+--     "knowing it is not enough", and the session carries a security_version
+--     and a credential hash, so a bare id from this table does not authenticate.
+--     It is still the first half of the pair, and "the first half" is what an
+--     attacker uses to find the second half elsewhere.
+--   * the only ways to write this table are the command handlers, and each is an
+--     `identity-application` operation writing through the Identity Worker.
+--     Constraint §2 is the control.
+--
+-- WHAT WOULD REDUCE THIS, and is `DEFERRED`: not storing the body at all and
+-- re-executing on retry is the alternative, and it is wrong for the operations
+-- that most need the key. Storing an opaque handle into a KV namespace is the
+-- third option and is the one this schema would take if the platform had a KV
+-- binding for the Identity Worker with the right durability — which it does not,
+-- and adding one to hold secrets would be a new binding and therefore an ADR.
+--
+-- -- THE ANONYMOUS-SCOPE COLLISION, restated because it is the sharp edge:
+--
+-- Two unauthenticated callers sharing a scope and a key get one another's
+-- response. For an OTP verification that means caller B receives caller A's
+-- session. The mitigations, in the order they bind:
+--
+--   1. keys are high-entropy and caller-generated, so a collision is a
+--      deliberate act, not a coincidence;
+--   2. every scope that can return a credential ALSO has an authentication
+--      precondition — a verification that returns a session requires the code,
+--      and a token that returns a token requires the code and the client. The
+--      key deduplicates the retry; it does not authorise anything on its own;
+--   3. `request_fingerprint` makes a cross-body reuse a 409 rather than a
+--      replay, so the attacker must send A's exact body to receive A's exact
+--      response — at which point they have A's code, and the key table is no
+--      longer the weakest link.
+--
+-- Point 2 is the real control and it is an application-layer one, which is why
+-- this column comment exists. A future scope that returns a credential and has
+-- no independent proof of possession must not be added to this table without
+-- rethinking (2).

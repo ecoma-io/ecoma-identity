@@ -1,0 +1,37 @@
+{
+  "meta": {
+    "title": "Ecoma Identity Admin"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "users": "Users",
+    "applications": "Applications",
+    "settings": "Settings",
+    "logout": "Sign out"
+  },
+  "auth": {
+    "login": {
+      "title": "Sign in to Admin Console",
+      "email": "Email address",
+      "password": "Password",
+      "submit": "Sign in",
+      "forgot": "Forgot password?"
+    }
+  },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "search": "Search",
+    "loading": "Loading...",
+    "error": "An error occurred",
+    "success": "Saved successfully"
+  },
+  "locale": {
+    "select": "Language",
+    "en": "English",
+    "vi": "Tiếng Việt"
+  }
+}

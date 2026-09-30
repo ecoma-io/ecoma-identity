@@ -1,0 +1,8 @@
+[package]
+name = "identity-testkit"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+identity-domain = { path = "../identity-domain" }
+identity-application = { path = "../identity-application" }

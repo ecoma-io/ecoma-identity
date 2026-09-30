@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/oidc/v1/authorization-request.schema.json",
+  "title": "AuthorizationRequest",
+  "description": "The parameters /oauth/authorize accepts, derived from identity_oidc::request::AuthorizationRequest. Every field is a protocol parameter on the request URI, not a JSON body: the endpoint reads them from the query string. This schema documents the parameter NAMES, their requiredness and their accepted values; a JSON document is used because it is the form a checker can validate. x-serde-status records what the Rust type does, so a change in either place is visible in the diff.",
+  "type": "object",
+  "x-rust-type": "identity_oidc::request::AuthorizationRequest",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; the endpoint that would parse it is DEFERRED to phase 4 (OIDC provider)",
+  "required": [
+    "client_id",
+    "response_type",
+    "redirect_uri",
+    "scope",
+    "state",
+    "code_challenge",
+    "code_challenge_method"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "client_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The client identifier, as registered. Kept as a String in Rust rather than an ApplicationId on purpose: the protocol field is a client-chosen handle, and resolving it to an application is a repository step this type does not perform.",
+      "x-serde": "pub client_id: String",
+      "x-serde-status": "required"
+    },
+    "response_type": {
+      "type": "string",
+      "const": "code",
+      "description": "The response type. 'code' is the only value the discovery document advertises (response_types_supported == [\"code\"]). The implicit and hybrid flows are refused because a token in a redirect is a token in a browser history, a referrer header and a proxy log.",
+      "x-serde": "pub response_type: String",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "identity_oidc::discovery::DiscoveryDocument::bootstrap — response_types_supported: vec![\"code\"]",
+        "constraining": "the field is a String in Rust; the code flow is the only supported one, and the constant records it"
+      }
+    },
+    "redirect_uri": {
+      "type": "string",
+      "format": "uri",
+      "maxLength": 2048,
+      "description": "The client identifier as the USER is redirected back, echoed in the response. Compared EXACTLY against the registered set — never a prefix, never a glob, never normalised. The registered URI must be absolute, http or https, and fragment-free.",
+      "x-serde": "pub redirect_uri: String",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "identity_domain::application::Application::allows_redirect_uri; bound and shape rules in Application::add_redirect_uri",
+        "constraining": "the field is a String in Rust; the exact-match rule is the domain's, not the type's"
+      }
+    },
+    "scope": {
+      "type": "string",
+      "description": "Space-delimited scopes. 'openid' is mandatory: a request without it is not an OIDC request. Parsed by splitting on ASCII whitespace and dropping empties; a multi-valued parameter is not how OAuth conveys scopes, so a second parser is not accepted.",
+      "x-serde": "pub scope: String",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "identity_oidc::discovery::DiscoveryDocument::bootstrap — scopes_supported == [\"openid\", \"profile\", \"email\"]",
+        "required_member": "openid",
+        "constraining": "the field is a String in Rust; AuthorizationRequest::requests_openid checks membership"
+      }
+    },
+    "state": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The client's CSRF binding. Required on EVERY request: a request with no state is refused, never defaulted. Not a secret.",
+      "x-serde": "pub state: String",
+      "x-serde-status": "required"
+    },
+    "nonce": {
+      "type": ["string", "null"],
+      "description": "The nonce binding the ID token's 'nonce' claim to this request. Its absence from a response to a request that carried one is a replay.",
+      "x-serde": "pub nonce: Option<String>",
+      "x-serde-status": "optional",
+      "x-serde-note": "Option<String> with no skip_serializing_if and no default attribute, so it is serialised as null when absent and a missing JSON key deserialises to None."
+    },
+    "code_challenge": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The PKCE code challenge, base64url without padding.",
+      "x-serde": "pub code_challenge: String",
+      "x-serde-status": "required"
+    },
+    "code_challenge_method": {
+      "type": "string",
+      "const": "S256",
+      "description": "The method the challenge was derived with. 'S256' only. 'plain' is not advertised and is not accepted: advertising a downgrade offer is worse than advertising nothing.",
+      "x-serde": "pub code_challenge_method: String",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "identity_oidc::SUPPORTED_CODE_CHALLENGE_METHOD == \"S256\"; AuthorizationRequest::uses_supported_pkce is the check",
+        "constraining": "the field is a String in Rust; S256 is the only accepted method"
+      }
+    },
+    "prompt": {
+      "type": ["string", "null"],
+      "description": "What the user is being asked to consent to. Display-only.",
+      "x-serde": "pub prompt: Option<String>",
+      "x-serde-status": "optional",
+      "x-serde-note": "Option<String> with no skip_serializing_if and no default attribute."
+    },
+    "provider": {
+      "type": ["string", "null"],
+      "description": "The identity provider to federate to, when the request selects one. A hint about which provider to use, not an assertion from one: an asserted identity enters through AuthenticateExternalIdentity, never through this parameter.",
+      "x-serde": "pub provider: Option<String>",
+      "x-serde-status": "optional",
+      "x-serde-note": "Option<String> with no skip_serializing_if and no default attribute."
+    },
+    "login_hint": {
+      "type": ["string", "null"],
+      "description": "A pre-filled identifier. Advisory only: a hint is never an assertion and never bypasses a challenge.",
+      "x-serde": "pub login_hint: Option<String>",
+      "x-serde-status": "optional",
+      "x-serde-note": "Option<String> with no skip_serializing_if and no default attribute."
+    }
+  },
+  "x-phase": "Phase 4 — OIDC provider"
+}

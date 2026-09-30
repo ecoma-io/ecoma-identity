@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/oidc/v1/json-web-key.schema.json",
+  "title": "JsonWebKey",
+  "description": "One JSON Web Key as served by the JWKS endpoint, derived from identity_oidc::jwt::JsonWebKey. The `use` field is the load-bearing rename: the Rust field is `use_` because `use` is a Rust keyword, and it carries #[serde(rename = \"use\")]. A client that received \"use_\" instead of \"use\" would not find the key's usage at all — which is why the crate has a test asserting the serialised form contains \"use\" and does not contain \"use_\".",
+  "type": "object",
+  "x-rust-type": "identity_oidc::jwt::JsonWebKey",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; the JWKS endpoint is DEFERRED to phase 4 (OIDC provider) and there is no signing key yet, so no document with a real key exists",
+  "required": ["kty", "use", "alg", "kid", "n", "e"],
+  "additionalProperties": false,
+  "properties": {
+    "kty": {
+      "type": "string",
+      "const": "RSA",
+      "description": "The key type. RSA only in bootstrap — JsonWebKey::KEY_TYPE.",
+      "x-serde": "pub kty: String",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "identity_oidc::jwt::JsonWebKey::KEY_TYPE == \"RSA\"",
+        "constraining": "the field is a String in Rust"
+      }
+    },
+    "use": {
+      "type": "string",
+      "const": "sig",
+      "description": "The intended use of the key: 'sig' and never 'enc'. This provider does not encrypt with its signing keys, and a key advertised for both is a key someone will eventually use for both. JsonWebKey::USE_SIGNATURE is the only accepted use.",
+      "x-serde": "#[serde(rename = \"use\")] pub use_: String",
+      "x-serde-status": "required",
+      "x-rename": {
+        "rust": "use_",
+        "wire": "use",
+        "reason": "`use` is a Rust keyword, so the field is `use_` and the rename puts the RFC 7517 name back on the wire.",
+        "test": "identity_oidc::jwt::tests::the_use_field_serialises_as_use asserts the body contains \"use\":\"sig\" and does not contain \"use_\""
+      },
+      "x-accepted-values": {
+        "source": "identity_oidc::jwt::JsonWebKey::USE_SIGNATURE == \"sig\"",
+        "constraining": "the field is a String in Rust"
+      }
+    },
+    "alg": {
+      "type": "string",
+      "const": "RS256",
+      "description": "The intended algorithm of the key. Matches kty. RS256 only — the discovery document advertises id_token_signing_alg_values_supported == [\"RS256\"] and userinfo_signing_alg_values_supported == [\"RS256\"], and neither JwtHeader::ALGORITHM nor JwtHeader::ACCEPTED_ALGORITHM names anything else.",
+      "x-serde": "pub alg: String",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "identity_oidc::jwt::JwtHeader::ALGORITHM == JwtHeader::ACCEPTED_ALGORITHM == \"RS256\"",
+        "constraining": "the field is a String in Rust; the two constants are deliberately distinct so a future second algorithm cannot widen what is accepted"
+      }
+    },
+    "kid": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The key identifier, referenced by a JWT header's kid. JwkSet::find looks a key up by this value, and an absent kid is a verification failure rather than a reason to try another key.",
+      "x-serde": "pub kid: String",
+      "x-serde-status": "required"
+    },
+    "n": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The RSA modulus, base64url without padding. A public value.",
+      "x-serde": "pub n: String",
+      "x-serde-status": "required"
+    },
+    "e": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The RSA public exponent, base64url without padding. A public value.",
+      "x-serde": "pub e: String",
+      "x-serde-status": "required"
+    }
+  },
+  "x-phase": "Phase 4 — OIDC provider"
+}

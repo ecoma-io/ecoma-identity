@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/oidc/v1/oauth-error-response.schema.json",
+  "title": "OAuthErrorResponse",
+  "description": "The error body the OAuth endpoints answer with, per RFC 6749 section 5.2, derived from identity_oidc::response::OAuthErrorResponse. This is a DIFFERENT type from identity_cloudflare::error::ErrorEnvelope and the difference is load-bearing: the OAuth endpoints must answer in the shape a third-party OAuth client library can parse, while the rest of the API answers in the shape Ecoma's own clients can parse. One envelope for both would break one of them. The two error-code vocabularies are therefore distinct: these values are the RFC 6749 section 5.2 set, not the ErrorEnvelope codes.",
+  "type": "object",
+  "x-rust-type": "identity_oidc::response::OAuthErrorResponse",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; no OAuth endpoint emits it in the bootstrap phase, because every protocol route answers the 501 envelope instead",
+  "required": ["error"],
+  "additionalProperties": false,
+  "properties": {
+    "error": {
+      "type": "string",
+      "description": "The machine-readable error code, from the fixed set in RFC 6749 section 5.2. The eight named constants below are the ones identity-oidc declares; OAuthErrorResponse::new accepts any String, so a code outside this set is representable in Rust and the schema keeps the set closed anyway because a closed set is the contract.",
+      "x-serde": "pub error: String",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "identity_oidc::response::OAuthErrorResponse — INVALID_REQUEST, INVALID_CLIENT, INVALID_GRANT, UNAUTHORIZED_CLIENT, UNSUPPORTED_GRANT_TYPE, INVALID_SCOPE, ACCESS_DENIED, SERVER_ERROR",
+        "constraining": "the field is a String in Rust and new() takes impl Into<String>, so the schema is the closed set the type documents rather than one the compiler enforces"
+      },
+      "enum": [
+        "invalid_request",
+        "invalid_client",
+        "invalid_grant",
+        "unauthorized_client",
+        "unsupported_grant_type",
+        "invalid_scope",
+        "access_denied",
+        "server_error"
+      ]
+    },
+    "error_description": {
+      "type": ["string", "null"],
+      "description": "A human-readable description. Never contains a secret. Omitted from the body entirely when absent, NOT serialised as null — a client that sees \"error_description\": null and does not handle null is entitled to be annoyed.",
+      "x-serde": "pub error_description: Option<String>",
+      "x-serde-status": "optional, omitted when absent",
+      "x-serde-note": "#[serde(skip_serializing_if = \"Option::is_none\", default)] — the field is absent from the body, not null. The `default` is what lets a body that omits it deserialise back to None."
+    },
+    "error_uri": {
+      "type": ["string", "null"],
+      "description": "A URI a client can follow to learn more. Omitted from the body entirely when absent, on the same rule as error_description.",
+      "x-serde": "pub error_uri: Option<String>",
+      "x-serde-status": "optional, omitted when absent",
+      "x-serde-note": "#[serde(skip_serializing_if = \"Option::is_none\", default)] — the field is absent from the body, not null. A client that receives a body with no error_uri key handles it; a client that receives \"use_\"-style noise here does not exist because this is a plain field name."
+    }
+  },
+  "x-omission-rule": {
+    "rule": "error_description and error_uri are omitted when None; error is always present.",
+    "source": "#[serde(skip_serializing_if = \"Option::is_none\", default)] on both optional fields",
+    "test": "identity_oidc::response::tests::an_oauth_error_omits_absent_optional_fields asserts a body with a description contains no \"error_uri\""
+  },
+  "x-phase": "Phase 4 — OIDC provider"
+}

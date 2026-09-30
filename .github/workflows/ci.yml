@@ -1,0 +1,408 @@
+name: CI
+
+# Pull-request CI, affected-first, plus the two jobs the ruleset requires by
+# name. The deployables are NOT built here — a pull request is not a
+# deployment (ADR-0012), and a build that uploads a version would make the
+# release process the thing that decides what production runs.
+#
+# What is honest about this file: it gates the repository's OWN checks. It does
+# not claim that a deploy produces a working authentication service, because
+# none exists — every declared protocol route answers 501 today. What a green
+# run means is "the tree is internally consistent and every gate it has passes",
+# and nothing more. `docs/README.md` owns the status vocabulary; this file does
+# not restate a claim about the product.
+
+on:
+  # Unfiltered, including stacks pointed at a feature branch. A
+  # `branches: [main]` filter would skip CI on a pull request stacked on
+  # another one, and a pull request reviewed with no evidence at all is the
+  # thing this file exists to prevent.
+  pull_request:
+  # The merge queue's own event. The queue builds a temporary ref (main plus
+  # the entries ahead of this one) and waits for the required checks to report
+  # against that ref; a workflow that does not run there reports nothing and the
+  # entry times out. This is also the only place a semantic conflict between two
+  # independently-green pull requests can surface.
+  merge_group:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    # `inputs` sits inside this mapping because `workflow_dispatch` reads it
+    # from here and GitHub has no separate top-level key for it. One input, on
+    # purpose: every extra knob on a required-gate workflow is a way for a red
+    # run to be argued around, and the one justified knob answers "did affected
+    # selection miss my change?" — a question a toolchain pin or a shared lint
+    # config raises and an ordinary diff does not. `--force` runs the whole
+    # workspace and is reachable from here and nowhere else, which is what keeps
+    # "affected" from decaying into "whatever passed".
+    inputs:
+      force:
+        description: "Run every project instead of the affected set (moon ci --force)"
+        type: boolean
+        required: false
+        default: false
+  # No `schedule:` here. `analysis.yml` keeps a weekly cron because its
+  # analysers update their own query packs and can surface findings against
+  # code that never changed; this file's checks are a pure function of the tree,
+  # so a nightly would only re-prove what every pull request just proved.
+
+# Every job here only reads the repository and runs local checks — none call the
+# GitHub API, none write anything back, and none hold a deployment credential.
+# `contents: read` is therefore the ceiling, not a default to be widened. Each
+# job that needs more declares its own, which REPLACES this block rather than
+# adding to it.
+permissions:
+  contents: read
+
+# A new push to a pull request supersedes the in-flight run for it. A push to
+# main gets a group of its own per commit, so a newer commit cannot cancel an
+# older one that is still queued — cancel-in-progress only spares runs that have
+# already started.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Moon starts one process per task up to the host CPU count; at the default on a
+# 16-core runner every crate's clippy starts at once and the processes fight
+# over cargo's build lock. The same cap `pnpm verify` assumes on a laptop.
+env:
+  MOON_CONCURRENCY: "4"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Affected-first. This is the run `moon ci` exists for (ADR / constraint 15):
+  # Moon computes which projects a change affects from the VCS diff and runs only
+  # those. A one-line comment in a Rust doc comment runs the Rust projects and
+  # skips the web apps.
+  #
+  # The direction of a wrong answer is not symmetric, which is why this is
+  # `moon ci` and not a hand-kept matrix: under-running is a green check on a
+  # broken build, over-running is slow and correct. Moon's affected graph errs
+  # toward over-running, and `moon ci --force` is the escape hatch for the rare
+  # change whose inputs moved without its paths (a toolchain pin, a shared lint
+  # config) — recorded as a workflow_dispatch input below rather than a habit.
+  # ---------------------------------------------------------------------------
+  checks:
+    name: Checks (affected)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Full history, because the commit-message gate diffs a pull request
+      # against its base rather than reading only the tip.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          # Nothing here pushes or fetches again, so checkout's write of the
+          # job token into .git/config has no reason to outlive the clone.
+          persist-credentials: false
+
+      # Reads the pnpm version from `packageManager` in package.json, so the
+      # runner uses the same pnpm a contributor's Corepack fetches.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      # The Rust toolchain for the nine crate and Worker projects. The MSRV
+      # itself is enforced by `rust-version` in the workspace Cargo.toml, and
+      # there is deliberately no rust-toolchain.toml: the ambient stable
+      # toolchain IS the toolchain, in CI as on a laptop.
+      #
+      # `with: toolchain: stable` is LOAD-BEARING and was missing here while
+      # present at the other two call sites. `# stable` at the end of the
+      # `uses:` line is a YAML COMMENT — it is read by whoever maintains the
+      # file, not by the runner. The action declares `toolchain` as
+      # `required: true`, GitHub does not enforce required inputs for composite
+      # actions (actions/runner#1070, which the action's own source links), and
+      # it fails with a bare `exit code 1` whose only diagnostic is one line on
+      # stderr. Found by the first CI run in this repository's history: this
+      # job died before `Install dependencies` and printed no step output at
+      # all, which is why the two errors it was hiding took a second run to see.
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+        with:
+          toolchain: stable
+          # `wasm32-unknown-unknown` is an INPUT to this job, not only to the
+          # two that compile a Worker directly. `moon ci` runs each affected
+          # project's `build` and `package`, and those tasks are the
+          # deployables' actual deliverable — `cargo build -p
+          # identity-jobs-worker --locked --target wasm32-unknown-unknown`.
+          # Without the target installed, `rustc` fails with
+          # `error[E0463]: can't find crate for core`, which reads like a
+          # broken crate rather than a missing target: `core` is not a
+          # dependency of anything, it is the target's standard library.
+          #
+          # Every host test in the same job passed in the run that surfaced
+          # this, so the toolchain was not broken — only half of it was
+          # present. The other two rust-toolchain call sites in this
+          # repository already declared the target; this one did not.
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: ". -> target"
+
+      # Moon's toolchain — the `moon` binary itself, and the plugins it
+      # resolves — is a function of `.prototools` and `.moon/toolchains.yml`
+      # alone, so the key is exact. No restore-keys: a key with a restore-keys
+      # chain hands a bumped run a tree it would then extend forever, and no
+      # `github.sha`, because a hit has nothing to advance.
+      - name: Restore moon's toolchain
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.proto/tools
+            ~/.proto/plugins
+            ~/.proto/shims
+            ~/.proto/bin
+            ~/.moon/plugins
+          key: moon-toolchain-${{ runner.os }}-${{ hashFiles('.prototools', '.moon/toolchains.yml', 'pnpm-lock.yaml') }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Every pull-request commit reaches main verbatim — under merge-commit
+      # merging as the SAME object, through the merge's second parent — and the
+      # local commit-msg hook cannot see history it was not installed for, so
+      # the gate re-runs here. This is the CI tier over the conventional format
+      # plus the scope enum, validating what the hook already checked locally.
+      # Merge commits are skipped by commitlint's own defaults: nobody authors
+      # a merge by hand.
+      #
+      # Release Please's pull requests are held to this too, which is why
+      # release-please-config.json pins `pull-request-title-pattern` to
+      # `chore(${component}): release ${version}` — the commit message
+      # release-please writes IS the pull request title, and the default
+      # pattern would fill the scope with the TARGET BRANCH (`main`), which is
+      # not one of the scopes commitlint.config.mjs declares because it is not
+      # an area of the code.
+      - name: Commit messages (Conventional Commits + scope enum)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: pnpm exec commitlint --from "origin/$BASE_REF" --to HEAD
+
+      # Prettier's verdict is a pure function of each file's own bytes:
+      # merging other pull requests into this one cannot unformat a file that
+      # was formatted, so the merge-queue run skips it. Everything below can
+      # change under a merge, which is the entire reason the queue exists.
+      - name: Check formatting
+        if: github.event_name != 'merge_group'
+        run: pnpm format:check
+
+      # The affected graph. `--force` is wired to the dispatch input below and
+      # to nothing else: a forced run on a pull request would defeat the very
+      # property this job exists for, so it is reachable only by a deliberate
+      # dispatch.
+      #
+      # The `env:` hop is what the org's own rule
+      # `workflow-expression-interpolated-into-run` requires: GitHub substitutes
+      # `${{ }}` into the script text before the shell sees it, so an expression
+      # spliced into a `run:` line is a command-injection sink. The rule
+      # covered `inputs.*` precisely because dispatch inputs are attacker-
+      # reachable on a fork. This line was the one finding in the whole tree
+      # when the ruleset landed.
+      #
+      # The value is rendered to a STRING, because `moon` reads `--force` from
+      # the environment rather than as a flag. Three earlier attempts at this
+      # step were each wrong in a way only CI could show:
+      #
+      #   1. `inputs.force == 'true' && '--force' || ''` interpolated a flag
+      #      into the run text. `inputs.force` is `type: boolean`, so GitHub
+      #      passes the BOOLEAN, and a boolean is never `==` to the string
+      #      'true' — the escape hatch this job documents silently never fired.
+      #   2. Interpolating the flag into the script and branching in the shell
+      #      fixed the boolean comparison and then handed the flag to
+      #      `pnpm exec`, whose own argument parser rejects a valueless option:
+      #      `error: a value is required for '--force' but none was supplied`.
+      #   3. Setting `MOON_FORCE` unconditionally from the expression — which
+      #      is what (1) and (2) were reaching for — and letting the shell
+      #      branch. `inputs.force && 'true' || ''` evaluates to the EMPTY
+      #      STRING whenever the input is false, and moon does not treat a bare
+      #      `MOON_FORCE=` as "off": an unset variable reads as absent, a set
+      #      variable reads as present with a value, and "" is a value that is
+      #      neither 'true' nor 'false'. Same error, same exit code 2, from a
+      #      step that had been rewritten specifically to stop producing it.
+      #
+      # `MOON_FORCE` is the documented environment form of the flag — moon
+      # declares `[env: MOON_FORCE=]` on `-f, --force` — so the flag never
+      # reaches pnpm's parser at all. The expression's job is only to turn the
+      # boolean into one of the two words moon accepts.
+      #
+      # Which is why the three values are distinguishable here, and why the
+      # difference between the last two is not cosmetic:
+      #
+      #   env -u MOON_FORCE   -> exit 0   absent
+      #   MOON_FORCE=        -> exit 2   present, value "", unparseable
+      #   MOON_FORCE=false   -> exit 0   present, parses, off
+      #   MOON_FORCE=true    -> exit 1   present, parses, runs everything
+      #
+      # Verified on this machine in all four states before committing, because
+      # the first version of this fix compared UNSET against TRUE, passed
+      # locally, and failed in CI on the third state it had never tried.
+      - name: Affected tasks (moon ci)
+        env:
+          MOON_FORCE: ${{ inputs.force && 'true' || 'false' }}
+        run: pnpm exec moon ci --summary minimal
+
+      # The `#[ignore]`d invariants, run as a job rather than as part of the
+      # affected graph: they are a standing question ("how much of the security
+      # model is real yet?"), and at platform bootstrap the answer is
+      # "not much" — which is the point of asking it every time rather than
+      # discovering it from a passing test that asserted nothing. A skipped test
+      # with a named reason is honest; a vacuous pass is a lie.
+      - name: Security model invariants (currently #[ignore]d by design)
+        run: pnpm exec moon run identity-domain:test-invariants
+
+  # ---------------------------------------------------------------------------
+  # The boundary law, on the WHOLE tree, on every trigger — never scoped to a
+  # diff, because a violation is a fact about the dependency graph and not about
+  # the files that happened to change. Scoping this to affected projects would
+  # let a change to a shared lint config pass because no project's own paths
+  # moved.
+  #
+  # The canaries run here and not in `checks` because they are the other half
+  # of the same claim: `arch:canary` proves the gate can still BITE by feeding
+  # it fixture trees that violate the law in the exact ways the documents
+  # forbid, and failing if either the bite or the cleanliness is gone. A guard
+  # that has silently stopped guarding is green forever.
+  # ---------------------------------------------------------------------------
+  architecture:
+    name: Architecture (boundary law + canaries)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Boundary law (pnpm arch)
+        run: pnpm arch
+      - name: The guard can still bite (pnpm arch:canary)
+        run: pnpm arch:canary
+
+  # ---------------------------------------------------------------------------
+  # Every `wrangler.jsonc` parses and is internally coherent. A config that
+  # wrangler cannot read is a deployable nothing can upload, promote or roll
+  # back, and it fails at deploy time — which for `identity` is after two
+  # approvals.
+  #
+  # The work is the per-Worker `wrangler-validate` moon task, and it is a REAL
+  # check rather than a parse: each one runs `wrangler deploy --dry-run`
+  # against that Worker's own config, which compiles the Worker and runs
+  # wrangler's validation without uploading and without changing any traffic. It
+  # is the one command that answers "would this upload work" on a pull request,
+  # where the alternative is finding out during a production promotion. A task
+  # that cannot run exits non-zero by construction — the tasks carry no
+  # `|| true`, deliberately, because a check that did not run must never be
+  # indistinguishable from a check that passed.
+  # ---------------------------------------------------------------------------
+  wrangler:
+    name: Wrangler configs (dry-run compile)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Moon resolves a merge base against `main` to decide which tasks are
+          # affected, and a shallow checkout has no `main` ref to resolve. The
+          # job dies with `fatal: ambiguous argument 'main': unknown revision`
+          # before it builds anything, which reads as a checkout problem rather
+          # than the full-history requirement it is. `checks` above already
+          # sets this for the same reason.
+          fetch-depth: 0
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      # The dry-run compiles the Worker, so the Rust toolchain and the wasm
+      # target are inputs to this job and not only to `checks`.
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: ". -> target"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The web apps are built FIRST and by name, because the SPA's `dist/` is
+      # what `assets.directory` points at — a Worker validated without it is a
+      # Worker that would serve an API and no UI, and a half of the release unit
+      # ADR-0015 says may not exist.
+      #
+      # Moon tasks, not `pnpm --filter`. Both apps now have their own `moon.yml`,
+      # so `identity-web:build` resolves — and each task carries
+      # `deps: ["^build"]`, which is what builds `@ecoma-io/shared-i18n` first.
+      # That ordering used to be implicit and it was wrong: `dist/` is
+      # gitignored, so on a clean CI checkout the shared library had no entry
+      # point and both builds failed with `Rolldown failed to resolve import
+      # "@ecoma-io/shared-i18n"`. Naming the dependency in the task graph fixes
+      # it for every workflow, rather than restating the same build step in
+      # each one that happens to need this app.
+      - name: Build the web apps (their dist/ is inside the version)
+        run: pnpm exec moon run identity-web:build identity-admin-web:build
+
+      # Build home-web's Nuxt/Nitro artifact before validating its wrangler config.
+      # home-web is not a Rust Worker; it uses `moon run home-web:package` which
+      # builds the Nitro server and verifies the output. This runs after the SPA
+      # builds because it is an independent deployable with no Worker dependency.
+      - name: Build home-web (Nuxt/Nitro application)
+        run: pnpm exec moon run home-web:package
+
+      - name: Validate every wrangler config (real dry-run, uploads nothing)
+        run: pnpm exec moon run :wrangler-validate
+
+  # ---------------------------------------------------------------------------
+  # The single fixed-name check for branch protection, and the one the ruleset
+  # in `.github/repository-settings.json` requires. A job named directly in a
+  # ruleset pins its own name; gating on this aggregate instead keeps one
+  # stable name while the jobs above are added or renamed, and makes a job that
+  # is never added to `needs` below impossible to leave ungated.
+  #
+  # `if: always()`, not `!cancelled()`: a required check that ends *skipped*
+  # counts as satisfied by branch protection, which is the hole this job exists
+  # to close.
+  # ---------------------------------------------------------------------------
+  ci-gate:
+    name: ci-gate
+    needs: [checks, architecture, wrangler]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # An ALLOW-list: name the one result that means "safe" and fail on
+      # everything else. The deny-list shape this replaced
+      # (`contains(..., 'failure') || ... 'cancelled' || ... 'skipped'`) went
+      # green over a red pipeline in this organisation when a dependency failed
+      # at "Set up job" during an outage and `needs` carried no recognisable
+      # result at all — a state the deny-list never named. The step also runs
+      # unconditionally: a step that decides whether to run is a step that can
+      # decline to.
+      - name: Fail unless every job succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "needs results: ${RESULTS:-<empty>}"
+          if [ -z "$RESULTS" ]; then
+            echo "::error::ci-gate got no result from its dependencies. Refusing to pass."
+            exit 1
+          fi
+          for result in $RESULTS; do
+            if [ "$result" != "success" ]; then
+              echo "::error::a required job reported '$result' rather than success."
+              exit 1
+            fi
+          done
+          echo "Every required job succeeded."

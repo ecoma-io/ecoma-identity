@@ -1,0 +1,34 @@
+{
+  "name": "@ecoma-io/shared-i18n",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared i18n utilities and types for Ecoma frontend applications.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ecoma-io/ecoma-identity",
+    "directory": "packages/shared-i18n"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "jsdom": "^28.0.0",
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.2"
+  }
+}

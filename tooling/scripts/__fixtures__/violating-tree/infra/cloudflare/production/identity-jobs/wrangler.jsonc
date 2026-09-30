@@ -1,0 +1,11 @@
+{
+  // Fixture wrangler config for the Jobs Worker, $ENV environment. Legal:
+  // a service binding, a queue consumer and a scratch KV namespace, no D1.
+  "name": "identity-jobs",
+  "compatibility_date": "2026-08-05",
+  "services": [{ "binding": "IDENTITY", "service": "identity" }],
+  "queues": {
+    "consumers": [{ "binding": "IDENTITY_QUEUE", "queue": "identity" }],
+  },
+  "kv_namespaces": [{ "binding": "JOBS_KV", "id": "2222" }],
+}

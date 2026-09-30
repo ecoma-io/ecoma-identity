@@ -1,0 +1,18 @@
+{
+  // Fixture wrangler config for the Admin Worker, $ENV environment.
+  //
+  // VIOLATION (check 1, config half): a d1_databases binding on the Worker that
+  // §3 says must not hold one. Present in all three environments, so a check
+  // that only reads one environment would still catch it — which is the point
+  // of a canary.
+  "name": "identity-admin",
+  "compatibility_date": "2026-08-05",
+  "d1_databases": [
+    {
+      "binding": "IDENTITY_DB",
+      "database_name": "identity-$ENV",
+      "database_id": "0000",
+    },
+  ],
+  "services": [{ "binding": "IDENTITY", "service": "identity" }],
+}

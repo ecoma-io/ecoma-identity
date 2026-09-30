@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/oidc/v1/revocation-request.schema.json",
+  "title": "RevocationRequest",
+  "description": "The parameters /oauth/revoke accepts, per RFC 7009, derived from identity_oidc::request::RevocationRequest. Form-encoded, like token-request.schema.json, and a JSON document is used here only to make the field names checkable.",
+  "type": "object",
+  "x-rust-type": "identity_oidc::request::RevocationRequest",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; the revocation endpoint is DEFERRED to phase 4 (OIDC provider)",
+  "required": ["token"],
+  "additionalProperties": false,
+  "properties": {
+    "token": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The token to revoke.",
+      "x-serde": "pub token: String",
+      "x-serde-status": "required"
+    },
+    "token_type_hint": {
+      "type": ["string", "null"],
+      "description": "A hint about the token's type, since RFC 7009 tokens are opaque to the client. A hint is an optimisation, not a selection: a wrong or absent hint does not make the token unrevocable.",
+      "x-serde": "pub token_type_hint: Option<String>",
+      "x-serde-status": "optional",
+      "x-serde-note": "Option<String> with no skip_serializing_if and no default attribute."
+    },
+    "client_id": {
+      "type": ["string", "null"],
+      "description": "The client identifier, when not authenticating with HTTP basic auth.",
+      "x-serde": "pub client_id: Option<String>",
+      "x-serde-status": "optional",
+      "x-serde-note": "Option<String> with no skip_serializing_if and no default attribute."
+    },
+    "client_secret": {
+      "type": ["string", "null"],
+      "description": "The client secret, when using client_secret_post. A credential: never logged, never returned by any other call.",
+      "x-serde": "pub client_secret: Option<String>",
+      "x-serde-status": "optional",
+      "x-serde-note": "Option<String> with no skip_serializing_if and no default attribute."
+    }
+  },
+  "x-phase": "Phase 4 — OIDC provider"
+}

@@ -1,0 +1,20 @@
+<!doctype html>
+<!--
+  The static shell the Admin Worker serves for the operator console.
+
+  It contains no markup beyond the mount point on purpose: every screen is
+  rendered by Vue, and anything baked into this file would be a second source
+  of truth for what the console is. The title says what this is and does not
+  claim that any administrative action works.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ecoma Identity — Console</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

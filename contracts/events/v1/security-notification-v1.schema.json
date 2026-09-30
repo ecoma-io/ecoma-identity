@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/events/v1/security-notification-v1.schema.json",
+  "title": "identity.security.notification.v1",
+  "description": "The payload of a security-notification event, derived from OutboxEventType::security_notification_v1(). The event_type name is the version; the payload shape is owned by that version. No Rust type carries this payload today — only the event_type string exists — so this is a PROMISE for the producer that Phase 7 builds.",
+  "type": "object",
+  "x-event-type": "identity.security.notification.v1",
+  "x-rust-type": "NONE — the event_type string exists (OutboxEventType::security_notification_v1); no payload struct exists",
+  "x-serde-status": "the event_type is IMPLEMENTED; the payload is NOT. A producer that writes this payload does not exist yet.",
+  "required": ["user_id", "kind"],
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The user the notification is about. Required: a security notification with no user is a notification about nothing.",
+      "x-status": "promised — no Rust field exists"
+    },
+    "kind": {
+      "type": "string",
+      "description": "Which event: new-device sign-in, password changed, factor enrolled, factor removed, session revoked, AAL escalation, and so on. The exact set is the producer's to fix in Phase 7.",
+      "x-status": "promised — no Rust field exists",
+      "x-not-a-contract": "Left open on purpose. A closed list here would be a claim about types that do not exist. Phase 7 fixes it and this schema is updated in the same commit."
+    },
+    "occurred_at_ms": {
+      "type": "integer",
+      "description": "When the security event happened, in milliseconds since the Unix epoch. Distinct from QueuedEvent.occurred_at_ms, which is when the fact was committed to the outbox — a notification about a sign-in three seconds ago may be committed now.",
+      "x-status": "promised — no Rust field exists",
+      "x-why-both-timestamps": "The two timestamps answer different questions. The queue body's is about delivery; this one is about the security event. Collapsing them makes it impossible to tell a slow dispatcher from a late login."
+    },
+    "ip_address": {
+      "type": ["string", "null"],
+      "description": "The source IP of the triggering request, when one exists.",
+      "x-status": "promised — no Rust field exists",
+      "x-not-logs": "This is a payload, not a log line. docs/operations/observability.md governs what is logged; this event's payload is not a licence to log what that document forbids."
+    },
+    "session_id": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "The session the notification is about, when there is one.",
+      "x-status": "promised — no Rust field exists"
+    }
+  },
+  "x-consumption": {
+    "idempotency": "keyed on QueuedEvent.id (the outbox event id), never on the payload.",
+    "refusal": "a consumer that cannot recognise the type refuses the message rather than guessing at the shape",
+    "disposition": "BatchOutcome::Done, Retry, or DeadLetter — three named outcomes, no 'silently ignored'"
+  },
+  "x-phase": "Phase 7 — Background work"
+}

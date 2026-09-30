@@ -1,0 +1,75 @@
+{
+  "meta": {
+    "title": "Ecoma — fair-code labor OS",
+    "description": "Humans, AI agents and rules/code as one kind of labor resource."
+  },
+  "nav": {
+    "home": "Home",
+    "features": "Features",
+    "pricing": "Pricing",
+    "docs": "Documentation",
+    "login": "Sign in",
+    "signup": "Get started",
+    "github": "GitHub",
+    "language": "Language"
+  },
+  "hero": {
+    "title": "Fair-code labor OS",
+    "subtitle": "Humans, AI agents and rules/code as one kind of labor resource.",
+    "cta": {
+      "primary": "View on GitHub",
+      "secondary": "View documentation"
+    }
+  },
+  "common": {
+    "statusLabel": "Status",
+    "statusBody": "Platform bootstrap. The product is under active development."
+  },
+  "features": {
+    "heading": "What is Ecoma?",
+    "unifiedModel": {
+      "title": "Unified labor model",
+      "body": "Humans, AI agents, and automated rules operate within a single coordination layer."
+    },
+    "graphLoop": {
+      "title": "Graph + loop engineering",
+      "body": "Work flows through structured graphs with explicit feedback loops."
+    },
+    "fairCode": {
+      "title": "Fair-code",
+      "body": "Open source with sustainable licensing for production use."
+    }
+  },
+  "repos": {
+    "heading": "Repositories",
+    "ecoma": {
+      "name": "ecoma",
+      "body": "the product"
+    },
+    "runtimeTrail": {
+      "name": "runtime-trail",
+      "body": "local developer observability"
+    },
+    "loom": {
+      "name": "loom",
+      "body": "UI system and composition library"
+    },
+    "archkeep": {
+      "name": "archkeep",
+      "body": "architecture governance"
+    }
+  },
+  "footer": {
+    "tagline": "Fair-code labor OS.",
+    "product": "Product",
+    "company": "Company",
+    "resources": "Resources",
+    "legal": "Legal",
+    "copyright": "© {year} Ecoma."
+  },
+  "locale": {
+    "select": "Language",
+    "en": "English",
+    "vi": "Tiếng Việt"
+  }
+}

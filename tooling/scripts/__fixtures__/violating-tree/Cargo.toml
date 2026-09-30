@@ -1,0 +1,18 @@
+# Fixture Cargo workspace. The members list is DELIBERATELY INCOMPLETE: the
+# fourth Worker, `apps/identity-reporting/worker`, is a directory with a
+# manifest but no membership, so the registration check has something real to
+# catch. Every dependency below is a path dependency, so `cargo metadata`
+# resolves this tree with no network and no registry.
+[workspace]
+resolver = "3"
+members = [
+    "crates/identity-domain",
+    "crates/identity-application",
+    "crates/identity-oidc",
+    "crates/identity-security",
+    "crates/identity-cloudflare",
+    "crates/identity-testkit",
+    "apps/identity/worker",
+    "apps/identity-admin/worker",
+    "apps/identity-jobs/worker",
+]

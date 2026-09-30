@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // This app is self-contained: it owns its own `tsconfig.json` rather than
+  // extending a repository base, because the Rust workspace and the pnpm
+  // workspace meet nowhere and there is no shared TypeScript project to
+  // extend. If a second TS app appears here, the shared `compilerOptions` block
+  // is what should move to a base file, not before.
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": ["vite/client"],
+
+    // The org's strictness bar. `exactOptionalPropertyTypes` and
+    // `noUncheckedIndexedAccess` are the two that matter most here: this app
+    // passes half-built objects to the API client and reads records keyed by
+    // capability id, and both flags are what stop those from being silent
+    // `undefined`s.
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "useUnknownInCatchVariables": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.vue", "tests/**/*.ts", "vite.config.ts"]
+}
