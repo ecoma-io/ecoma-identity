@@ -89,6 +89,8 @@ let tempDir = null;
 let tempIndex = null;
 /** Fixture secret paths this run created, so `after()` never deletes a developer's. */
 const createdFixtureSecrets = new Set();
+/** Fixture secret paths that already existed, and the bytes to put back. */
+const preExistingFixtureSecrets = new Map();
 let fixtureRun = null;
 let realRun = null;
 
@@ -212,8 +214,17 @@ describe("the canary fixture: a deliberately violating tree", () => {
       // fresh clone. Nothing has ever pushed a commit, so nothing exposed it.
       // The content below is not a credential; it exists so the file is
       // unambiguously a secret file and nothing else.
+      //
+      // A file that is already here belongs to the developer, so it is
+      // preserved verbatim and restored on the way out. The guard only reads
+      // the path and the extension, so the fixture's exact bytes are
+      // irrelevant to what the canary proves.
+      if (fs.existsSync(target)) {
+        preExistingFixtureSecrets.set(target, fs.readFileSync(target));
+      } else {
+        createdFixtureSecrets.add(target);
+      }
       fs.writeFileSync(target, FIXTURE_SECRET_CONTENT[file]);
-      createdFixtureSecrets.add(target);
       // `-f` is REQUIRED and is the whole point of this construction.
       // Without it git refuses the path because this repository's .gitignore
       // correctly ignores `.env` and `*.pem` — and that rule must keep
@@ -254,12 +265,17 @@ describe("the canary fixture: a deliberately violating tree", () => {
 
   after(() => {
     if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
-    // Only remove a file this run created. A developer's own copy of these paths
-    // is left alone, because overwriting someone's working tree on the way out
-    // of a test is a worse surprise than a leftover fixture file.
+    // A file that was already here is the developer's, and its exact bytes are
+    // put back; a file this run created is removed. Getting this backwards
+    // would silently delete a developer's working-tree file, which is a far
+    // worse surprise than a leftover fixture.
     for (const file of FIXTURE_SECRET_FILES) {
       const target = path.join(FIXTURE, file);
-      if (createdFixtureSecrets.has(target)) {
+      const owned = preExistingFixtureSecrets.get(target);
+      if (owned !== undefined) {
+        fs.writeFileSync(target, owned);
+        preExistingFixtureSecrets.delete(target);
+      } else if (createdFixtureSecrets.has(target)) {
         fs.rmSync(target, { force: true });
         createdFixtureSecrets.delete(target);
       }
