@@ -65,5 +65,6 @@
     "rule": "every field is always present. `label` is the only nullable one.",
     "source": "no skip_serializing_if on SessionView",
     "test": "identity_application::sessions::tests::a_session_view_exposes_no_secret_material asserts the serialised view contains no 'secret', 'token', 'hash', 'cookie' or 'security_version'"
-  }
+  },
+  "x-phase": "Phase 1 — Sessions and the request context for the record; Phase 5 — Applications, grants, and the self-service surface for the screen that renders it"
 }

@@ -52,5 +52,6 @@
     "rule": "name, preferred_username, email and email_verified are omitted when None; sub is always present.",
     "source": "#[serde(skip_serializing_if = \"Option::is_none\")] on all four optional claims",
     "test": "identity_oidc::response::tests::absent_claims_are_omitted_rather_than_serialised_as_null asserts the minimal body is exactly {\"sub\":\"s\"}"
-  }
+  },
+  "x-phase": "Phase 4 — OIDC provider"
 }

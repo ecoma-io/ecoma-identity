@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/admin/v1/role-change.schema.json",
+  "title": "RoleChange",
+  "description": "The outcome of evaluating a role change, derived from identity_application::administration::RoleChange. This is one of only two things in identity-application with a REAL BODY rather than a trait signature: RoleChangeRequest::evaluate is a pure function, and it exists here rather than in identity-domain because the rule needs a COUNT OF ADMINISTRATORS — a fact about the current state of the store, not a property of a single user.",
+  "type": "object",
+  "x-rust-type": "identity_application::administration::RoleChange",
+  "x-serde-status": "the type and the rule behind it are IMPLEMENTED; the command that would apply the outcome, ChangeUserRoleCommand, has no body",
+  "x-serde-note": "Internally tagged: #[serde(rename_all = \"snake_case\", tag = \"outcome\")]. The discriminator is the field 'outcome', NOT a key in an externally-tagged union, because no client can switch on an externally-tagged enum without parsing the key first.",
+  "oneOf": [
+    {
+      "title": "Permitted",
+      "description": "The change is permitted and should be applied. Note what this does NOT mean: it means the RULE did not refuse. It does not mean the change has been applied — a console must not report success before the command has committed.",
+      "type": "object",
+      "required": ["outcome"],
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "const": "permitted"
+        }
+      }
+    },
+    {
+      "title": "LastAdministrator",
+      "description": "Refused: this would leave the platform with no active administrator. Fires only when the change would REMOVE an active administrator — a demotion, or a change of role away from administrator, on a target whose status is active — and the count is at or below one. A suspended administrator is not counted, which is precisely why RoleChangeRequest.target_status is an input rather than something the function re-reads.",
+      "type": "object",
+      "required": ["outcome", "user_id"],
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "const": "last_administrator"
+        },
+        "user_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The user who would have been demoted. Named so an operator reading the refusal knows exactly whose demotion was refused.",
+          "x-serde": "LastAdministrator { user_id: UserId }"
+        }
+      }
+    },
+    {
+      "title": "SelfChange",
+      "description": "Refused: a user cannot change their own role. Self-promotion is the privilege-escalation primitive; the only way to grant a role is for ANOTHER administrator to grant it. Checked FIRST, before the last-administrator rule, so a lone administrator demoting themselves gets the honest reason rather than the misleading one.",
+      "type": "object",
+      "required": ["outcome"],
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "const": "self_change"
+        }
+      }
+    },
+    {
+      "title": "NotPermitted",
+      "description": "Refused: the actor's role may not assign the target role. Checked BEFORE the administrator count is consulted, so a support actor demoting the last administrator gets the authorization refusal — the last-administrator reason would be misleading for a problem that is really 'you may not do this at all'. The check is on the ACTOR, not the direction of the change: a member promoting someone to administrator is refused too, and so is the Service role the Jobs Worker holds.",
+      "type": "object",
+      "required": ["outcome", "role"],
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "const": "not_permitted"
+        },
+        "role": {
+          "type": "string",
+          "description": "Which role was refused — the role being ASSIGNED, not the actor's role.",
+          "x-serde": "NotPermitted { role: PlatformRole }",
+          "enum": ["member", "support", "administrator", "service"]
+        }
+      }
+    }
+  ],
+  "x-evaluation-order": {
+    "1": "SelfChange — user_id == actor_id",
+    "2": "NotPermitted — !actor_role.may_assign_roles()",
+    "3": "LastAdministrator — current_role.may_assign_roles() && !new_role.may_assign_roles() && target_status == Active && active_administrator_count <= 1",
+    "4": "Permitted",
+    "why-the-order-is-load-bearing": "identity_application::administration::tests::self_change_is_reported_before_the_last_administrator_rule asserts a lone administrator demoting themselves gets SelfChange, not LastAdministrator. Both apply; the self-change reason is the more useful one."
+  },
+  "x-concurrency-requirement": {
+    "rule": "the active_administrator_count passed into the rule must be computed INSIDE THE SAME TRANSACTION that applies the change",
+    "why": "two simultaneous demotions must not both see two administrators. The count and the change belong in one transaction, and Phase 6's exit condition requires the test to actually race them.",
+    "the-console-does-not-pre-empt-this": "the operator console does NOT disable the control client-side. A client-side 'you cannot demote the last administrator' check is a check the client can be wrong about, and a disabled control is a control that explains nothing. The console shows the server's refusal when it arrives."
+  },
+  "x-error-shape": "The command itself returns ApplicationResult<PlatformRole> — a PlatformRole on success, an error on refusal. RoleChange is what the pure rule returns internally; whether a refusal reaches the client as a 403 envelope or as this body is a Phase 6 decision, and this contract does not claim it is settled. The 403 envelope is the documented status mapping for 'forbidden'.",
+  "x-phase": "Phase 6 — Administration"
+}

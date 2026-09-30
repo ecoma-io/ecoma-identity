@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/self-service/v1/connected-application.schema.json",
+  "title": "ConnectedApplication",
+  "description": "An application the caller has granted access to, from the user's own point of view. It is identity_application::applications::ApplicationView MINUS everything administrative: the user-facing surface needs the client_id, the display name and the granted scopes to render 'you have shared this with X', and does not need the registered redirect URIs, the registered scopes, the status or when the secret was rotated. Passing those to a browser that does not need them widens the disclosure for no gain. There is no Rust type of this exact shape; the projection is a contract-level decision and is recorded as such.",
+  "type": "object",
+  "x-rust-type": "projection of identity_application::applications::ApplicationView",
+  "x-serde-status": "the source type is IMPLEMENTED as a shape; the projection has no Rust type and no route serves it",
+  "required": [
+    "application_id",
+    "client_id",
+    "display_name",
+    "access_mode",
+    "granted_at_ms",
+    "granted_scopes"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "application_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The application's identifier. A transparent newtype over a UUID in Rust.",
+      "x-serde": "ApplicationView.application_id",
+      "x-serde-status": "required",
+      "x-serde-note": "ApplicationId is #[serde(transparent)] over a Uuid."
+    },
+    "client_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 191,
+      "description": "The PUBLIC client_id. It appears in browser redirects by design. Bounded at 191 bytes by Application::new, because it backs a unique index whose key length must fit the D1 index limit alongside its collation.",
+      "x-serde": "ApplicationView.client_id",
+      "x-serde-status": "required"
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "The display name.",
+      "x-serde": "ApplicationView.display_name",
+      "x-serde-status": "required"
+    },
+    "access_mode": {
+      "type": "string",
+      "description": "Which access mode it registered under. oidc receives identity claims about the user and delegates authentication here; oauth2 receives access tokens without an identity, and is what a machine-to-machine client with no user to authenticate registers under. BOTH modes require PKCE unconditionally — ApplicationAccessMode::requires_pkce returns true for both, deliberately, so a future tightening is not a breaking change to stored registrations.",
+      "x-serde": "ApplicationView.access_mode",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "identity_domain::application::ApplicationAccessMode with #[serde(rename_all = \"snake_case\")]",
+        "constraining": "an enum in Rust"
+      },
+      "enum": ["oidc", "oauth2"]
+    },
+    "granted_at_ms": {
+      "type": "integer",
+      "description": "When access was granted, in milliseconds since the Unix epoch. NOT on ApplicationView — it is a property of the GRANT, not of the application, and an application may hold several grants from one user over time.",
+      "x-serde": "not on ApplicationView; a property of the grant record",
+      "x-serde-status": "required"
+    },
+    "granted_scopes": {
+      "type": "array",
+      "description": "The scopes actually granted, which may be FEWER than were offered. This is the intersection of what the user consented to and what the application registered — GrantApplicationAccessOutcome::granted_scopes, documented as exactly that intersection. A client that assumed it received everything it asked for would over-claim its own authority.",
+      "x-serde": "GrantApplicationAccessOutcome::granted_scopes (Vec<String>)",
+      "x-serde-status": "required",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "x-fields-deliberately-absent": {
+    "status": "ApplicationStatus — whether a registration may be used is an administrative question; a user's own account page does not need it",
+    "redirect_uris": "the registered redirect URIs are server-side data for exact matching; a browser has no use for them",
+    "allowed_scopes": "what the application REGISTERED, as opposed to what was granted — the grant is the narrower and the honest number to show",
+    "secret_rotated_at_ms": "an administrative datum, and one whose absence (null meaning 'never') is a finding for an operator, not a fact for a user"
+  },
+  "x-on-withdrawal": "WithdrawAccess is a DEFERRED command and its effect on already-issued tokens is the server's rule, not this contract's. A UI must not claim 'its access has stopped working' when the call succeeds: what the grant's removal invalidates is decided server-side.",
+  "x-phase": "Phase 5 — Applications, grants, and the self-service surface"
+}

@@ -85,7 +85,9 @@
       "x-serde": "pub scopes_supported: Vec<String>",
       "x-serde-status": "required",
       "minItems": 1,
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "x-accepted-values": {
         "source": "DiscoveryDocument::bootstrap — [REQUIRED_SCOPE, SCOPE_PROFILE, SCOPE_EMAIL] == [\"openid\", \"profile\", \"email\"]",
         "constraining": "the field is a Vec<String> in Rust; a provider without the openid scope is not an OIDC provider"
@@ -98,7 +100,10 @@
       "x-serde": "pub response_types_supported: Vec<String>",
       "x-serde-status": "required",
       "minItems": 1,
-      "items": { "type": "string", "enum": ["code"] },
+      "items": {
+        "type": "string",
+        "enum": ["code"]
+      },
       "x-bootstrap-value": ["code"],
       "x-accepted-values": {
         "source": "DiscoveryDocument::bootstrap — vec![\"code\"]",
@@ -127,7 +132,10 @@
       "x-serde": "pub subject_types_supported: Vec<String>",
       "x-serde-status": "required",
       "minItems": 1,
-      "items": { "type": "string", "enum": ["public"] },
+      "items": {
+        "type": "string",
+        "enum": ["public"]
+      },
       "x-bootstrap-value": ["public"],
       "x-accepted-values": {
         "source": "DiscoveryDocument::bootstrap — vec![\"public\"]",
@@ -140,7 +148,10 @@
       "x-serde": "pub id_token_signing_alg_values_supported: Vec<String>",
       "x-serde-status": "required",
       "minItems": 1,
-      "items": { "type": "string", "enum": ["RS256"] },
+      "items": {
+        "type": "string",
+        "enum": ["RS256"]
+      },
       "x-bootstrap-value": ["RS256"],
       "x-accepted-values": {
         "source": "DiscoveryDocument::bootstrap — vec![\"RS256\"]; matches JwtHeader::ALGORITHM"
@@ -152,7 +163,10 @@
       "x-serde": "pub userinfo_signing_alg_values_supported: Vec<String>",
       "x-serde-status": "required",
       "minItems": 1,
-      "items": { "type": "string", "enum": ["RS256"] },
+      "items": {
+        "type": "string",
+        "enum": ["RS256"]
+      },
       "x-bootstrap-value": ["RS256"],
       "x-accepted-values": {
         "source": "DiscoveryDocument::bootstrap — vec![\"RS256\"]"
@@ -165,7 +179,10 @@
       "x-serde": "pub code_challenge_methods_supported: Vec<String>",
       "x-serde-status": "required",
       "minItems": 1,
-      "items": { "type": "string", "enum": ["S256"] },
+      "items": {
+        "type": "string",
+        "enum": ["S256"]
+      },
       "x-bootstrap-value": ["S256"],
       "x-accepted-values": {
         "source": "identity_oidc::SUPPORTED_CODE_CHALLENGE_METHOD; AuthorizationRequest::uses_supported_pkce checks against the same constant",
@@ -198,7 +215,9 @@
       "x-serde": "pub claims_supported: Vec<String>",
       "x-serde-status": "required",
       "minItems": 1,
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "x-bootstrap-value": [
         "iss",
         "sub",
@@ -249,5 +268,6 @@
         "source": "DiscoveryDocument::bootstrap — false"
       }
     }
-  }
+  },
+  "x-phase": "Phase 4 — OIDC provider"
 }

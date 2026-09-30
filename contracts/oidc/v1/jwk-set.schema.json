@@ -24,5 +24,6 @@
     "rule": "the set may not be empty",
     "source": "identity_oidc::jwt::JwkSet documents the invariant; the Rust type is a plain Vec and does not enforce it at construction",
     "consequence": "a consumer that receives {\"keys\": []} is looking at a broken provider and must fail closed"
-  }
+  },
+  "x-phase": "Phase 4 — OIDC provider"
 }

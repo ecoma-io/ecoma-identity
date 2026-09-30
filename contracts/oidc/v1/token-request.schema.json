@@ -68,5 +68,6 @@
       "x-serde-status": "optional",
       "x-serde-note": "Option<String> with no skip_serializing_if and no default attribute. TokenRequest::scopes treats None as an empty list."
     }
-  }
+  },
+  "x-phase": "Phase 4 — OIDC provider"
 }

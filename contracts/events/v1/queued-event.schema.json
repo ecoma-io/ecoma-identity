@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/events/v1/queued-event.schema.json",
+  "title": "QueuedEvent",
+  "description": "The wire shape of a queued outbox event, derived from identity_cloudflare::queue::QueuedEvent. This is the body placed on Cloudflare Queues: a struct rather than the bare OutboxEvent, because the queue body is a contract that outlives any Rust type. The payload is opaque here; its schema belongs to the event type's version.",
+  "type": "object",
+  "x-rust-type": "identity_cloudflare::queue::QueuedEvent",
+  "x-serde-status": "IMPLEMENTED as a wire shape (Cloudflare adapter). The type is defined and serialised; producers and consumers are DEFERRED to Phase 7.",
+  "required": ["id", "event_type", "occurred_at_ms", "payload"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "The idempotency key. Minted at write time and never re-minted, so every delivery of the same fact carries the same id. Empty is refused; not a UUID is refused by the adapter's parsed_id() boundary.",
+      "x-serde": "pub id: String",
+      "x-serde-status": "required",
+      "x-note": "The key is the canonical text form of OutboxEventId (minted at write time), not regenerated at dispatch."
+    },
+    "event_type": {
+      "type": "string",
+      "description": "The versioned message type, e.g. identity.email.send.v1. Must end with .vN (digits). An unknown or malformed type is not recognised by consumers.",
+      "x-serde": "pub event_type: String",
+      "x-serde-status": "required",
+      "pattern": "^.+\\.v[0-9]+$",
+      "maxLength": 128
+    },
+    "occurred_at_ms": {
+      "type": "integer",
+      "description": "When the fact was committed, in milliseconds since the Unix epoch.",
+      "x-serde": "pub occurred_at_ms: i64",
+      "x-serde-status": "required"
+    },
+    "payload": {
+      "type": "object",
+      "description": "The body. Opaque here; its shape belongs to the event type's version. The OutboxEvent stores it as serde_json::Value.",
+      "x-serde": "pub payload: serde_json::Value",
+      "x-serde-status": "required"
+    }
+  },
+  "x-at-least-once": true,
+  "x-idempotency-key": "id (OutboxEventId, minted at write time)",
+  "x-versioning": "Version is encoded in the event_type suffix (.vN). Consumers must refuse unknown types rather than guessing.",
+  "x-phase": "Phase 7 — Background work (the wire shape exists; dispatch/consumers deferred)"
+}

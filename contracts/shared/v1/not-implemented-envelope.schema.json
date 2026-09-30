@@ -6,6 +6,7 @@
   "type": "object",
   "x-rust-type": "identity_cloudflare::error::ErrorEnvelope, built from a CloudflareError whose code() is \"not_implemented\"",
   "x-serde-status": "the envelope type is IMPLEMENTED; no Worker emits it yet — all three Worker composition roots are one-line placeholders (apps/*/worker/src/lib.rs), so in the repository as it stands no route is served at all. The 501 is CONTRACTED, not observed.",
+  "x-phase": "Phase 0 — Platform bootstrap (this commit) for the type. It is emitted by whichever phase implements the route it answers for; the three phases that cover this repository's routes are Phase 4 — OIDC provider, Phase 5 — Applications, grants, and the self-service surface, and Phase 6 — Administration.",
   "x-http-status": 501,
   "required": ["code", "message", "client_safe"],
   "additionalProperties": false,

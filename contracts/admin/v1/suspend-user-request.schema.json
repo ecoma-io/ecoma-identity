@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/admin/v1/suspend-user-request.schema.json",
+  "title": "SuspendUser",
+  "description": "The body of an administrative suspension, derived from identity_application::administration::SuspendUser. `reason` is a non-Option String, and that is the enforcement: a suspension without a stated reason is one nobody can appeal.",
+  "type": "object",
+  "x-rust-type": "identity_application::administration::SuspendUser",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; SuspendUserCommand has no body and no route serves it",
+  "required": ["context", "user_id", "reason"],
+  "additionalProperties": false,
+  "properties": {
+    "context": {
+      "$ref": "https://auth.ecoma.io/contracts/admin/v1/admin-context.schema.json",
+      "description": "Who is asking, and under which session. Required at AAL2."
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The user to suspend.",
+      "x-serde": "pub user_id: UserId",
+      "x-serde-status": "required"
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Why, recorded in the audit trail. MANDATORY and non-empty — the type carries a plain String, not an Option<String>, and the crate has a test recording that a future Option<String> would be a regression. It is CLIENT-SAFE: the reason is operator prose, never a secret and never a platform error string.",
+      "x-serde": "pub reason: String",
+      "x-serde-status": "required",
+      "x-test": "identity_application::administration::tests::a_suspension_requires_a_reason asserts the serialised body carries reason as a non-null string, and the test comment records that this is enforced by the TYPE rather than by a validation branch"
+    }
+  },
+  "x-effect-is-not-complete-when-this-returns": "Suspension also revokes the user's sessions server-side, so the effect is not finished when the call returns. The client returns void for exactly this reason: a screen must report what the Worker said, not what it assumed. `status` remains the authoritative gate even so — a stale session must still be refused.",
+  "x-a-client-may-omit-the-reason": "The operator console's client makes `reason` optional at its own boundary, and says why: an operator suspending someone mid-incident should not be blocked by a form, and the audit record's value does not depend on it. That is a UI decision about whether to PROMPT. The server-side contract above keeps the field mandatory, and a console that omits it will be refused.",
+  "x-refusals": {
+    "not-an-administrator": "ApplicationError::Forbidden — 403",
+    "not-aal2": "ApplicationError::Forbidden via forbidden_reason_missing_aal2 — 403",
+    "last-active-administrator": "ApplicationError::Domain — a suspension of the last active administrator is refused"
+  },
+  "x-phase": "Phase 6 — Administration"
+}

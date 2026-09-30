@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/self-service/v1/unlink-identity-request.schema.json",
+  "title": "UnlinkIdentity",
+  "description": "The body of a request to unlink an external identity from the caller's own account, derived from identity_application::accounts::UnlinkIdentity. It carries no actor and no user_id: a user may only unlink from their own account, and the field that would let them name someone else's is the one this layer refuses to have.",
+  "type": "object",
+  "x-rust-type": "identity_application::accounts::UnlinkIdentity",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; UnlinkIdentityCommand has no body and no route serves it",
+  "required": ["identity_id"],
+  "additionalProperties": false,
+  "properties": {
+    "identity_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The identity's identifier — the enrollment row's id, NOT the (provider, subject) pair. The pair is what a provider calls the user; this is what we call the link.",
+      "x-serde": "pub identity_id: String",
+      "x-serde-status": "required",
+      "x-type-note": "A plain String in the Rust type, not the IdentityId newtype. The domain's IdentityId is a transparent UUID newtype, so a well-formed value is the canonical hyphenated text form — but the field itself is a String and this schema does not claim the compiler enforces the shape."
+    }
+  },
+  "x-on-refusal": {
+    "last-sign-in-method": "ApplicationError::Domain. Unlinking the last sign-in method of an account is a self-lockout, and this refusal is the only thing standing between a compromised session and an unreachable account.",
+    "not-at-aal2": "ApplicationError::Domain. The session must be at AAL2. Removing a way to authenticate is not something an AAL1 session may do.",
+    "phase": "Phase 3 — the AAL2 requirement; Phase 5 — the surface"
+  },
+  "x-phase": "Phase 3 — Second factor, and the assurance model for the AAL2 requirement; Phase 5 — Applications, grants, and the self-service surface for the surface"
+}

@@ -120,5 +120,6 @@
     "rule": "name, email and email_verified are omitted when None; nonce is always present and may be null. The eight registered claims (iss, sub, aud, exp, iat, auth_time, acr, amr) are always present.",
     "source": "#[serde(skip_serializing_if = \"Option::is_none\")] on the three profile/email claims; no attribute on nonce",
     "test": "identity_oidc::jwt::tests::an_empty_claim_set_still_serialises_the_registered_claims asserts all eight registered claim names are present on a minimal claim set"
-  }
+  },
+  "x-phase": "Phase 4 — OIDC provider"
 }

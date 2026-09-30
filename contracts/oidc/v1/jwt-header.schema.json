@@ -45,5 +45,6 @@
       "x-serde-status": "required"
     }
   },
-  "x-boundary-note": "identity-oidc can write this header and can parse a JWK set. It cannot sign, verify, or check an expiry — there is no function in crates/identity-oidc/src/jwt.rs that takes a secret or a key, by construction. Anything in this file that implies a token is valid is a lie."
+  "x-boundary-note": "identity-oidc can write this header and can parse a JWK set. It cannot sign, verify, or check an expiry — there is no function in crates/identity-oidc/src/jwt.rs that takes a secret or a key, by construction. Anything in this file that implies a token is valid is a lie.",
+  "x-phase": "Phase 4 — OIDC provider"
 }

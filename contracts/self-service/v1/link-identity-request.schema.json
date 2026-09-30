@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/self-service/v1/link-identity-request.schema.json",
+  "title": "LinkIdentity",
+  "description": "The body of a request to link an external identity to the caller's own account, derived from identity_application::accounts::LinkIdentity. `state` is the one-time code Identity issued to the client for the CSRF binding, and it is what proves this callback belongs to this session.",
+  "type": "object",
+  "x-rust-type": "identity_application::accounts::LinkIdentity",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; LinkIdentityCommand has no body and no route serves it",
+  "required": ["provider", "subject", "state"],
+  "additionalProperties": false,
+  "properties": {
+    "provider": {
+      "type": "string",
+      "description": "Which provider asserted it. The subject is only stable WITHIN a provider, which is why the two travel together: two providers may mint the same subject string, and treating either as globally unique on its own is an account-takeover primitive.",
+      "x-serde": "pub provider: IdentityProvider",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "identity_domain::identity::IdentityProvider with #[serde(rename_all = \"snake_case\")]",
+        "constraining": "an enum in Rust",
+        "reserved": "saml — a declared variant because the domain is expected to need it, not because anything implements it. Linking a SAML identity is not in the roadmap at all; adding it would be a new phase."
+      },
+      "enum": ["oauth", "passkey", "email", "saml"]
+    },
+    "subject": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "description": "The provider's identifier for the user. Bounded at 512 bytes by Identity::new so a hostile provider cannot write an unbounded row. The pairing (provider, subject) is the natural key and is the subject of the 'user subject cannot be reused' invariant.",
+      "x-serde": "pub subject: String",
+      "x-serde-status": "required"
+    },
+    "state": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The one-time state that binds the provider's callback to THIS session. A mismatch is a refusal, and it is the only thing standing between an attacker's callback and a link on the victim's account.",
+      "x-serde": "pub state: String",
+      "x-serde-status": "required"
+    }
+  },
+  "x-on-refusal": {
+    "already-linked-elsewhere": "ApplicationError::Domain. The refusal MUST be explicit. Silently no-op'ing would leave the user believing a link exists that does not, and the (provider, subject) pair stays attached to the account that already holds it — re-attaching it to a different user is the account-takeover shape this command exists to make hard to write.",
+    "phase": "Phase 5 — Applications, grants, and the self-service surface"
+  },
+  "x-phase": "Phase 5 — Applications, grants, and the self-service surface"
+}

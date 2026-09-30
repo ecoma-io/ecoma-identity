@@ -48,5 +48,6 @@
     "rule": "error_description and error_uri are omitted when None; error is always present.",
     "source": "#[serde(skip_serializing_if = \"Option::is_none\", default)] on both optional fields",
     "test": "identity_oidc::response::tests::an_oauth_error_omits_absent_optional_fields asserts a body with a description contains no \"error_uri\""
-  }
+  },
+  "x-phase": "Phase 4 — OIDC provider"
 }

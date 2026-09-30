@@ -155,5 +155,6 @@
     "rule": "every field of AccountView, AccountEmail and AccountIdentity is always present. The only nullable field is AccountIdentity.label.",
     "source": "no skip_serializing_if on any of these types",
     "test": "identity_application::accounts::tests::an_account_view_does_not_carry_another_users_secrets asserts the serialised view contains no 'password', 'secret', 'token' or 'security_version'"
-  }
+  },
+  "x-phase": "Phase 5 — Applications, grants, and the self-service surface"
 }

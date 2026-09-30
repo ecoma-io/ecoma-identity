@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/self-service/v1/totp-enrolment.schema.json",
+  "title": "TOTP enrolment response",
+  "description": "The response to beginning a TOTP enrolment. THIS TYPE DOES NOT EXIST IN RUST — there is no TOTP enrolment response type in identity-application, identity-domain or identity-security in the bootstrap phase. What is below is the contract the identity_web API client (apps/identity/web/src/api/self-service.ts, beginTotpEnrolment) already declares as its return type, and it is recorded here so the Phase 3 work has a shape to meet and so this directory does not imply the shape exists. A schema for a type nothing can produce is a promise; this one is marked as a promise, deliberately, and it must not be read as a description of current behaviour.",
+  "type": "object",
+  "x-rust-type": "NONE — no such type exists",
+  "x-serde-status": "DEFERRED — the shape below is declared by the web client, not by any crate",
+  "x-not-yet-producible": "There is no TOTP enrolment in this repository. identity-security declares factor gates as traits with no body, and there is no cryptography implemented anywhere. A client that receives this body from a working endpoint would be trusting a TOTP implementation that does not exist.",
+  "required": ["secret", "provisioning_uri"],
+  "additionalProperties": false,
+  "properties": {
+    "secret": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The Base32 shared secret. A SECRET: never logged, never placed in a URL, never placed in localStorage. It is not a session token, so the HttpOnly rule that governs the session cookie does not apply to it — it must simply never be written anywhere a later reader can find it.",
+      "x-handling": "The UI's obligation when this day comes is to render the provisioning URI as a QR code and to treat this field the way it treats the session cookie: as a credential that is shown once and stored nowhere."
+    },
+    "provisioning_uri": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The otpauth:// URI to render as a QR code. It embeds `secret`, so it inherits every handling rule above: a URL is a place secrets leak from, which is why the session token is in an HttpOnly cookie and this must never be.",
+      "x-handling": "render as a QR code; never log, never navigate with it, never store it"
+    }
+  },
+  "x-phase": {
+    "status": "DEFERRED",
+    "phase": "Phase 3 — Second factor, and the assurance model",
+    "note": "Phase 3's exit condition requires WebCrypto only, no cryptography crate and no hand-rolled comparison (ADR-0008), and the window and drift behaviour documented in identity-security."
+  },
+  "x-what-phase-3-also-requires": "Removing a factor is a different operation and lands in the same phase: it lowers the account's assurance, so it is the one self-service call that will demand a step-up (AAL2) when it exists. The AccountView.step_up_required flag is what tells a UI the demand is coming; a UI may warn and may not decide the answer."
+}

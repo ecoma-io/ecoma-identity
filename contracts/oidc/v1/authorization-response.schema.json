@@ -40,5 +40,6 @@
     "template": "{redirect_uri}{separator}code={code}&state={state}&iss={iss}",
     "separator": "'&' when redirect_uri already contains '?', otherwise '?'",
     "encoding": "each of code, state and iss is passed through urlencoding::encode"
-  }
+  },
+  "x-phase": "Phase 4 — OIDC provider"
 }

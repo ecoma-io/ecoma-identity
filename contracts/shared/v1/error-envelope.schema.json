@@ -6,6 +6,7 @@
   "type": "object",
   "x-rust-type": "identity_cloudflare::error::ErrorEnvelope",
   "x-serde-status": "the envelope type is IMPLEMENTED as a shape; no Worker emits it yet, because all three Worker composition roots are placeholders",
+  "x-phase": "Phase 0 — Platform bootstrap (this commit) for the type; Phase 1 — Sessions and the request context for the first Worker that emits it. This is the envelope every surface in contracts/ uses, so it is the one answer to 'what does an error look like' rather than four.",
   "required": ["code", "message", "client_safe"],
   "additionalProperties": false,
   "properties": {

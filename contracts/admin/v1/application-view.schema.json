@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/admin/v1/application-view.schema.json",
+  "title": "ApplicationView",
+  "description": "A registered OAuth client as the administrative surface sees it, derived from identity_application::applications::ApplicationView. The self-service view of the same application is a NARROWER projection (contracts/self-service/v1/connected-application.schema.json), and the difference is deliberate: a browser that does not need the registered redirect URIs and scopes should not be handed them.",
+  "type": "object",
+  "x-rust-type": "identity_application::applications::ApplicationView",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; no registration command has a body",
+  "required": [
+    "application_id",
+    "client_id",
+    "display_name",
+    "status",
+    "access_mode",
+    "redirect_uris",
+    "allowed_scopes",
+    "secret_rotated_at_ms"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "application_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The application's identifier. A transparent UUID newtype in Rust.",
+      "x-serde": "pub application_id: ApplicationId",
+      "x-serde-status": "required"
+    },
+    "client_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 191,
+      "description": "The PUBLIC client_id. It appears in browser redirects by design, so it is not a secret. Unique across all applications, enforced by the applications.client_id unique index — 191 bytes because that index key must fit the D1 index limit alongside its collation.",
+      "x-serde": "pub client_id: String",
+      "x-serde-status": "required"
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "The display name, shown in the admin UI and on the consent screen.",
+      "x-serde": "pub display_name: String",
+      "x-serde-status": "required"
+    },
+    "status": {
+      "type": "string",
+      "description": "Whether it may be used. active is the only status that permits authorization (ApplicationStatus::permits_authorization). retired is ONE-WAY — an abandoned integration cannot be woken up years later by a stale automation — and that is why retired is distinct from suspended rather than a suspended with a longer timeout.",
+      "x-serde": "pub status: ApplicationStatus",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "identity_domain::application::ApplicationStatus, serde rename_all = \"snake_case\""
+      },
+      "enum": ["active", "suspended", "retired"]
+    },
+    "access_mode": {
+      "type": "string",
+      "description": "Which access mode it registered under. Both modes require PKCE unconditionally (ApplicationAccessMode::requires_pkce), deliberately: the IETF is moving the ecosystem toward mandatory PKCE for public clients, and making it optional here would mean a future tightening is a breaking change to stored registrations rather than a config flip.",
+      "x-serde": "pub access_mode: ApplicationAccessMode",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "identity_domain::application::ApplicationAccessMode, serde rename_all = \"snake_case\""
+      },
+      "enum": ["oidc", "oauth2"]
+    },
+    "redirect_uris": {
+      "type": "array",
+      "description": "Its registered redirect URIs, PRE-REGISTERED. A redirect URI is never learned from a request at runtime — a redirect target learned at request time is the open redirect this design refuses. Each must be absolute, http or https, and fragment-free, at most 2048 bytes; the domain model refuses the rest.",
+      "x-serde": "pub redirect_uris: Vec<String>",
+      "x-serde-status": "required",
+      "items": {
+        "type": "string",
+        "format": "uri",
+        "maxLength": 2048
+      },
+      "x-matching-rule": "Application::allows_redirect_uri compares EXACTLY. Never a prefix, never a glob, never normalised. Phase 5's exit condition requires that there be no prefix, wildcard or normalisation escape."
+    },
+    "allowed_scopes": {
+      "type": "array",
+      "description": "Its registered scopes, pre-registered at registration. A request for a scope outside this set is refused, and a grant is narrowed to the intersection of what was asked and what is registered.",
+      "x-serde": "pub allowed_scopes: Vec<String>",
+      "x-serde-status": "required",
+      "items": {
+        "type": "string"
+      }
+    },
+    "secret_rotated_at_ms": {
+      "type": ["integer", "null"],
+      "description": "When its secret was last rotated, in milliseconds since the Unix epoch. Null means NEVER — which for a confidential client is a FINDING, not a neutral state. Serialised as null, not omitted.",
+      "x-serde": "pub secret_rotated_at_ms: Option<i64>",
+      "x-serde-status": "required on the wire, nullable",
+      "x-serde-note": "Option<i64> with no skip_serializing_if, so the key is always present."
+    }
+  },
+  "x-what-this-view-never-contains": {
+    "client_secret": "never, in any read. A secret is returned exactly once by the registration or rotation call that mints it and is not retrievable afterwards. RegisterApplicationOutcome's hand-written Debug prints \"<redacted>\" for it, and ClientSecret has no Debug derive at all, so `{:?}` on one is a COMPILE ERROR rather than a silent leak."
+  },
+  "x-phase": "Phase 4 — OIDC provider (client registration and the confidential/public distinction); Phase 5 — Applications, grants, and the self-service surface for the console screen that renders it"
+}

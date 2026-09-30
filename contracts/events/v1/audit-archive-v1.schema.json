@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/events/v1/audit-archive-v1.schema.json",
+  "title": "identity.audit.archive.v1",
+  "description": "The payload of an audit-archive event, derived from OutboxEventType::audit_archive_v1(). The event_type name is the version; the payload shape is owned by that version. No Rust type carries this payload today — only the event_type string exists — so this is a PROMISE for the producer that Phase 7 builds.",
+  "type": "object",
+  "x-event-type": "identity.audit.archive.v1",
+  "x-rust-type": "NONE — the event_type string exists (OutboxEventType::audit_archive_v1); no payload struct exists",
+  "x-serde-status": "the event_type is IMPLEMENTED; the payload is NOT. A producer that writes this payload does not exist yet.",
+  "required": ["window_start_ms", "window_end_ms"],
+  "additionalProperties": false,
+  "properties": {
+    "window_start_ms": {
+      "type": "integer",
+      "description": "Inclusive start of the archive window, in milliseconds since the Unix epoch.",
+      "x-status": "promised — no Rust field exists"
+    },
+    "window_end_ms": {
+      "type": "integer",
+      "description": "Exclusive end of the archive window, in milliseconds since the Unix epoch.",
+      "x-status": "promised — no Rust field exists",
+      "x-why-exclusive": "An exclusive end is what makes two consecutive windows partition a timeline without an off-by-one at every boundary. A closed interval would double-archive or drop one row at every window edge."
+    },
+    "row_count": {
+      "type": ["integer", "null"],
+      "description": "How many audit rows the window contained, when the producer knows it before writing the event.",
+      "x-status": "promised — no Rust field exists",
+      "x-not-logs": "A count, not the rows. The event announces that a window was archived; it does not carry the rows themselves, which stay in the audit store where an operator can query them."
+    },
+    "destination": {
+      "type": ["string", "null"],
+      "description": "Where the window was archived to, as an opaque storage reference. The producer's choice, not this contract's.",
+      "x-status": "promised — no Rust field exists"
+    }
+  },
+  "x-consumption": {
+    "idempotency": "keyed on QueuedEvent.id (the outbox event id), never on the payload. Two archive events for overlapping windows are two facts and must both be processed; the consumer decides whether the second is a no-op.",
+    "refusal": "a consumer that cannot recognise the type refuses the message rather than guessing at the shape",
+    "disposition": "BatchOutcome::Done, Retry, or DeadLetter — three named outcomes, no 'silently ignored'",
+    "ordering": "not guaranteed. Archive events are independent windows and must not depend on arriving in order."
+  },
+  "x-phase": "Phase 7 — Background work"
+}

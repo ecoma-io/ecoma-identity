@@ -69,5 +69,6 @@
       "x-serde": "pub e: String",
       "x-serde-status": "required"
     }
-  }
+  },
+  "x-phase": "Phase 4 — OIDC provider"
 }

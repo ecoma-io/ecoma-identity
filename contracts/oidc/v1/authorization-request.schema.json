@@ -111,5 +111,6 @@
       "x-serde-status": "optional",
       "x-serde-note": "Option<String> with no skip_serializing_if and no default attribute."
     }
-  }
+  },
+  "x-phase": "Phase 4 — OIDC provider"
 }

@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/admin/v1/admin-audit-row.schema.json",
+  "title": "AdminAuditRow",
+  "description": "One row of the administrative audit view, derived from identity_application::administration::AdminAuditRow. It is a REDUCED projection of identity_domain::audit::AuditEvent, and the two fields it drops are the interesting ones: actor_session_id and request_id are not on the console's row. A console has no use for the session identifier, and the request id belongs in the server log, not in a list an operator scrolls.",
+  "type": "object",
+  "x-rust-type": "identity_application::administration::AdminAuditRow",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; QueryAuditQuery has no body and no route serves it",
+  "required": [
+    "event_id",
+    "event_type",
+    "user_id",
+    "actor_id",
+    "occurred_at_ms",
+    "metadata"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The event's identifier, and its idempotency key downstream. AuditEventId is a transparent UUID newtype in Rust.",
+      "x-serde": "pub event_id: String",
+      "x-serde-status": "required",
+      "x-type-note": "A plain String here, not the AuditEventId newtype. The well-formed value is the canonical hyphenated text form, but the field is a String and this schema does not claim the compiler enforces it."
+    },
+    "event_type": {
+      "type": "string",
+      "description": "What happened. A CLOSED vocabulary of twenty-one names — an open string here would let a caller invent an event name that no query, no retention policy and no alert knows about, and the audit trail's value is that its vocabulary is closed enough to be complete.",
+      "x-serde": "pub event_type: String",
+      "x-serde-status": "required",
+      "enum": [
+        "user_authenticated",
+        "authentication_failed",
+        "session_created",
+        "session_revoked",
+        "all_sessions_revoked",
+        "authenticator_enrolled",
+        "authenticator_removed",
+        "identity_linked",
+        "identity_unlinked",
+        "email_added",
+        "email_removed",
+        "profile_updated",
+        "user_suspended",
+        "user_unsuspended",
+        "user_role_changed",
+        "application_registered",
+        "application_updated",
+        "application_secret_rotated",
+        "application_access_granted",
+        "application_access_revoked",
+        "security_version_bumped"
+      ],
+      "x-accepted-values": {
+        "source": "identity_domain::audit::AuditEventType, an enum with #[serde(rename_all = \"snake_case\")]",
+        "constraining": "AdminAuditRow.event_type is a plain String, NOT the enum — so the Rust type does NOT enforce this set. The enum is the source of the names; the string is what the row carries.",
+        "why-a-string-here": "the row is a projection, and a projection that named the enum would put a domain dependency in a view type. The closed set is a contract-level guarantee, recorded here because the compiler does not enforce it."
+      }
+    },
+    "user_id": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "The user the event is ABOUT. Null when the event is about an application or a system rather than a person — the three application events do not name a user (AuditEventType::concerns_a_user is false for them).",
+      "x-serde": "pub user_id: Option<UserId>",
+      "x-serde-status": "required on the wire, nullable",
+      "x-serde-note": "Option<UserId> with no skip_serializing_if, so the key is always present."
+    },
+    "actor_id": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "The administrator who acted, if one did. Null for every event the user performed themselves, which is the distinction administrative_only filters on.",
+      "x-serde": "pub actor_id: Option<UserId>",
+      "x-serde-status": "required on the wire, nullable",
+      "x-serde-note": "Option<UserId> with no skip_serializing_if, so the key is always present."
+    },
+    "occurred_at_ms": {
+      "type": "integer",
+      "description": "When it happened, in milliseconds since the Unix epoch.",
+      "x-serde": "pub occurred_at_ms: i64",
+      "x-serde-status": "required"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Already-redacted detail, as string keys and string values. A map rather than a list because the writer decides the shape; a BTreeMap rather than a HashMap so an audit row's JSON serialises in a stable order and is diffable in a review. Redaction is the writer's job — the wire format does not carry the promise that it was done.",
+      "x-serde": "pub metadata: std::collections::BTreeMap<String, String>",
+      "x-serde-status": "required",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "x-bounds": {
+        "source": "identity_domain::audit::AuditEvent::with_metadata refuses a blank or over-512-byte key or value",
+        "note": "unbounded metadata is how secrets end up in an audit table"
+      }
+    }
+  },
+  "x-fields-deliberately-absent": {
+    "actor_session_id": "on the domain AuditEvent, not on this row. A console has no use for which session an administrator held, and the field exists on the event so an operator can correlate actions with a session in the SERVER log.",
+    "request_id": "on the domain AuditEvent, not on this row. The request id's purpose is to find the Worker log lines for the same request, and a console list is not where that lookup happens."
+  },
+  "x-every-action-is-audited": "Phase 6's exit condition requires every administrative action to write an audit event, INCLUDING THE REFUSALS. A refused role change, a refused suspension and an unauthorised lookup all leave a row. A trail that records only successes records which accounts were successfully attacked, which is not the same question.",
+  "x-phase": "Phase 6 — Administration"
+}
