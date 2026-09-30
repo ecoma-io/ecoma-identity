@@ -87,8 +87,15 @@
     {
       "binding": "IDENTITY_KV",
       // brief §2 constraint 24: KV holds rate-limit counters and nothing
-      // authoritative. Local KV is a local directory keyed by name.
-      "id": "",
+      // authoritative. Local KV is a local directory keyed by name, so the id
+      // is never resolved against the account — but it still has to be a
+      // NON-EMPTY string, because `"id": ""` makes `wrangler deploy --dry-run`
+      // fail config validation. A zero-shaped placeholder is the honest form:
+      // obviously wrong to a reader, and satisfying to the validator. The
+      // trailing digit is the same convention staging and production use —
+      // `a` for the identity Worker, `b` for the jobs Worker — so a reader can
+      // tell which namespace a given id stands for without opening the file.
+      "id": "0000000000000000000000000000000a",
       "remote": false,
     },
   ],

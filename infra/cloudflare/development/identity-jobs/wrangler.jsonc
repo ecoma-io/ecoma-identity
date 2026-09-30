@@ -70,8 +70,14 @@
       // verification email?". brief §2 constraint 24 — never authoritative
       // identity state. If a key is lost the consequence is a duplicate email,
       // not a wrong authorization decision.
+      //
+      // Local KV is a local directory keyed by name, so this id is never
+      // resolved against the account — but it still has to be a NON-EMPTY
+      // string, because `"id": ""` makes `wrangler deploy --dry-run` fail
+      // config validation. Zero-shaped and suffixed `b` to match the
+      // convention the other environments use for this Worker.
       "binding": "JOBS_KV",
-      "id": "",
+      "id": "0000000000000000000000000000000b",
       "remote": false,
     },
   ],
