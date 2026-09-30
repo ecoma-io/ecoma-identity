@@ -108,7 +108,20 @@ jobs:
       # itself is enforced by `rust-version` in the workspace Cargo.toml, and
       # there is deliberately no rust-toolchain.toml: the ambient stable
       # toolchain IS the toolchain, in CI as on a laptop.
+      #
+      # `with: toolchain: stable` is LOAD-BEARING and was missing here while
+      # present at the other two call sites. `# stable` at the end of the
+      # `uses:` line is a YAML COMMENT — it is read by whoever maintains the
+      # file, not by the runner. The action declares `toolchain` as
+      # `required: true`, GitHub does not enforce required inputs for composite
+      # actions (actions/runner#1070, which the action's own source links), and
+      # it fails with a bare `exit code 1` whose only diagnostic is one line on
+      # stderr. Found by the first CI run in this repository's history: this
+      # job died before `Install dependencies` and printed no step output at
+      # all, which is why the two errors it was hiding took a second run to see.
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+        with:
+          toolchain: stable
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: ". -> target"
