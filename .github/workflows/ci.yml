@@ -194,9 +194,6 @@ jobs:
       # property this job exists for, so it is reachable only by a deliberate
       # dispatch.
       #
-      # The input arrives through `env:` and is tested by the shell, and both
-      # halves of that are load-bearing.
-      #
       # The `env:` hop is what the org's own rule
       # `workflow-expression-interpolated-into-run` requires: GitHub substitutes
       # `${{ }}` into the script text before the shell sees it, so an expression
@@ -205,20 +202,29 @@ jobs:
       # reachable on a fork. This line was the one finding in the whole tree
       # when the ruleset landed.
       #
-      # The shell test is because `inputs.force` is `type: boolean`, so GitHub
-      # passes the BOOLEAN. The expression this replaced was
-      # `inputs.force == 'true' && '--force' || ''` — a boolean compared
-      # against a string, which is never equal, so `--force` silently never
-      # fired. The escape hatch this job documents has not existed until now.
+      # The value is rendered to a STRING, because `moon` reads `--force` from
+      # the environment rather than as a flag. Two earlier attempts at this step
+      # were each wrong in a way that only CI could show:
+      #
+      #   1. `inputs.force == 'true' && '--force' || ''` interpolated a flag
+      #      into the run text. `inputs.force` is `type: boolean`, so GitHub
+      #      passes the BOOLEAN, and a boolean is never `==` to the string
+      #      'true' — the escape hatch this job documents silently never fired.
+      #   2. Interpolating the flag into the script and branching in the shell
+      #      fixed the boolean comparison and then handed the flag to
+      #      `pnpm exec`, whose own argument parser rejects a valueless option:
+      #      `error: a value is required for '--force' but none was supplied`.
+      #
+      # `MOON_FORCE` is the documented environment form of the same flag — moon
+      # declares `[env: MOON_FORCE=]` on `-f, --force` — so the flag never
+      # reaches pnpm's parser at all, and the expression's job reduces to
+      # "true or nothing". Verified both ways on this machine before committing:
+      # `MOON_FORCE=true` runs every project, `MOON_FORCE=` runs the affected
+      # set.
       - name: Affected tasks (moon ci)
         env:
-          MOON_FORCE: ${{ inputs.force }}
-        run: |
-          if [ "$MOON_FORCE" = "true" ]; then
-            pnpm exec moon ci --force --summary minimal
-          else
-            pnpm exec moon ci --summary minimal
-          fi
+          MOON_FORCE: ${{ inputs.force && 'true' || '' }}
+        run: pnpm exec moon ci --summary minimal
 
       # The `#[ignore]`d invariants, run as a job rather than as part of the
       # affected graph: they are a standing question ("how much of the security
