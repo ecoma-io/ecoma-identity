@@ -64,8 +64,31 @@ const FIXTURE = path.join(SCRIPT_DIR, "__fixtures__", "violating-tree");
  */
 const FIXTURE_SECRET_FILES = [".env", "tls.pem"];
 
+/**
+ * The content each of those files is written with. The canary only needs a file
+ * whose NAME makes it a secret file, and the guard only ever reads path and
+ * extension — but the text is written out in full rather than a placeholder so
+ * that a reader can confirm at a glance that no real credential is involved,
+ * and so the fixture states why it exists in the file itself.
+ */
+const FIXTURE_SECRET_CONTENT = {
+  ".env": `# Fixture secret. VIOLATION (check 8): a tracked .env is a secret file by
+# construction, and the real tree ships .env.example instead. The values below
+# are not real credentials — they exist so the file is unambiguously a secret
+# file and nothing else.
+DATABASE_URL=postgres://identity:fixture-not-a-real-password@localhost:5432/identity
+SIGNING_KEY=fixture-not-a-real-key
+`,
+  "tls.pem": `-----BEGIN CERTIFICATE-----
+MIICFixtureCertificateNotAKeyJustAnExtensionCheckNeedsToCatch
+-----END CERTIFICATE-----
+`,
+};
+
 let tempDir = null;
 let tempIndex = null;
+/** Fixture secret paths this run created, so `after()` never deletes a developer's. */
+const createdFixtureSecrets = new Set();
 let fixtureRun = null;
 let realRun = null;
 
@@ -180,10 +203,17 @@ describe("the canary fixture: a deliberately violating tree", () => {
     tempIndex = path.join(tempDir, "index");
     for (const file of FIXTURE_SECRET_FILES) {
       const target = path.join(FIXTURE, file);
-      assert.ok(
-        fs.existsSync(target),
-        `the fixture file "${file}" is missing; the §27 canary needs it`,
-      );
+      // The file is WRITTEN, not required. It cannot be committed: `.gitignore`
+      // correctly ignores `.env` and `*.pem`, and a negation for this path
+      // would weaken a security rule so that a test could run — which is the
+      // direction that makes a gate decorative. It used to be read with
+      // `assert.ok(fs.existsSync(...))` and a developer's local copy made that
+      // pass, which meant the canary CANCELLED 16 of its 21 tests in every
+      // fresh clone. Nothing has ever pushed a commit, so nothing exposed it.
+      // The content below is not a credential; it exists so the file is
+      // unambiguously a secret file and nothing else.
+      fs.writeFileSync(target, FIXTURE_SECRET_CONTENT[file]);
+      createdFixtureSecrets.add(target);
       // `-f` is REQUIRED and is the whole point of this construction.
       // Without it git refuses the path because this repository's .gitignore
       // correctly ignores `.env` and `*.pem` — and that rule must keep
@@ -224,6 +254,16 @@ describe("the canary fixture: a deliberately violating tree", () => {
 
   after(() => {
     if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
+    // Only remove a file this run created. A developer's own copy of these paths
+    // is left alone, because overwriting someone's working tree on the way out
+    // of a test is a worse surprise than a leftover fixture file.
+    for (const file of FIXTURE_SECRET_FILES) {
+      const target = path.join(FIXTURE, file);
+      if (createdFixtureSecrets.has(target)) {
+        fs.rmSync(target, { force: true });
+        createdFixtureSecrets.delete(target);
+      }
+    }
   });
 
   it("exits non-zero, because a tree that violates the law must not pass", () => {
