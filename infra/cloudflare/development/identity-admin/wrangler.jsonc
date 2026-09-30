@@ -1,0 +1,143 @@
+// What this is: the DEVELOPMENT (local) wrangler configuration for the
+// `identity-admin` Worker — the administrative BFF and operator session.
+//
+// What this is NOT: it is not a staging or production configuration, and it
+// does not have a D1 binding. Read the note on the binding matrix below before
+// editing this file; the absence is the design, not a gap.
+//
+// Read with:  wrangler dev -c infra/cloudflare/development/identity-admin.wrangler.jsonc
+// From a contributor: `moon run identity-admin:dev`.
+//
+// ---------------------------------------------------------------------------------
+// BOUNDARY: there is no `d1_databases` block in this file, and adding one is not
+// a configuration change — it is a brief §2 constraint 3 violation ("The Admin
+// Worker MUST NOT access Identity D1 directly") and needs an ADR before the code
+// lands, let alone before a reviewer sees a binding for it. `infra/cloudflare/
+// README.md` and ADR-0002 own that decision; this file only records the absence
+// so the next editor does not "helpfully" add one and call it a fix.
+// ---------------------------------------------------------------------------------
+
+{
+  "$schema": "../../../../node_modules/wrangler/config-schema.json",
+
+  "name": "identity-admin",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // See infra/cloudflare/development/identity/wrangler.jsonc for why `main`
+  // points at the worker-build JS shim rather than at src/lib.rs.
+  "main": "build/index.js",
+  "build": {
+    // ------------------------------------------------------------------------
+    // THE COMMAND LOCATES THE REPOSITORY ROOT ITSELF. There is no `cwd` key
+    // here, and both halves of that are deliberate.
+    //
+    // WHY NO `cwd`. Measured against wrangler 4.144.0, invoked from the
+    // repository root with `-c infra/cloudflare/staging/identity/wrangler.jsonc`,
+    // this is where a custom build actually runs for each spelling of `cwd`:
+    //
+    //   build.cwd      where the build ran
+    //   ------------   ------------------------------------------------------
+    //   (absent)       the INVOKING PROCESS's working directory
+    //   "."            the invoking process's working directory — identical
+    //   "../.."        the invoking process's working directory, plus ".."
+    //   "$PWD"         Error: spawn /bin/sh ENOENT — `cwd` goes to spawn()
+    //                  unexpanded, so a shell token makes wrangler try to
+    //                  spawn the literal string as a directory
+    //   "/abs/path"    exactly that path
+    //
+    // So `cwd` has no spelling that is both portable and caller-independent:
+    // the relative ones are relative to whoever ran wrangler, and the absolute
+    // one would hard-code `/home/<user>/…` into nine tracked configs that a
+    // fork, a CI runner or a second contributor cannot use.
+    //
+    // WHY THE COMMAND THEN DOES THE LOCATING. `command -v wrangler` resolves
+    // through node_modules to `<repo>/node_modules/.bin/wrangler`, so three
+    // `dirname`s from it is the repository root — wherever the repository is,
+    // whoever cloned it, and whichever directory wrangler was invoked from.
+    //
+    // THAT THIS WAS THE BUG. The command used to be
+    //
+    //   cd ../../../../apps/identity/worker && … --out-dir ../../../…
+    //
+    // with four `..` written for "the config's own directory". Every LOCAL
+    // command and the `wrangler-validate` moon task do `cd` there first, so
+    // four was right for them and the build worked on a laptop.
+    // `deploy-worker.yml` does not: it runs wrangler from the REPOSITORY ROOT
+    // against `-c infra/cloudflare/<env>/<worker>/wrangler.generated.jsonc`,
+    // and four `..` from there leaves the repository entirely. The first
+    // staging deploy failed with
+    //
+    //   [custom build] /bin/sh: 1: cd: can't cd to ../../../../apps/identity/worker
+    //
+    // — one level short, which is exactly what four levels up from the
+    // repository root is. A custom build whose working directory depends on
+    // who invoked wrangler is not a build; it is a build that happens to work
+    // for the callers somebody happened to try first.
+    //
+    // `--out-dir` stays explicit because `worker-build` defaults it to `build`
+    // relative to ITS OWN working directory — the crate — so the default writes
+    // to `apps/<w>/worker/build/` while wrangler looks in
+    // `infra/cloudflare/<env>/<w>/build/`, and reports "The expected output file
+    // at build/index.js was not found", naming the path it could not find
+    // rather than the one that was written.
+    //
+    // Verified from two different caller directories — the repository root and
+    // the config's own — both of which land the build in `apps/<w>/worker` and
+    // put the artefact where `main` points.
+    // ------------------------------------------------------------------------
+    "command": "ROOT=$(dirname \"$(dirname \"$(dirname \"$(command -v wrangler)\")\")\") && cd \"$ROOT/apps/identity-admin/worker\" && cargo install -q \"worker-build@^0.8\" --locked && worker-build --release --out-dir \"$ROOT/infra/cloudflare/development/identity-admin/build\"",
+  },
+
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": false,
+    },
+  },
+
+  // The ONE way this Worker reaches identity data: a private service binding
+  // (brief §2 constraint 4, §3). Service bindings do not traverse the public
+  // internet and do not carry identity credentials, which is why they are
+  // preferred over an HTTP call with a shared API key.
+  "services": [
+    {
+      "binding": "IDENTITY",
+      "service": "identity-development",
+    },
+  ],
+
+  // A separate limiter from the identity Worker's. Sharing one namespace would
+  // let an admin console's traffic consume the end-user login budget and lock
+  // real users out — a self-inflicted denial of service with a confusing
+  // symptom.
+  "ratelimits": [
+    {
+      "name": "ADMIN_RATE_LIMITER",
+      "namespace_id": "",
+      "simple": {
+        "limit": 600,
+        "period": 60,
+      },
+    },
+  ],
+
+  // The admin web UI's built output. brief §8: the frontend and the BFF behind
+  // it are ONE release unit, so `dist/` is built by `identity-admin-web:build`
+  // and shipped as this Worker's static assets — not served from a CDN and not
+  // versioned separately.
+  "assets": {
+    "directory": "../../../../apps/identity-admin/web/dist",
+    "binding": "ASSETS",
+    // A Vue SPA: any unknown path is a client-side route, so a miss falls back
+    // to index.html rather than rendering a 404 page from the Worker.
+    "not_found_handling": "single-page-application",
+  },
+
+  "vars": {
+    // Non-secret configuration only; secrets come from `.dev.vars` (gitignored).
+    "ENVIRONMENT": "development",
+  },
+}

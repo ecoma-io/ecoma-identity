@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/oidc/v1/jwk-set.schema.json",
+  "title": "JwkSet",
+  "description": "The JSON Web Key Set served at the JWKS URI, derived from identity_oidc::jwt::JwkSet. At least one key, always: an empty JWKS is a provider that cannot verify anything it has ever signed, which during a rotation window is indistinguishable from a total outage. A client that sees an empty set must treat it as an outage, not as \"nothing to check here\".",
+  "type": "object",
+  "x-rust-type": "identity_oidc::jwt::JwkSet",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; the JWKS endpoint is DEFERRED to phase 4 (OIDC provider) and no key exists to publish",
+  "required": ["keys"],
+  "additionalProperties": false,
+  "properties": {
+    "keys": {
+      "type": "array",
+      "description": "The published keys. Minimum one.",
+      "x-serde": "pub keys: Vec<JsonWebKey>",
+      "x-serde-status": "required",
+      "minItems": 1,
+      "items": {
+        "$ref": "https://auth.ecoma.io/contracts/oidc/v1/json-web-key.schema.json"
+      }
+    }
+  },
+  "x-note-on-min-items": {
+    "rule": "the set may not be empty",
+    "source": "identity_oidc::jwt::JwkSet documents the invariant; the Rust type is a plain Vec and does not enforce it at construction",
+    "consequence": "a consumer that receives {\"keys\": []} is looking at a broken provider and must fail closed"
+  },
+  "x-phase": "Phase 4 — OIDC provider"
+}

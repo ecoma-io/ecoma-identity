@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/oidc/v1/userinfo-response.schema.json",
+  "title": "UserInfoResponse",
+  "description": "A userinfo response, derived from identity_oidc::response::UserInfoResponse. An unsigned JSON document, not a JWT: the access token is already the authentication of this call, and the claims here are about the user the token was issued for. Every claim except sub carries skip_serializing_if = \"Option::is_none\", so a minimal response is exactly {\"sub\": \"...\"} — the four optional claims are ABSENT, never null.",
+  "type": "object",
+  "x-rust-type": "identity_oidc::response::UserInfoResponse",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; no route emits it in the bootstrap phase",
+  "required": ["sub"],
+  "additionalProperties": false,
+  "properties": {
+    "sub": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The subject. Always the same string for the same user, across every client — the discovery document advertises subject_types_supported == [\"public\"] and never \"pairwise\". UserInfoResponse::SUBJECT_CLAIM is this name.",
+      "x-serde": "pub sub: String",
+      "x-serde-status": "required"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The display name, present when the 'profile' scope was granted. Absent otherwise.",
+      "x-serde": "pub name: Option<String>",
+      "x-serde-status": "optional, omitted when absent",
+      "x-serde-note": "#[serde(skip_serializing_if = \"Option::is_none\")] — absent from the body, not null."
+    },
+    "preferred_username": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The preferred username, present when the 'profile' scope was granted. Absent otherwise.",
+      "x-serde": "pub preferred_username: Option<String>",
+      "x-serde-status": "optional, omitted when absent",
+      "x-serde-note": "#[serde(skip_serializing_if = \"Option::is_none\")] — absent from the body, not null."
+    },
+    "email": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The email address, present when the 'email' scope was granted. Absent otherwise.",
+      "x-serde": "pub email: Option<String>",
+      "x-serde-status": "optional, omitted when absent",
+      "x-serde-note": "#[serde(skip_serializing_if = \"Option::is_none\")] — absent from the body, not null."
+    },
+    "email_verified": {
+      "type": "boolean",
+      "description": "Whether the address has been proven. The field is not optional in spirit when email is present: UserInfoResponse::email_is_safely_usable is true only when email.is_some() AND email_verified == Some(true), and a client keying on email alone has an account-takeover bug. RFC 8414 marks this claim optional; this provider refuses to emit the pair unless both are meaningful.",
+      "x-serde": "pub email_verified: Option<bool>",
+      "x-serde-status": "optional, omitted when absent",
+      "x-serde-note": "#[serde(skip_serializing_if = \"Option::is_none\")] — absent from the body, not null. Absent alongside an email, the address is NOT safely usable."
+    }
+  },
+  "x-omission-rule": {
+    "rule": "name, preferred_username, email and email_verified are omitted when None; sub is always present.",
+    "source": "#[serde(skip_serializing_if = \"Option::is_none\")] on all four optional claims",
+    "test": "identity_oidc::response::tests::absent_claims_are_omitted_rather_than_serialised_as_null asserts the minimal body is exactly {\"sub\":\"s\"}"
+  },
+  "x-phase": "Phase 4 — OIDC provider"
+}

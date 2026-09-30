@@ -1,0 +1,287 @@
+# PRODUCTION. On a release tag, for all four deployables.
+#
+# This is the file the wrangler configs at `infra/cloudflare/production/*` name
+# as the thing that injects their placeholder ids, and it is the only workflow in
+# this repository that holds a production Cloudflare credential.
+#
+# ---------------------------------------------------------------------------
+# WHY A TAG AND NOT A MERGE
+# ---------------------------------------------------------------------------
+# ADR-0012. Release Please owns the version bump, the changelog, the release PR
+# and the tag, and it does NOTHING else: it never calls wrangler, never learns
+# a Cloudflare account exists, and holds no credential that could deploy. A
+# release and a deployment are two events with two owners
+# (`docs/operations/release-process.md`), and this file is the second one.
+#
+# Concretely, this workflow triggers on `push: tags:` and NOT on a merge to
+# `main`, and `release.yml` contains no deploy job. If production deployed on
+# merge, constraint 16 (staging deploys automatically) and constraint 19
+# (production needs two human approvals) would contradict each other and one of
+# them would have to go.
+#
+# ---------------------------------------------------------------------------
+# WHAT A GREEN RUN OF THIS WORKFLOW DOES AND DOES NOT MEAN
+# ---------------------------------------------------------------------------
+# For `identity-admin` and `identity-jobs`: these bytes are serving 100% of
+# production traffic.
+#
+# For `identity` and `home-web`: the two human gates at 50% and at 100% have
+# passed, in that order, by two approvals on the `production` environment.
+#
+# For all four: NONE of this establishes that authentication works. At platform
+# bootstrap the three Identity Worker composition roots are one-line placeholders
+# (`docs/README.md`) and every declared protocol route answers 501. A green run
+# of this file means "these bytes are serving", and the smoke test in
+# `deploy-worker.yml` will FAIL until the Workers are implemented — which is the
+# honest state, not a gap in this file.
+#
+# ---------------------------------------------------------------------------
+# THE TWO GATES ARE NOT YET ARMED
+# ---------------------------------------------------------------------------
+# The 50% and 100% promotions are jobs carrying `environment: production`, and
+# the runner will not pass them without a named approver ONLY IF that
+# environment is configured with required reviewers. That configuration lives in
+# repository settings, not in this file, and `.github/repository-settings.json`
+# carries no environment entry yet — ADR-0014's own enforcement table records
+# this as "enforcement not yet built".
+#
+# So today, a fresh repository would click through both gates. The `environment:`
+# keys are still correct and become real gates the moment the setting exists, and
+# this file says so rather than implying the gate is already load-bearing.
+
+on:
+  # Release Please's tag. `identity-v0.1.0` and `identity-admin-v0.1.0` arrive as
+  # SEPARATE pushes and each triggers a run — the four components release
+  # independently (`release-please-config.json` uses
+  # `separate-pull-requests: true`), and `identity-jobs` has no relationship to
+  # whether `identity` shipped today.
+  #
+  # The `identity-*` prefix is why the three Identity tags do not fight: the pattern is
+  # matched per component below, and each job ignores a tag that is not its
+  # own. `home-web-v*` is a separate family for the independent public deployable.
+  push:
+    tags:
+      - "identity-v*"
+      - "identity-admin-v*"
+      - "identity-jobs-v*"
+      - "home-web-v*"
+  # Deploy a specific component at a specific existing tag, without waiting for
+  # the next release. This is the recovery path when a tag exists but its
+  # deployable never reached production, and it is deliberately the ONLY way to
+  # reach production outside a tag push — there is no "deploy whatever is on
+  # main" input, because that would be a promotion without a release behind it
+  # and `docs/operations/release-process.md` calls that a problem.
+  workflow_dispatch:
+    inputs:
+      worker:
+        description: "Component to deploy (identity | identity-admin | identity-jobs | home-web)"
+        required: true
+        type: string
+      tag:
+        description: "Existing release tag to deploy, e.g. identity-v0.1.0"
+        required: true
+        type: string
+
+# NEVER `cancel-in-progress` here. A production promotion cancelled halfway is
+# a Worker sitting at 50% that nobody chose to leave there, and the person who
+# cancelled it may be asleep by the time it matters. Staging can afford
+# supersession (`deploy.yml`); production supersedes only by being superseded
+# deliberately, which is what this concurrency group enforces.
+concurrency:
+  group: deploy-production-${{ inputs.worker || github.ref_name }}
+  cancel-in-progress: false
+
+# `contents: read` is the ceiling for this file. Nothing here pushes a commit,
+# cuts a tag or opens a pull request — Release Please does that, and a deploy
+# that could also release would be two owners for one act (ADR-0012).
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # `identity` — the canary ladder with its two human gates.
+  #
+  # The `identity-` prefix families look like they overlap and do not: the
+  # dispatch branch is guarded per job, and the tag branch matches the full
+  # `refs/tags/identity-v` prefix, so `identity-admin-v0.2.0` reaches
+  # `identity-admin` and NOT `identity`. Verified by simulation rather than by
+  # inspection, because a tag that deployed two components would be the kind of
+  # bug nobody notices until production has an unexpected version on it.
+  # ---------------------------------------------------------------------------
+  identity:
+    name: Production — identity (canary ladder, two human gates)
+    if: >-
+      startsWith(github.ref, 'refs/tags/identity-v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.worker == 'identity')
+    uses: ./.github/workflows/deploy-worker.yml
+    permissions:
+      contents: read
+    with:
+      worker: identity
+      # Production's script name IS `identity` — no suffix, and that is exactly
+      # why staging's is not (see `deploy.yml`).
+      worker-name: identity
+      environment: production
+      tag: ${{ inputs.tag || github.ref_name }}
+      lane: production
+      # THE LADDER. `[1,10]` — 1% then 10%, with a health gate between — and it
+      # ENDS at 10%. The policy limit is reached automatically, and everything
+      # past it is a separate job behind a separate approval.
+      #
+      # `final-percentage: 100` with `policy-limit-percentage: 50` reads oddly
+      # until you see the two gates, and it is the correct encoding: this file
+      # describes the WHOLE ladder (which ends at 100%), while the `canary`
+      # array describes the part of it that runs unattended. The reusable
+      # workflow is what turns one description into three gates.
+      canary: "[1,10]"
+      policy-limit-percentage: 50
+      final-percentage: 100
+      # True, and the only lane that sets it. It is what selects the two
+      # `environment: production` jobs over the automatic final promotion.
+      requires-approval: true
+      # The five production placeholders `identity` carries, substituted into a
+      # generated copy of the config that is never committed and never uploaded
+      # as an artefact. See `infra/cloudflare/README.md` for where each value
+      # comes from.
+      #
+      # `vars:` and NOT `secrets:`, and that is not an oversight. The production
+      # `wrangler.jsonc` comments insist a Cloudflare resource id is
+      # "bearer-grade" and treat it as a production secret; the owner document
+      # for that classification, `docs/security/secrets-management.md`, lists "a
+      # database id, a queue name, a KV namespace id" under "Configuration, not
+      # a secret … In a tracked wrangler.jsonc. Public by construction." The two
+      # documents disagree and one of them has to change; until it does this file
+      # follows the OWNER document, because `secrets-management.md` is what the
+      # authority map makes responsible for where a secret lives.
+      #
+      # The values are still never committed and never printed: the substitution
+      # is a text replacement, and the generated copy is deleted in the same job.
+      # What `secrets:` would add is storage in GitHub's secret store rather than
+      # its variable store, and that difference is worth a documentation fix
+      # rather than a silent one.
+      injections: >-
+        {
+          "PRODUCTION_IDENTITY_DB_DATABASE_ID": "${{ vars.PRODUCTION_IDENTITY_DB_DATABASE_ID }}",
+          "PRODUCTION_IDENTITY_KV_NAMESPACE_ID": "${{ vars.PRODUCTION_IDENTITY_KV_NAMESPACE_ID }}",
+          "PRODUCTION_IDENTITY_QUEUE": "${{ vars.PRODUCTION_IDENTITY_QUEUE }}",
+          "PRODUCTION_EMAIL_PROVIDER": "${{ vars.PRODUCTION_EMAIL_PROVIDER }}",
+          "PRODUCTION_RATE_LIMITER_NAMESPACE_ID": "${{ vars.PRODUCTION_RATE_LIMITER_NAMESPACE_ID }}"
+        }
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.PRODUCTION_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.PRODUCTION_CLOUDFLARE_ACCOUNT_ID }}
+
+  # ---------------------------------------------------------------------------
+  # `identity-admin` — uploaded, smoke tested, promoted to 100%, no approval at
+  # any point (ADR-0014 constraint 20 and step 4). It is an internal surface
+  # reached by a small number of operators, its blast radius is a service
+  # binding and an audit trail rather than the credential store, and its smoke
+  # test is its gate.
+  #
+  # There is no `environment:` key anywhere in this job. That absence IS the
+  # policy, and adding one would contradict ADR-0014's rejection of "human
+  # approval on all three deployables, for symmetry".
+  # ---------------------------------------------------------------------------
+  identity-admin:
+    name: Production — identity-admin (automatic, no gate)
+    if: >-
+      startsWith(github.ref, 'refs/tags/identity-admin-v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.worker == 'identity-admin')
+    uses: ./.github/workflows/deploy-worker.yml
+    permissions:
+      contents: read
+    with:
+      worker: identity-admin
+      worker-name: identity-admin
+      environment: production
+      tag: ${{ inputs.tag || github.ref_name }}
+      lane: production
+      canary: "[]"
+      policy-limit-percentage: 0
+      final-percentage: 100
+      requires-approval: false
+      injections: >-
+        {
+          "PRODUCTION_IDENTITY_WORKER": "${{ vars.PRODUCTION_IDENTITY_WORKER }}",
+          "PRODUCTION_ADMIN_RATE_LIMITER_NAMESPACE_ID": "${{ vars.PRODUCTION_ADMIN_RATE_LIMITER_NAMESPACE_ID }}"
+        }
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.PRODUCTION_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.PRODUCTION_CLOUDFLARE_ACCOUNT_ID }}
+
+  # ---------------------------------------------------------------------------
+  # `identity-jobs` — the queue consumer. No public route at all: it consumes a
+  # queue, so there is no traffic share to canary against and a percentage
+  # ladder would have nothing to measure (ADR-0014's "canaries for admin and
+  # jobs" rejection). Automatic, like admin, for the same reason.
+  # ---------------------------------------------------------------------------
+  identity-jobs:
+    name: Production — identity-jobs (automatic, no gate)
+    if: >-
+      startsWith(github.ref, 'refs/tags/identity-jobs-v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.worker == 'identity-jobs')
+    uses: ./.github/workflows/deploy-worker.yml
+    permissions:
+      contents: read
+    with:
+      worker: identity-jobs
+      worker-name: identity-jobs
+      environment: production
+      tag: ${{ inputs.tag || github.ref_name }}
+      lane: production
+      canary: "[]"
+      policy-limit-percentage: 0
+      final-percentage: 100
+      requires-approval: false
+      injections: >-
+        {
+          "PRODUCTION_IDENTITY_WORKER": "${{ vars.PRODUCTION_IDENTITY_WORKER }}",
+          "PRODUCTION_EMAIL_PROVIDER": "${{ vars.PRODUCTION_EMAIL_PROVIDER }}",
+          "PRODUCTION_IDENTITY_QUEUE": "${{ vars.PRODUCTION_IDENTITY_QUEUE }}",
+          "PRODUCTION_IDENTITY_QUEUE_DLQ": "${{ vars.PRODUCTION_IDENTITY_QUEUE_DLQ }}",
+          "PRODUCTION_JOBS_KV_NAMESPACE_ID": "${{ vars.PRODUCTION_JOBS_KV_NAMESPACE_ID }}"
+        }
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.PRODUCTION_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.PRODUCTION_CLOUDFLARE_ACCOUNT_ID }}
+
+  # ---------------------------------------------------------------------------
+  # `home-web` — the public web application. ADR-0016 explicitly covers SC-19,
+  # so production follows the same gated ladder as `identity`: 1% → 10% → 50%
+  # (approval) → 100% (approval). It holds no Identity data, no session, no
+  # service binding, but it is a public surface whose blast radius includes
+  # the organisation's public presence.
+  # ---------------------------------------------------------------------------
+  home-web:
+    name: Production — home-web (canary ladder, two human gates)
+    if: >-
+      startsWith(github.ref, 'refs/tags/home-web-v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.worker == 'home-web')
+    uses: ./.github/workflows/deploy-worker.yml
+    permissions:
+      contents: read
+    with:
+      worker: home-web
+      worker-name: home-web
+      environment: production
+      tag: ${{ inputs.tag || github.ref_name }}
+      lane: production
+      # Same ladder as identity: ADR-0016 covers SC-19.
+      canary: "[1,10]"
+      policy-limit-percentage: 50
+      final-percentage: 100
+      requires-approval: true
+      # home-web has no Identity bindings, no D1, no KV, no queues.
+      # Empty injections is the honest value.
+      injections: "{}"
+      # The production public host. SEPARATE from SMOKE_PROBE_BASE_URL, which is
+      # the Identity production host. This one is load-bearing twice over here,
+      # because production is the only lane that walks the canary ladder: it
+      # supplies both the smoke job's landing-page host and the health gate's
+      # liveness route between the 1% and 10% promotions. Unset, the ladder
+      # refuses to start rather than gating one deployment's traffic on
+      # another's host.
+      home-smoke-base-url: ${{ vars.HOME_WEB_PRODUCTION_SMOKE_PROBE_BASE_URL }}
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.PRODUCTION_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.PRODUCTION_CLOUDFLARE_ACCOUNT_ID }}

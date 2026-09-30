@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/self-service/v1/update-profile-request.schema.json",
+  "title": "UpdateProfile",
+  "description": "The body of a request to change the caller's own display name, derived from identity_application::accounts::UpdateProfile. It carries no actor and no user_id: the caller is whoever the session says they are, and a field naming a target would be the confused-deputy shape this whole layer is written to make hard to write.",
+  "type": "object",
+  "x-rust-type": "identity_application::accounts::UpdateProfile",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; UpdateProfileCommand has no body and no route serves it",
+  "required": ["display_name"],
+  "additionalProperties": false,
+  "properties": {
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "The new display name. A blank or oversized name is a domain refusal (ApplicationError::Domain), not an invented 400.",
+      "x-serde": "pub display_name: String",
+      "x-serde-status": "required",
+      "x-bounds": {
+        "source": "identity_domain::user::User::new",
+        "note": "the Rust field is a plain String; the bound lives in the domain constructor, which is what UpdateProfileCommand's documentation points at"
+      }
+    }
+  },
+  "x-response": "AccountView on success — the command returns the updated view rather than a status, so a client re-renders from the same document it already knows how to render.",
+  "x-phase": "Phase 5 — Applications, grants, and the self-service surface"
+}

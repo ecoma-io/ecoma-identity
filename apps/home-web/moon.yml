@@ -1,0 +1,85 @@
+# Moon configuration for home-web.
+#
+# An independent deployable: the public-facing web application running Nuxt 4 /
+# Nitro on Cloudflare Workers + Workers Assets. Not a Rust Worker — Nuxt/Nitro
+# is the runtime.
+#
+# See docs/adr/0016-home-web-fourth-deployable.md for the architecture.
+
+tags:
+  - home-web
+
+tasks:
+  format-check:
+    script: '"$MOON_WORKSPACE_ROOT/node_modules/.bin/prettier" --check --ignore-unknown .'
+    inputs:
+      - "**/*.{js,mjs,cjs,ts,vue,json,jsonc,yml,yaml,md,css,html}"
+    outputs: []
+
+  lint:
+    script: '"$MOON_WORKSPACE_ROOT/node_modules/.bin/eslint" .'
+    inputs:
+      - "**/*.{js,mjs,cjs,ts,vue}"
+    outputs: []
+
+  typecheck:
+    script: 'cd "$MOON_PROJECT_ROOT" && "$MOON_PROJECT_ROOT/node_modules/.bin/nuxt" typecheck'
+    inputs:
+      - "**/*.{ts,vue}"
+      - "nuxt.config.ts"
+      - "tsconfig.json"
+    outputs: []
+
+  test:
+    script: 'cd "$MOON_PROJECT_ROOT" && node --test tests/worker-smoke.test.mjs'
+    deps:
+      - build
+    inputs:
+      - "tests/**/*.mjs"
+      - ".output/**/*"
+    outputs: []
+
+  build:
+    script: 'cd "$MOON_PROJECT_ROOT" && "$MOON_PROJECT_ROOT/node_modules/.bin/nuxt" build'
+    inputs:
+      - "**/*.{ts,vue,json,jsonc,yml,yaml,md,css,html}"
+      - "nuxt.config.ts"
+      - "package.json"
+    outputs:
+      - ".output/**/*"
+
+  dev:
+    script: 'cd "$MOON_PROJECT_ROOT" && "$MOON_PROJECT_ROOT/node_modules/.bin/nuxt" dev'
+    options:
+      runInCI: false
+    inputs: []
+    outputs: []
+
+  # Nitro's build is the immutable Worker and Workers Assets package. This task
+  # deliberately does not rebuild it: it proves the artefact the deploy workflow
+  # will upload exists and is internally complete.
+  package:
+    script: |
+      set -eu
+      test -f "$MOON_PROJECT_ROOT/.output/server/index.mjs"
+      test -d "$MOON_PROJECT_ROOT/.output/public"
+      test -n "$(find "$MOON_PROJECT_ROOT/.output/public" -type f -print -quit)"
+    deps:
+      - build
+    inputs:
+      - ".output/**/*"
+    outputs: []
+
+  wrangler-validate:
+    script: |
+      cd "$MOON_PROJECT_ROOT"
+      "$MOON_WORKSPACE_ROOT/node_modules/.bin/wrangler" deploy --dry-run \
+        --config "$MOON_WORKSPACE_ROOT/infra/cloudflare/development/home-web/wrangler.jsonc"
+    deps:
+      - package
+    options:
+      cache: false
+    inputs:
+      - "wrangler.jsonc"
+      - ".output/**/*"
+    outputs: []

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/admin/v1/admin-context.schema.json",
+  "title": "AdminContext",
+  "description": "The context EVERY administrative command carries, derived from identity_application::administration::AdminContext. The second field is not redundancy: the session is what proves the actor at AAL2, and a destructive administrative action that did not check the actor's assurance level would be reachable from a session the actor merely LOGGED INTO.",
+  "type": "object",
+  "x-rust-type": "identity_application::administration::AdminContext",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; no administrative command has a body",
+  "required": ["actor_id", "actor_session_id"],
+  "additionalProperties": false,
+  "properties": {
+    "actor_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The administrator acting. Whose session it is comes from the Admin Worker's own session; it is never taken from the request body at the Identity Worker, because a body field is the caller asserting who they are.",
+      "x-serde": "pub actor_id: UserId",
+      "x-serde-status": "required",
+      "x-derivation": "re-derived by the Identity Worker from the session, not read from the body — see docs/architecture/overview.md, where the Admin Worker 're-derives the actor' before the rule is evaluated"
+    },
+    "actor_session_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The session the administrator is acting under. Checked for AAL2 on every command that changes someone else's security posture. This is the field the AAL2 check has to happen against: without it there is nowhere to check.",
+      "x-serde": "pub actor_session_id: String",
+      "x-serde-status": "required",
+      "x-test": "identity_application::administration::tests::every_administrative_command_carries_a_session asserts context.actor_session_id is present on SuspendUser, UnsuspendUser, RevokeUserSessions and ChangeUserRole"
+    }
+  },
+  "x-aal2-requirement": {
+    "rule": "every command that changes someone else's security posture requires the actor's session to be at AAL2",
+    "refusal": "identity_application::administration::forbidden_reason_missing_aal2 — ONE named function rather than an inline string at each call site, so the audit of authorization failures has a single reason to group by",
+    "reason_text": "administrative action requires an AAL2 session",
+    "not-on-the-wire": "the refusal is an ApplicationError::Forbidden and reaches a client as code 'forbidden' (403). The reason string is for the audit trail."
+  },
+  "x-phase": "Phase 6 — Administration"
+}

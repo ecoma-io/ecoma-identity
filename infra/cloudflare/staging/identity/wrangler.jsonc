@@ -1,0 +1,212 @@
+// What this is: the STAGING wrangler configuration for the `identity` Worker.
+//
+// What this is NOT: it is not production, and it must never become a second
+// production. Every resource id below is a DIFFERENT resource from the one in
+// infra/cloudflare/production/identity/wrangler.jsonc, and the difference is
+// deliberate and checkable: a database that is shared between staging and
+// production is how a staging deploy destroys production data, and the only
+// defence that has ever worked is making the ids visibly different to a human
+// reading a diff.
+//
+// STAGING IS PRODUCTION-SHAPED. It has the same bindings, the same
+// compatibility date, the same observability, the same tier-sensitive settings.
+// The ONLY differences are: the resource ids, and the data in them. A staging
+// configuration that omits a binding to keep it small is a configuration that
+// cannot tell you the binding was going to break until it does.
+//
+// brief §2 constraint 16: staging deploys automatically after a merge to the
+// default branch. That is a reason for this file to exist on every merge, not a
+// reason for it to be a smaller version of production.
+//
+// ---------------------------------------------------------------------------------
+// RESOURCE SEPARATION — the ids an operator must create, all in a DIFFERENT
+// Cloudflare account or an account-scoped namespace prefix:
+//
+//   D1    ecoma-identity-staging            (production: ecoma-identity)
+//   KV    identity-staging counters        (production: identity-production counters)
+//   Queue identity-staging                 (production: identity-production)
+//         + identity-staging-dlq
+//
+// These are REAL ids, not placeholders: staging is a deployed environment and a
+// placeholder there would make every staging deploy a hand-edit. They are still
+// infrastructure identifiers and not secrets (wrangler requires them in
+// config), which is why they are committed while production's are not — see
+// infra/cloudflare/production/identity/wrangler.jsonc for that distinction.
+// ---------------------------------------------------------------------------------
+
+{
+  "$schema": "../../../../node_modules/wrangler/config-schema.json",
+
+  // STAGING SCRIPT NAME = `identity-staging`.
+  //
+  // This is not a fourth deployable (brief §2 constraint 7 names three). It is
+  // the staging ENVIRONMENT of the `identity` deployable, and the `-staging`
+  // suffix is how Cloudflare names a separate environment of one script.
+  //
+  // It has to be explicit here. Without it, `identity` in this file and
+  // `identity` in production/ would be the same script's default environment,
+  // and `wrangler versions deploy -c <this file>` would put STAGING CODE ON
+  // PRODUCTION. The suffix is the guard against that mistake, and it is why
+  // the service bindings in identity-admin.wrangler.jsonc and
+  // identity-jobs.wrangler.jsonc in this directory read `identity-staging`.
+  "name": "identity-staging",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "main": "build/index.js",
+  "build": {
+    // ------------------------------------------------------------------------
+    // THE COMMAND LOCATES THE REPOSITORY ROOT ITSELF. There is no `cwd` key
+    // here, and both halves of that are deliberate.
+    //
+    // WHY NO `cwd`. Measured against wrangler 4.144.0, invoked from the
+    // repository root with `-c infra/cloudflare/staging/identity/wrangler.jsonc`,
+    // this is where a custom build actually runs for each spelling of `cwd`:
+    //
+    //   build.cwd      where the build ran
+    //   ------------   ------------------------------------------------------
+    //   (absent)       the INVOKING PROCESS's working directory
+    //   "."            the invoking process's working directory — identical
+    //   "../.."        the invoking process's working directory, plus ".."
+    //   "$PWD"         Error: spawn /bin/sh ENOENT — `cwd` goes to spawn()
+    //                  unexpanded, so a shell token makes wrangler try to
+    //                  spawn the literal string as a directory
+    //   "/abs/path"    exactly that path
+    //
+    // So `cwd` has no spelling that is both portable and caller-independent:
+    // the relative ones are relative to whoever ran wrangler, and the absolute
+    // one would hard-code `/home/<user>/…` into nine tracked configs that a
+    // fork, a CI runner or a second contributor cannot use.
+    //
+    // WHY THE COMMAND THEN DOES THE LOCATING. `command -v wrangler` resolves
+    // through node_modules to `<repo>/node_modules/.bin/wrangler`, so three
+    // `dirname`s from it is the repository root — wherever the repository is,
+    // whoever cloned it, and whichever directory wrangler was invoked from.
+    //
+    // THAT THIS WAS THE BUG. The command used to be
+    //
+    //   cd ../../../../apps/identity/worker && … --out-dir ../../../…
+    //
+    // with four `..` written for "the config's own directory". Every LOCAL
+    // command and the `wrangler-validate` moon task do `cd` there first, so
+    // four was right for them and the build worked on a laptop.
+    // `deploy-worker.yml` does not: it runs wrangler from the REPOSITORY ROOT
+    // against `-c infra/cloudflare/<env>/<worker>/wrangler.generated.jsonc`,
+    // and four `..` from there leaves the repository entirely. The first
+    // staging deploy failed with
+    //
+    //   [custom build] /bin/sh: 1: cd: can't cd to ../../../../apps/identity/worker
+    //
+    // — one level short, which is exactly what four levels up from the
+    // repository root is. A custom build whose working directory depends on
+    // who invoked wrangler is not a build; it is a build that happens to work
+    // for the callers somebody happened to try first.
+    //
+    // `--out-dir` stays explicit because `worker-build` defaults it to `build`
+    // relative to ITS OWN working directory — the crate — so the default writes
+    // to `apps/<w>/worker/build/` while wrangler looks in
+    // `infra/cloudflare/<env>/<w>/build/`, and reports "The expected output file
+    // at build/index.js was not found", naming the path it could not find
+    // rather than the one that was written.
+    //
+    // Verified from two different caller directories — the repository root and
+    // the config's own — both of which land the build in `apps/<w>/worker` and
+    // put the artefact where `main` points.
+    // ------------------------------------------------------------------------
+    "command": "ROOT=$(dirname \"$(dirname \"$(dirname \"$(command -v wrangler)\")\")\") && cd \"$ROOT/apps/identity/worker\" && cargo install -q \"worker-build@^0.8\" --locked && worker-build --release --out-dir \"$ROOT/infra/cloudflare/staging/identity/build\"",
+  },
+
+  // Staging is production-shaped, so it logs like production and is queryable
+  // the same way. `persist: true` is the reason someone can debug a staging
+  // incident; the cost is a log store that costs money, and that cost is the
+  // point of having a staging environment at all.
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.1,
+      "persist": true,
+    },
+  },
+
+  "d1_databases": [
+    {
+      "binding": "IDENTITY_DB",
+      // STAGING DATABASE. Not the production database. If you find yourself
+      // copying a database_id out of the production config into this file,
+      // stop: that is the exact failure this comment exists to prevent.
+      "database_name": "ecoma-identity-staging",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../../../database/identity/migrations",
+      // brief §2 constraint 2: only the Identity Worker runs migrations. This
+      // is where its migration runner reads from. `wrangler d1 migrations
+      // apply` against this database from a laptop is a boundary violation
+      // even though the CLI would allow it — the constraint is about the
+      // runner, not about the permission.
+      "migrations_table": "d1_migrations",
+    },
+  ],
+
+  "kv_namespaces": [
+    {
+      "binding": "IDENTITY_KV",
+      // STAGING namespace. brief §2 constraint 24 — counters only, never
+      // authoritative state, so a lost namespace costs rate-limit accuracy and
+      // nothing else.
+      "id": "0000000000000000000000000000000a",
+    },
+  ],
+
+  "queues": {
+    "producers": [
+      {
+        "binding": "IDENTITY_QUEUE",
+        // STAGING queue. brief §2 constraint 22 — the envelope in
+        // contracts/events/v1/ is versioned so this producer stays compatible
+        // with the staging consumer in identity-jobs.wrangler.jsonc even while
+        // the production pair is on a different revision.
+        "queue": "identity-staging",
+      },
+    ],
+  },
+
+  "services": [
+    {
+      "binding": "EMAIL_PROVIDER",
+      "service": "identity-email-provider-staging",
+    },
+  ],
+
+  "ratelimits": [
+    {
+      "name": "RATE_LIMITER",
+      // A STAGING rate-limit namespace. Separate from production's so staging
+      // load tests do not consume the real login budget and lock real users out
+      // — a self-inflicted denial of service with a very confusing symptom.
+      "namespace_id": "1001",
+      "simple": {
+        "limit": 60,
+        "period": 60,
+      },
+    },
+  ],
+
+  // No smart placement on staging. `placement: smart` moves the Worker closer
+  // to D1, which is a real latency win in production; on staging it would make
+  // a staging request take a different code path from the one being tested
+  // (placement is observable in colo and in D1 request latency). Staging
+  // tests the CODE; production settings test the PLACEMENT.
+  "placement": {
+    "mode": "off",
+  },
+
+  "vars": {
+    "ENVIRONMENT": "staging",
+    "ISSUER_BASE_URL": "https://identity-staging.ecoma.io",
+  },
+}

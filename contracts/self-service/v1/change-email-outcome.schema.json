@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/self-service/v1/change-email-outcome.schema.json",
+  "title": "ChangeEmailOutcome",
+  "description": "The outcome of beginning an email change on the caller's own account, derived from identity_application::accounts::ChangeEmailOutcome. The response carries the challenge the verification code was delivered under and a backoff — and NO confirmation that the address was added, because it has not been. The address is added when the code is redeemed, which is a different call that this contract does not yet have.",
+  "type": "object",
+  "x-rust-type": "identity_application::accounts::ChangeEmailOutcome",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; ChangeEmailCommand has no body and no route serves it",
+  "required": ["challenge_id", "retry_after_seconds"],
+  "additionalProperties": false,
+  "properties": {
+    "challenge_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The challenge the verification code was delivered under. A correct code presented against the WRONG challenge must be refused, so this is what a redemption names alongside the code — it is not a decoration.",
+      "x-serde": "pub challenge_id: String",
+      "x-serde-status": "required"
+    },
+    "retry_after_seconds": {
+      "type": "integer",
+      "description": "How long to wait before offering a resend. A count of SECONDS, never a duration: a duration is ambiguous across the clock the server and the clock the browser think it is.",
+      "x-serde": "pub retry_after_seconds: u32",
+      "x-serde-status": "required",
+      "minimum": 0
+    }
+  },
+  "x-what-this-response-does-not-say": [
+    "it does not say the address was added — it was not, and the change is unverified until a code is redeemed",
+    "it does not say the address was already on the account — that is a refusal, and refusals arrive as errors",
+    "it does not say the delivery reached anyone — a send that logs and returns success is a finding under SECURITY.md, and Phase 2's exit condition requires real delivery"
+  ],
+  "x-phase": {
+    "status": "DEFERRED",
+    "phase": "Phase 5 — Applications, grants, and the self-service surface",
+    "note": "the command itself is a Phase 1/Phase 2 concern (sessions must exist before an account can be changed), and the surface that renders it is Phase 5. This contract names 5 because that is the phase the self-service surface lands in; see docs/roadmap/phases.md."
+  }
+}

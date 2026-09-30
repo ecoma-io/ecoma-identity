@@ -1,0 +1,145 @@
+# Ecoma Identity — ignore rules.
+#
+# Two things here are load-bearing for security rather than tidiness, and both
+# are checked by `tooling/scripts/check-architecture.mjs` (constraints §27 and
+# §28: no production secret committed, no other Ecoma repository in this
+# monorepo). Do not add an exception without an ADR.
+#
+#   * `.dev.vars` holds real development secrets and must never be tracked.
+#     Only `.dev.vars.example` is committed.
+#   * A `Cargo.toml` path dependency or a pnpm workspace glob reaching outside
+#     this repository is a violation, not a convenience.
+
+# ---------------------------------------------------------------------------
+# Rust
+# ---------------------------------------------------------------------------
+/target
+**/*.rs.bk
+*.pdb
+
+# `worker-build`'s output, in BOTH places it can land. The `apps/**/worker/build/`
+# form is what the tool wrote before the configs named `--out-dir`; the
+# `infra/cloudflare/**/build/` form is what it writes now, and is what wrangler's
+# `main` points at. Neither is source, and `build/` is the name a bundler or a
+# compiled artefact would use in any language, so this rule is written for the
+# whole name rather than for the paths that happen to need it today.
+**/build/
+
+# ---------------------------------------------------------------------------
+# Node
+# ---------------------------------------------------------------------------
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# ---------------------------------------------------------------------------
+# Nuxt
+# ---------------------------------------------------------------------------
+.output
+.nuxt
+# ---------------------------------------------------------------------------
+# moon's task cache.
+#
+# `.moon/cache/` is generated state: task hashes and the workspace graph, both of
+# which change on almost every run and both of which are a function of the
+# machine that ran them. Tracking them produces merge conflicts that carry no
+# information — two developers running different tasks get two different graphs
+# — and it makes `git status` permanently dirty.
+#
+# The cache directory ships its own `CACHEDIR.TAG` precisely so tools skip it.
+# `.moon/workspace.yml` and `.moon/toolchains.yml` are the two files that are
+# NOT cache, and they are deliberately not covered by this rule.
+# ---------------------------------------------------------------------------
+.moon/cache/
+
+# ---------------------------------------------------------------------------
+# Secrets. Nothing below may ever be tracked; the `.example` files are what gets
+# committed, and they carry the shape of a value with no value in it.
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+!.env.*.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+!.dev.vars.*.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+secrets.toml
+
+# ---------------------------------------------------------------------------
+# Wrangler. Local D1 state, local KV and Queue emulation, and the auth token
+# wrangler persists for `wrangler whoami`.
+# ---------------------------------------------------------------------------
+.wrangler/
+.dev.vars.local
+
+# ---------------------------------------------------------------------------
+# Test and coverage output
+# ---------------------------------------------------------------------------
+.nyc_output/
+playwright-report/
+test-results/
+screenshots/
+
+# ---------------------------------------------------------------------------
+# Editor and OS
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+
+# ---------------------------------------------------------------------------
+# The canary fixture's own git directory.
+#
+# `tooling/scripts/__fixtures__/violating-tree/` is a deliberately violating
+# mini-repository, and building it sometimes leaves a real `.git` inside it (any
+# command run there that shells out to git). When git meets a nested repository
+# whose files are not already tracked, it refuses the whole path, reports
+# `does not have a commit checked out`, and `fatal: adding files failed` — which
+# blocks `git add -A` for the ENTIRE repository, so one stray fixture artefact
+# could stop anyone staging anything at all. Ignoring the nested `.git` stops git
+# treating the fixture as an embedded repository and removes that failure mode.
+#
+# THIS RULE COVERS ONLY THE NESTED `.git`. It is deliberately narrower than
+# ignoring the whole fixture directory, because the fixture's files must stay
+# tracked (see below). Measured boundary, A/B on a pristine repository with
+# `git add -A --dry-run` as the probe:
+#
+#   fixture contents tracked,    no rule            exit 0
+#   fixture contents tracked,    `.git` rule        exit 0   <-- today's state
+#   fixture contents untracked,  no rule            exit 128 FAILS
+#   fixture contents untracked,  `.git` rule        exit 128 still fails
+#   fixture contents untracked,  whole-directory    exit 0
+#
+# So this rule is NOT sufficient on its own if the fixture's files were ever
+# untracked — only a whole-directory pattern covers that case. The narrower rule
+# is kept anyway, because it is the one that preserves the fixture, and the
+# fixture is tracked in this repository and has never been untracked. If it ever
+# is, `git add -A` will fail loudly and visibly, which is the honest outcome: the
+# fix is to re-track the fixture, not to silence the check by ignoring it
+# wholesale.
+#
+# This does NOT weaken the fixture's coverage. The fixture's own files are
+# ALREADY tracked and stay that way — ignoring a nested `.git` cannot untrack
+# anything. The §27 canary reads its `.env`, `tls.pem` and `.env.example`
+# stand-ins from the git index, and stages them into a temporary index with
+# `git add --intent-to-add --force` precisely because `.gitignore` correctly
+# ignores those names for real files. Ignoring the fixture wholesale would make
+# the canary vacuous while still reading as a green canary, so it is not done.
+# ---------------------------------------------------------------------------
+tooling/scripts/__fixtures__/violating-tree/.git
+
+# Agent worktrees: full checkouts of this repository, nested inside it, holding
+# another session's in-flight work. `git add -A` would sweep a whole worktree
+# into a commit, and prettier would rewrite the files inside it — both already
+# guarded in `eslint.config.mjs` and `.prettierignore`, and this is the third.
+# `.claude/settings.json` is deliberately NOT ignored: it is repository
+# configuration a checkout should carry, not generated state.
+.claude/worktrees/

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/admin/v1/unsuspend-user-request.schema.json",
+  "title": "UnsuspendUser",
+  "description": "The body of an administrative reinstatement, derived from identity_application::administration::UnsuspendUser. Structurally identical to SuspendUser: same AdminContext, same mandatory reason. They are two operations rather than one operation with a status field because each is a command with an audit consequence, and a single 'set status' endpoint would invite a console that offers status as a generic control.",
+  "type": "object",
+  "x-rust-type": "identity_application::administration::UnsuspendUser",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; UnsuspendUserCommand has no body and no route serves it",
+  "required": ["context", "user_id", "reason"],
+  "additionalProperties": false,
+  "properties": {
+    "context": {
+      "$ref": "https://auth.ecoma.io/contracts/admin/v1/admin-context.schema.json",
+      "description": "Who is asking, and under which session. Required at AAL2."
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The user to reinstate.",
+      "x-serde": "pub user_id: UserId",
+      "x-serde-status": "required"
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Why, recorded in the audit trail. Mandatory and non-empty, for the same reason as a suspension's.",
+      "x-serde": "pub reason: String",
+      "x-serde-status": "required"
+    }
+  },
+  "x-only-suspended-can-be-reinstated": {
+    "rule": "a deactivated user cannot be reinstated",
+    "source": "UserStatus::permits_reactivation is true for Suspended and PendingVerification and false for Active and Deactivated",
+    "already-active": "ApplicationError::Domain — a refusal",
+    "console-rule": "the console will not offer reinstatement for a deactivated account, because a control the server would refuse is a dead control with a misleading label"
+  },
+  "x-phase": "Phase 6 — Administration"
+}

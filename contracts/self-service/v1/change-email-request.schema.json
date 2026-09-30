@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/self-service/v1/change-email-request.schema.json",
+  "title": "ChangeEmail",
+  "description": "The body of a request to begin adding an email address to the caller's own account, derived from identity_application::accounts::ChangeEmail. It is a request to START a change, not a completed one: the address is not on the account when this returns.",
+  "type": "object",
+  "x-rust-type": "identity_application::accounts::ChangeEmail",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; ChangeEmailCommand has no body and no route serves it",
+  "required": ["email_address", "make_primary"],
+  "additionalProperties": false,
+  "properties": {
+    "email_address": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The address to add. A malformed address, or one already on the account, is a domain refusal rather than a 400 invented here.",
+      "x-serde": "pub email_address: String",
+      "x-serde-status": "required"
+    },
+    "make_primary": {
+      "type": "boolean",
+      "description": "Set the newly VERIFIED address as the account's sign-in address. The flag is honoured only after the address is verified; requesting this for an address that never becomes verified changes nothing, by design.",
+      "x-serde": "pub make_primary: bool",
+      "x-serde-status": "required"
+    }
+  },
+  "x-no-actor-field": {
+    "rule": "this body carries no actor, no actor_session_id, and no user_id",
+    "why": "that absence is what makes self-service mechanical rather than a convention: there is nowhere to put 'as whom'. If a field like actor_id appears here, the command has become an administrative one and belongs in identity_application::administration.",
+    "test": "identity_application::accounts::tests::no_account_command_carries_an_actor asserts the serialised body contains none of actor_id, actor, as_user, admin"
+  },
+  "x-phase": "Phase 5 — Applications, grants, and the self-service surface"
+}

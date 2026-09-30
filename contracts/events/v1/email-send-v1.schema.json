@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/events/v1/email-send-v1.schema.json",
+  "title": "identity.email.send.v1",
+  "description": "The payload of an email-send event, derived from the three OutboxEventType constructors. The event_type name is the version; the payload shape is owned by that version. No Rust type in the repository carries this payload's shape today — only the event_type string exists — so this is a PROMISE for the producer that Phase 7 builds, not a description of a type that exists.",
+  "type": "object",
+  "x-event-type": "identity.email.send.v1",
+  "x-rust-type": "NONE — the event_type string exists (OutboxEventType::email_send_v1); no payload struct exists",
+  "x-serde-status": "the event_type is IMPLEMENTED; the payload is NOT. OutboxEventType::email_send_v1() returns this name. A producer that writes this payload does not exist yet.",
+  "required": ["to", "kind"],
+  "additionalProperties": false,
+  "properties": {
+    "to": {
+      "type": "string",
+      "format": "email",
+      "description": "The recipient address.",
+      "x-status": "promised — no Rust field exists"
+    },
+    "kind": {
+      "type": "string",
+      "description": "Which email. At minimum a password-reset, email-verification, and security-notification variant. The exact set is the producer's to fix in Phase 7.",
+      "x-status": "promised — no Rust field exists",
+      "x-not-a-contract": "This enum is deliberately left open. Writing a closed list here would be a claim about types that do not exist. Phase 7 fixes it and this schema is updated in the same commit."
+    },
+    "user_id": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "The user the email is for, when the email is about a known account.",
+      "x-status": "promised — no Rust field exists"
+    },
+    "token": {
+      "type": ["string", "null"],
+      "description": "A single-use token embedded in the email, when the email carries one. The token is not an outbox id; it has its own lifecycle and its own expiry.",
+      "x-status": "promised — no Rust field exists"
+    },
+    "expires_at_ms": {
+      "type": ["integer", "null"],
+      "description": "When the token in this email expires, in milliseconds since the Unix epoch.",
+      "x-status": "promised — no Rust field exists"
+    }
+  },
+  "x-consumption": {
+    "idempotency": "keyed on the outbox event id (QueuedEvent.id), never on the payload. Two sends of the same email content are two facts and must both be delivered.",
+    "refusal": "a consumer that cannot recognise the type refuses the message rather than guessing at the shape",
+    "disposition": "BatchOutcome::Done, Retry, or DeadLetter — three named outcomes, no 'silently ignored'"
+  },
+  "x-phase": "Phase 7 — Background work"
+}

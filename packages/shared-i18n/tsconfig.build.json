@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // The build config, and the only one that emits.
+  //
+  // `rootDir: ./src` with `include: ["src/**/*"]` is what keeps `dist/index.js`
+  // a real entry point rather than `dist/src/index.js`, and it is also what
+  // keeps a test file out of the published package. The declaration output is
+  // not optional: the two Vue apps resolve `@ecoma-io/shared-i18n` through this
+  // package's `types` field, and without `.d.ts` their `vue-tsc` run would see
+  // an untyped module and fall back to `any` — silently, at the boundary this
+  // package exists to type.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "tests", "vitest.config.ts"]
+}

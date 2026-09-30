@@ -1,0 +1,16 @@
+{
+  "name": "home-web",
+  "main": ".output/server/index.mjs",
+  "compatibility_date": "2024-09-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "binding": "ASSETS",
+  },
+  // DELIBERATE VIOLATION: home-web must not have D1 binding
+  "d1_databases": [
+    {
+      "binding": "IDENTITY_DB",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+    },
+  ],
+}

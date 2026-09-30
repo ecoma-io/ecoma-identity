@@ -1,0 +1,77 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/identity-domain",
+    "crates/identity-application",
+    "crates/identity-oidc",
+    "crates/identity-security",
+    "crates/identity-cloudflare",
+    "crates/identity-testkit",
+    "apps/identity/worker",
+    "apps/identity-admin/worker",
+    "apps/identity-jobs/worker",
+]
+
+# The org's Rust lint bar, inherited by every crate via `[lints] workspace =
+# true`. A crate that genuinely needs `unsafe` must write its own `[lints]`
+# table — a visible diff decision, never a silent one.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+
+[workspace.package]
+# Every deployable and every internal crate starts at 0.0.0. Release Please
+# owns the three production versions (`.release-please-manifest.json`); the
+# internal crates are not production release units and are never tagged
+# (ADR-0008). This `version` therefore exists only to satisfy Cargo's manifest
+# and is NOT the deployed version of anything.
+version = "0.0.0"
+edition = "2024"
+# Edition 2024 stabilised in Rust 1.85 — that fact is the floor, not a number
+# someone remembered. Contributors and CI run `stable`; the compatibility
+# contract is this field.
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/ecoma-io/ecoma-identity"
+publish = false
+
+[workspace.dependencies]
+# Internal crates. Dependency direction is the law in `docs/architecture/`:
+# domain depends on nothing internal, application depends on domain, and only
+# the Cloudflare adapter crate and the Worker composition roots may reach the
+# `worker` crate. `tooling/scripts/check-architecture.mjs` judges that graph
+# from `cargo metadata`, so a Cargo.toml edit that inverts it fails CI.
+identity-domain = { path = "crates/identity-domain" }
+identity-application = { path = "crates/identity-application" }
+identity-oidc = { path = "crates/identity-oidc" }
+identity-security = { path = "crates/identity-security" }
+identity-cloudflare = { path = "crates/identity-cloudflare" }
+identity-testkit = { path = "crates/identity-testkit" }
+
+# Cloudflare Workers. `features` are not optional: worker-rs gates D1, Queues
+# and the `http` module behind them, so a Worker that reads a binding will not
+# compile unless the crate asked for it. The `http` feature is what lets a
+# handler return `http::Response` directly.
+worker = { version = "0.8.7", features = ["d1", "queue", "http"] }
+worker-macros = "0.8.7"
+
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+http = "1.5.0"
+thiserror = "2.0.21"
+# The `js` feature is what makes `Uuid::new_v4` resolve its entropy source on
+# `wasm32-unknown-unknown`: `getrandom` has no filesystem to read there, and
+# the platform's is `crypto.getRandomValues`. Without it every crate that mints
+# an id — which is `identity-domain` and therefore all four of them — fails to
+# compile for the Workers target, which is the only target any of them ships to.
+uuid = { version = "1.26.1", features = ["v4", "serde", "js"] }
+time = { version = "0.3.55", features = ["formatting", "parsing"] }
+# Query-string encoding for the OAuth redirect Location header. A dependency
+# rather than a hand-rolled escape: percent-encoding has edge cases (a space is
+# `+` in one grammar and `%20` in another, and only one of them is right in a
+# Location header) and getting them wrong in an identity system is not a
+# rounding error.
+urlencoding = "2.1.3"

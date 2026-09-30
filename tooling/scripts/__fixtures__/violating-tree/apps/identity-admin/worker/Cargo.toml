@@ -1,0 +1,9 @@
+[package]
+name = "identity-admin-worker"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+identity-application = { path = "../../../crates/identity-application" }
+identity-cloudflare = { path = "../../../crates/identity-cloudflare" }
+worker = { path = "../../../vendor/worker", features = ["d1"] }

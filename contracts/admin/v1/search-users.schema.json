@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/admin/v1/search-users.schema.json",
+  "title": "SearchUsers",
+  "description": "The query parameters of the administrative user search, derived from identity_application::administration::SearchUsers. The `query` field is FREE TEXT and is a QUERY PARAMETER, never a SQL fragment: the repository is the only thing that may decide what it matches, and a value that could become a fragment is an injection point on an administrative endpoint.",
+  "type": "object",
+  "x-rust-type": "identity_application::administration::SearchUsers",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; SearchUsersQuery has no body and no route serves it",
+  "x-wire-form": "the query string of GET /admin/users — limit, offset, and optionally query, status, role",
+  "required": ["limit", "offset"],
+  "additionalProperties": false,
+  "properties": {
+    "query": {
+      "type": ["string", "null"],
+      "description": "Free text over display name and address. A parameter the repository binds, never a fragment. A body that gained a `where` key, or a value carrying SQL keywords, would be a finding rather than a feature.",
+      "x-serde": "pub query: Option<String>",
+      "x-serde-status": "optional",
+      "x-serde-note": "Option<String> with no skip_serializing_if; on a query string an absent parameter is simply absent.",
+      "x-test": "identity_application::administration::tests::a_search_query_is_a_parameter_not_a_fragment asserts a value of \"'; DROP TABLE users; --\" is carried verbatim and that no 'where' key appears"
+    },
+    "status": {
+      "type": ["string", "null"],
+      "description": "Filter by account status.",
+      "x-serde": "pub status: Option<UserStatus>",
+      "x-serde-status": "optional",
+      "enum": ["active", "suspended", "deactivated", "pending_verification"],
+      "x-accepted-values": {
+        "source": "identity_domain::user::UserStatus, serde rename_all = \"snake_case\""
+      }
+    },
+    "role": {
+      "type": ["string", "null"],
+      "description": "Filter by platform role.",
+      "x-serde": "pub role: Option<PlatformRole>",
+      "x-serde-status": "optional",
+      "enum": ["member", "support", "administrator", "service"],
+      "x-accepted-values": {
+        "source": "identity_domain::user::PlatformRole, serde rename_all = \"snake_case\""
+      }
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Page size. Bounded by the repository — the Rust field is a bare u32 and enforces nothing itself, so a client must not read an unbounded limit as permission to send one.",
+      "x-serde": "pub limit: u32",
+      "x-serde-status": "required",
+      "minimum": 0
+    },
+    "offset": {
+      "type": "integer",
+      "description": "Page offset. Bounded by the repository, same caveat as limit.",
+      "x-serde": "pub offset: u32",
+      "x-serde-status": "required",
+      "minimum": 0
+    }
+  },
+  "x-response": "SearchUsersOutcome — { users: AdminUserRow[], has_more: boolean }. `has_more` is a BOOLEAN, not a count or a total: a console must not claim a number of users it was not told.",
+  "x-phase": "Phase 6 — Administration"
+}

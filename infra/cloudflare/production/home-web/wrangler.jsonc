@@ -1,0 +1,16 @@
+// Production wrangler configuration for home-web.
+//
+// This site has no resource identifiers or secrets to inject. Nuxt's Worker
+// module and Workers Assets stay relative to this config. No stateful or Identity
+// binding belongs to this public deployable (ADR-0016).
+
+{
+  "name": "home-web",
+  "main": "../../../../apps/home-web/.output/server/index.mjs",
+  "compatibility_date": "2024-09-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "../../../../apps/home-web/.output/public",
+  },
+}

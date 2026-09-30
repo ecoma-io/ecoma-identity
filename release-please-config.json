@@ -1,0 +1,51 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "$comment": "Four components, one per DEPLOYABLE (ADR-0016). The three Identity Workers and the public web application version independently. The nine internal crates are not release units: the root Cargo.toml sets `version = \"0.0.0\"` for every crate precisely because the manifest needs one and it is the version of nothing.\n\n`release-type: simple` per component, for the same reason: it derives the next version and the changelog from the conventional commits since the last matching tag and writes the manifest bump — and that is ALL it does. It does not write a `version` into any Cargo.toml or package.json, and that is deliberate rather than a limitation to work around. The `0.0.0` in the root Cargo.toml is not a stale version string to be rewritten; it is a comment with a number in it, saying the manifest requires a value. A `cargo`-type component would rewrite it into three independently-drifting numbers, and a version that appears in two places is a version that will eventually disagree with itself.\n\nThe one version-bearing file is `.release-please-manifest.json`, which the `simple` type is the only one of these that bumps, and which nothing else reads. The version a deployable actually reports is its Cloudflare Version tag, set at upload from the git tag this repository's release workflow produces.\n\n`separate-pull-requests: true` because the four deployables genuinely version independently: a commit touching only the jobs Worker is not a reason to bump the end-user authentication service's version, and a commit touching only home-web is not a reason to bump any Identity version. One combined release PR spanning all four would mean every release publishes a number for three deployables that did not change, which is the way a version number stops meaning anything.\n\nTHERE IS NO `extraFiles` AT THE TOP LEVEL, NO `extra-files` KEY IN ANY COMPONENT, AND NO `scripts` KEY IN THIS FILE. THAT ABSENCE IS THE ENFORCEMENT OF ADR-0012 — not an omission. `extraFiles` is release-please's mechanism for rewriting files during a release, and a workflow file is exactly the kind of file it accepts. A release PR that rewrites `.github/workflows/` is a release PR that has acquired the power to change what production runs, and a compromised release-please configuration is then a production change rather than a bad version number. Release Please calls no deployment tool here, holds no Cloudflare credential, and does not know a Cloudflare account exists. `pnpm arch`'s `boundary-5-worker-registration` reads this file as one of the four places a deployable is registered, so a fifth component added without a corresponding deployable is a finding the architecture gate raises rather than a comment someone remembers.",
+
+  "separate-pull-requests": true,
+  "include-component-in-tag": true,
+  "include-v-in-tag": true,
+  "pull-request-title-pattern": "chore(${component}): release ${version}",
+
+  "changelog-sections": [
+    { "type": "feat", "section": "Features" },
+    { "type": "fix", "section": "Bug fixes" },
+    { "type": "perf", "section": "Performance" },
+    { "type": "revert", "section": "Reverts" },
+    { "type": "docs", "section": "Documentation" },
+    { "type": "refactor", "section": "Refactoring" },
+    { "type": "test", "section": "Tests" },
+    { "type": "build", "section": "Build and CI" },
+    { "type": "ci", "section": "Build and CI" },
+    { "type": "infra", "section": "Build and CI" },
+    { "type": "deps", "section": "Build and CI" },
+    { "type": "arch", "section": "Build and CI" },
+    { "type": "db", "section": "Build and CI" },
+    { "type": "contracts", "section": "Build and CI" },
+    { "type": "release", "section": "Build and CI" },
+    { "type": "security", "section": "Security" }
+  ],
+
+  "packages": {
+    "apps/identity/worker": {
+      "release-type": "simple",
+      "package-name": "identity",
+      "component": "identity"
+    },
+    "apps/identity-admin/worker": {
+      "release-type": "simple",
+      "package-name": "identity-admin",
+      "component": "identity-admin"
+    },
+    "apps/identity-jobs/worker": {
+      "release-type": "simple",
+      "package-name": "identity-jobs",
+      "component": "identity-jobs"
+    },
+    "apps/home-web": {
+      "release-type": "simple",
+      "package-name": "home-web",
+      "component": "home-web"
+    }
+  }
+}

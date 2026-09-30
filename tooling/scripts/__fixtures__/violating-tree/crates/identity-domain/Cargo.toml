@@ -1,0 +1,11 @@
+[package]
+name = "identity-domain"
+version = "0.0.0"
+edition = "2024"
+
+# VIOLATION (check 3, direction two): the platform-free crate depends on the
+# Cloudflare Workers runtime. The domain rules must be expressible without a
+# platform; this edge is the one that proves check 3 reads the graph rather
+# than grepping for a `worker` line in a manifest.
+[dependencies]
+worker = { path = "../../vendor/worker", features = ["d1"] }

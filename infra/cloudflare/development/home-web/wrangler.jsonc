@@ -1,0 +1,16 @@
+// Development wrangler configuration for home-web.
+//
+// Nuxt/Nitro produces the Worker module and Workers Assets under apps/home-web.
+// This config deliberately grants no D1, service, queue, KV, R2 or Durable
+// Object binding: home-web is public and holds no Identity state (ADR-0016).
+
+{
+  "name": "home-web",
+  "main": "../../../../apps/home-web/.output/server/index.mjs",
+  "compatibility_date": "2024-09-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "../../../../apps/home-web/.output/public",
+  },
+}

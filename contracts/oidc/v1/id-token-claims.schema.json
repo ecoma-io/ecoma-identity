@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/oidc/v1/id-token-claims.schema.json",
+  "title": "IdTokenClaims",
+  "description": "The claim set of an ID token, derived from identity_oidc::jwt::IdTokenClaims. This is the payload half of a JWS: the header half is JwtHeader (jwt-header.schema.json), and the signature is never produced by identity-oidc — that is identity-security's job, and the crate is not allowed to depend on it. Every registered claim is required; the profile and email claims are present only when the corresponding scope was granted, which is what Option means here.",
+  "type": "object",
+  "x-rust-type": "identity_oidc::jwt::IdTokenClaims",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; no ID token is signed anywhere in the bootstrap phase — signing is DEFERRED to phase 4 (OIDC provider)",
+  "x-not-yet-producible": "identity-oidc can serialise this claim set and can check is_expired_at, and can do NOTHING else: no signing, no verification, no signature checking, no issuer or audience check. A claim set that validates as a token is not a valid token.",
+  "required": [
+    "iss",
+    "sub",
+    "aud",
+    "exp",
+    "iat",
+    "auth_time",
+    "nonce",
+    "acr",
+    "amr"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "iss": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The issuer. Must equal the discovery document's 'issuer' exactly, including scheme and any trailing slash. It is an opaque identifier that happens to look like a URL, not a URL the provider resolves.",
+      "x-serde": "pub iss: String",
+      "x-serde-status": "required"
+    },
+    "sub": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The subject — the user. The same string across every client, per subject_types_supported == [\"public\"].",
+      "x-serde": "pub sub: String",
+      "x-serde-status": "required"
+    },
+    "aud": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The audience: the client the token was minted for. A String in Rust, not an array — this provider mints a token for exactly one client.",
+      "x-serde": "pub aud: String",
+      "x-serde-status": "required"
+    },
+    "exp": {
+      "type": "integer",
+      "description": "Expiry, as seconds since the Unix epoch. The comparison is inclusive: is_expired_at(now) is true when now >= exp, so a token whose exp is now is expired.",
+      "x-serde": "pub exp: i64",
+      "x-serde-status": "required"
+    },
+    "iat": {
+      "type": "integer",
+      "description": "Issued-at, as seconds since the Unix epoch.",
+      "x-serde": "pub iat: i64",
+      "x-serde-status": "required"
+    },
+    "auth_time": {
+      "type": "integer",
+      "description": "When the user actually authenticated, as seconds since the Unix epoch. Distinct from iat: a token minted an hour after authentication has a much later iat than auth_time, and that gap is exactly the signal a client needs to decide whether to ask for a step-up.",
+      "x-serde": "pub auth_time: i64",
+      "x-serde-status": "required"
+    },
+    "nonce": {
+      "type": ["string", "null"],
+      "description": "The nonce from the authorization request. Required whenever the request carried one — its absence from a response to a request that had one is a replay. Carried on the wire as null when the request had none, because the field has no skip_serializing_if.",
+      "x-serde": "pub nonce: Option<String>",
+      "x-serde-status": "required on the wire, nullable",
+      "x-serde-note": "Option<String> with no skip_serializing_if and no default attribute, so it is serialised as null when absent."
+    },
+    "acr": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The authentication context class reference — this provider's assurance level. Two declared values: urn:ecoma:loa:1 for AAL1 and urn:ecoma:loa:2 for AAL2. These are this provider's OWN values, not the ISO or OIDC AAL claim values: a client matching on 'urn:ecoma:loa:1' learns the user proved one factor, and a client matching on the raw AAL string would not find one.",
+      "x-serde": "pub acr: String",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "identity_oidc::jwt::IdTokenClaims::ACR_AAL1 == \"urn:ecoma:loa:1\", ACR_AAL2 == \"urn:ecoma:loa:2\"",
+        "constraining": "the field is a String in Rust"
+      },
+      "enum": ["urn:ecoma:loa:1", "urn:ecoma:loa:2"]
+    },
+    "amr": {
+      "type": "array",
+      "description": "The authentication methods used, as an array of strings. The four declared AMR values are otp (both the emailed code and a time-based one-time password), user (a passkey), and federated (a federated provider). The array may be empty; it is never omitted.",
+      "x-serde": "pub amr: Vec<String>",
+      "x-serde-status": "required",
+      "items": {
+        "type": "string",
+        "enum": ["otp", "user", "federated"]
+      },
+      "x-accepted-values": {
+        "source": "identity_oidc::jwt::IdTokenClaims::AMR_EMAIL_OTP == \"otp\", AMR_OTP == \"otp\", AMR_PASSKEY == \"user\", AMR_FEDERATED == \"federated\"",
+        "constraining": "the field is a Vec<String> in Rust; the four constants collapse to three distinct wire values because the email code and the TOTP code are both 'otp'"
+      }
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The display name, when the 'profile' scope was granted. Absent otherwise.",
+      "x-serde": "pub name: Option<String>",
+      "x-serde-status": "optional, omitted when absent",
+      "x-serde-note": "#[serde(skip_serializing_if = \"Option::is_none\")] — absent from the payload, not null."
+    },
+    "email": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The email address, when the 'email' scope was granted. Absent otherwise.",
+      "x-serde": "pub email: Option<String>",
+      "x-serde-status": "optional, omitted when absent",
+      "x-serde-note": "#[serde(skip_serializing_if = \"Option::is_none\")] — absent from the payload, not null."
+    },
+    "email_verified": {
+      "type": "boolean",
+      "description": "Whether the address was proven. Present whenever email is. A client keying on email without reading this has an account-takeover bug.",
+      "x-serde": "pub email_verified: Option<bool>",
+      "x-serde-status": "optional, omitted when absent",
+      "x-serde-note": "#[serde(skip_serializing_if = \"Option::is_none\")] — absent from the payload, not null."
+    }
+  },
+  "x-omission-rule": {
+    "rule": "name, email and email_verified are omitted when None; nonce is always present and may be null. The eight registered claims (iss, sub, aud, exp, iat, auth_time, acr, amr) are always present.",
+    "source": "#[serde(skip_serializing_if = \"Option::is_none\")] on the three profile/email claims; no attribute on nonce",
+    "test": "identity_oidc::jwt::tests::an_empty_claim_set_still_serialises_the_registered_claims asserts all eight registered claim names are present on a minimal claim set"
+  },
+  "x-phase": "Phase 4 — OIDC provider"
+}

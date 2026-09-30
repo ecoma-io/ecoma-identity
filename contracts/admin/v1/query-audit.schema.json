@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/admin/v1/query-audit.schema.json",
+  "title": "QueryAudit",
+  "description": "The query parameters of the administrative audit query, derived from identity_application::administration::QueryAudit. administrative_only is NOT optional and defaults to nothing: a caller that omits it gets the whole trail, and the flag is spelled out because the two are different questions.",
+  "type": "object",
+  "x-rust-type": "identity_application::administration::QueryAudit",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; QueryAuditQuery has no body and no route serves it",
+  "x-wire-form": "the query string of GET /admin/audit",
+  "required": ["administrative_only", "limit", "offset"],
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "Restrict to events ABOUT one user. `about`, not `by`: the actor filter is the separate actor_id field. AuditEventType::concerns_a_user is false for the three application events, which name an application rather than a person, so this filter legitimately returns nothing for those.",
+      "x-serde": "pub user_id: Option<UserId>",
+      "x-serde-status": "optional"
+    },
+    "actor_id": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "Restrict to events BY one actor — the administrator who performed the action. Null in the row when no administrator acted.",
+      "x-serde": "pub actor_id: Option<UserId>",
+      "x-serde-status": "optional"
+    },
+    "since_ms": {
+      "type": ["integer", "null"],
+      "description": "Only events at or after this time, in milliseconds since the epoch. A bound, not a window: 'since 1700000000000' is answerable, 'the last week' is not, because the latter depends on when you asked.",
+      "x-serde": "pub since_ms: Option<i64>",
+      "x-serde-status": "optional"
+    },
+    "administrative_only": {
+      "type": "boolean",
+      "description": "Only administrative events — those where an administrator changing an account caused them. Not nullable, so there is no reading of an absent value to get wrong. AuditEventType::is_administrative is the closed list: user_suspended, user_unsuspended, user_role_changed, all_sessions_revoked, application_registered, application_updated, application_secret_rotated.",
+      "x-serde": "pub administrative_only: bool",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "identity_domain::audit::AuditEventType::is_administrative — a closed list of seven",
+        "constraining": "a plain bool in Rust; the seven values are a property of the enum, not of this field"
+      }
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Page size. Bounded by the repository.",
+      "x-serde": "pub limit: u32",
+      "x-serde-status": "required",
+      "minimum": 0
+    },
+    "offset": {
+      "type": "integer",
+      "description": "Page offset. Bounded by the repository.",
+      "x-serde": "pub offset: u32",
+      "x-serde-status": "required",
+      "minimum": 0
+    }
+  },
+  "x-response": "QueryAuditOutcome — { events: AdminAuditRow[], has_more: boolean }, newest first. A console must NOT render an empty list as 'nothing happened': an empty audit log is a specific and alarming claim, and during the bootstrap phase events ARE being recorded server-side while only the query is deferred. Saying 'no events' when events exist and cannot be read is the worst thing an operator investigating an incident could be told.",
+  "x-metadata-is-already-redacted": "AdminAuditRow.metadata is a BTreeMap<String, String> — a BTreeMap and not a HashMap because an audit row's JSON must serialise in a stable order to be diffable in a review. The values arrive redacted: redaction is the writer's job, and a console that trusted the trail to redact on read would be relying on a property the wire format does not carry.",
+  "x-phase": "Phase 6 — Administration"
+}

@@ -1,0 +1,47 @@
+{
+  "name": "ecoma-identity",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Ecoma Identity — the identity and authentication control plane for the Ecoma organisation.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ecoma-io/ecoma-identity"
+  },
+  "packageManager": "pnpm@12.8.1",
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=12"
+  },
+  "scripts": {
+    "format": "prettier --write --ignore-unknown .",
+    "format:check": "prettier --check --ignore-unknown .",
+    "lint": "pnpm exec moon run :lint",
+    "typecheck": "pnpm exec moon run :typecheck",
+    "test": "pnpm exec moon run :test",
+    "build": "pnpm exec moon run identity:build identity-admin:build identity-jobs:build home-web:build",
+    "arch": "node tooling/scripts/check-architecture.mjs",
+    "arch:canary": "node --test \"tooling/scripts/**/*.test.mjs\"",
+    "contracts": "node tooling/ci/check-contracts.mjs",
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm contracts && pnpm arch",
+    "wrangler:validate": "pnpm exec moon run :wrangler-validate",
+    "wrangler:prereqs": "node tooling/scripts/check-worker-build-prereqs.mjs infra/cloudflare/development/identity",
+    "moon": "moon",
+    "prepare": "lefthook install"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^20.1.0",
+    "@commitlint/config-conventional": "^20.1.0",
+    "@moonrepo/cli": "2.5.6",
+    "@types/node": "^26.6.3",
+    "eslint": "^10.11.0",
+    "jsdom": "^28.0.0",
+    "lefthook": "2.1.9",
+    "prettier": "^3.9.9",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.69.0",
+    "vue-tsc": "^3.3.11",
+    "wrangler": "4.144.0"
+  }
+}

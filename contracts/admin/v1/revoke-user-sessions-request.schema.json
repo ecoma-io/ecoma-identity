@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/admin/v1/revoke-user-sessions-request.schema.json",
+  "title": "RevokeUserSessions",
+  "description": "The body of an administrative bulk session revocation, derived from identity_application::administration::RevokeUserSessions. This is the ADMINISTRATOR's version of signing someone out everywhere, and it is a SEPARATE TYPE from the self-service RevokeAllSessions on purpose: a confused deputy that let a user pass a user_id to the self-service command would be an account-takeover primitive, so the two are different types with different fields.",
+  "type": "object",
+  "x-rust-type": "identity_application::administration::RevokeUserSessions",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; RevokeUserSessionsCommand has no body and no route serves it",
+  "required": ["context", "user_id", "reason"],
+  "additionalProperties": false,
+  "properties": {
+    "context": {
+      "$ref": "https://auth.ecoma.io/contracts/admin/v1/admin-context.schema.json",
+      "description": "Who is asking, and under which session. Required at AAL2."
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The user whose sessions are revoked. The whole reason this is a different type from the self-service command.",
+      "x-serde": "pub user_id: UserId",
+      "x-serde-status": "required"
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Why, recorded in the audit trail. Mandatory and non-empty.",
+      "x-serde": "pub reason: String",
+      "x-serde-status": "required"
+    }
+  },
+  "x-distinct-from-suspension": "Revoking sessions ends the user's current access WITHOUT changing their account status; suspending changes their status and revokes sessions as a consequence. Collapsing them into one 'disable the user' button would be imprecise about which thing an operator did, and both are written to the audit trail.",
+  "x-the-o1-alternative": "This command walks sessions; bumping the user's security_version achieves the same result in O(1) without enumerating them, which is the mechanism Phase 1 is built around. Both write the all_sessions_revoked audit event. Which one this route uses is a Phase 6 decision, and this contract does not claim it is settled.",
+  "x-phase": "Phase 1 — Sessions and the request context for the mechanism, Phase 6 — Administration for the administrative surface"
+}

@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/self-service/v1/enrolled-authenticator.schema.json",
+  "title": "EnrolledAuthenticator",
+  "description": "One of the caller's enrolled factors, derived from identity_domain::authenticator::Authenticator. The domain type is the fact of ENROLMENT — which factor, for whom, since when, whether it has been used — and deliberately holds no secret: the TOTP seed, the recovery codes and the passkey public key are identity-security's business. That is what lets the domain answer 'what may this user present?' without touching a secret, and it is why this type is safe to hand to a browser. Note the two gaps against the Rust type, which are load-bearing and are recorded below: `last_used_at_ms` and `user_id` are NOT in this view.",
+  "type": "object",
+  "x-rust-type": "identity_domain::authenticator::Authenticator, projected — the user_id is implied by the session and is not re-sent",
+  "x-serde-status": "the domain type is IMPLEMENTED; the projection has no Rust type of its own, and no route serves it",
+  "x-projection-note": "The Rust Authenticator carries six fields. The self-service view carries four: user_id is redundant on a route that reads the caller's own account, and last_used_at_ms is a step-up window input that the UI does not read. A view that carried either would be disclosing session state to a browser for no gain. The projection is therefore a contract-level decision, not a serde derivation, and it is stated here rather than left to be discovered by a client.",
+  "required": ["authenticator_id", "kind", "label", "enrolled_at_ms"],
+  "additionalProperties": false,
+  "properties": {
+    "authenticator_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "This enrolment's identifier. A handle used to address the enrolment in a removal request; it is not a credential and does not authenticate anything.",
+      "x-serde": "Authenticator.id (as authenticator_id in the projection)",
+      "x-serde-status": "required",
+      "x-serde-note": "AuthenticatorId is #[serde(transparent)] over a Uuid."
+    },
+    "kind": {
+      "type": "string",
+      "description": "What kind of factor this is. email_otp is a first factor (AuthenticatorKind::is_primary_factor); totp and passkey are second factors (is_second_factor); recovery_code is neither — it is a single-use secret for when every other factor is lost.",
+      "x-serde": "Authenticator.kind",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "identity_domain::authenticator::AuthenticatorKind with #[serde(rename_all = \"snake_case\")]",
+        "constraining": "an enum in Rust; the wire values are the snake_case variant names"
+      },
+      "enum": ["email_otp", "totp", "passkey", "recovery_code"]
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "A user-chosen label, so two authenticator apps are distinguishable. Bounded at 200 bytes by Authenticator::with_label. NOT nullable in this view: a label is required for a row to be useful to a user looking at a list, and Authenticator.label is Option<String> in the domain precisely so the domain can represent 'never labelled' while the self-service view presents an empty string as '' rather than null.",
+      "x-serde": "Authenticator.label (as a non-null string in the projection)",
+      "x-serde-status": "required",
+      "x-divergence-from-domain": "Authenticator.label is Option<String>. This view types it as a required string, defaulting an absent label to the empty string. A consumer must not treat an empty label as a display bug; it is the projection's choice, and the alternative — a null the UI would have to special-case — carries no more information."
+    },
+    "enrolled_at_ms": {
+      "type": "integer",
+      "description": "When it was enrolled, in milliseconds since the Unix epoch.",
+      "x-serde": "Authenticator.enrolled_at_ms",
+      "x-serde-status": "required"
+    }
+  },
+  "x-fields-deliberately-absent": {
+    "user_id": "implied by the session; the route reads the caller's own account and re-sending it would be noise",
+    "last_used_at_ms": "the step-up window input (Authenticator::was_used_recently) is a server-side authorization decision, not a field a browser reads",
+    "secret_material": "the TOTP seed, recovery codes and passkey public key are not on this type at all — that is the point of Authenticator's design, and a field carrying any of them would be a finding"
+  },
+  "x-phase": "Phase 3 — Second factor, and the assurance model for the authenticator; Phase 5 — Applications, grants, and the self-service surface for the screen that renders it"
+}

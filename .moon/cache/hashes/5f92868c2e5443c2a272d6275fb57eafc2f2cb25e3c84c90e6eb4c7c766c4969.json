@@ -1,0 +1,31 @@
+[
+  {
+    "projects": {
+      "identity-admin-web": "apps/identity-admin/web",
+      "identity-admin-worker": "apps/identity-admin/worker",
+      "identity-application": "crates/identity-application",
+      "identity-cloudflare": "crates/identity-cloudflare",
+      "identity-domain": "crates/identity-domain",
+      "identity-jobs-worker": "apps/identity-jobs/worker",
+      "identity-oidc": "crates/identity-oidc",
+      "identity-security": "crates/identity-security",
+      "identity-testkit": "crates/identity-testkit",
+      "identity-web": "apps/identity/web",
+      "identity-worker": "apps/identity/worker"
+    },
+    "asyncGraphBuilding": true,
+    "env": { "MOON_OUTPUT_STYLE": "", "MOON_RETRY_COUNT": "" },
+    "extensions": {},
+    "inDocker": false,
+    "inputs": {
+      ".moon/toolchains.yml": "5f3f75b1b35e7d3d46f1371e9876c01a580d2ef35a0c8efa812bd2355d35faf4",
+      ".moon/workspace.yml": "e2447380b9850ec94b0f576fbd6a3d5048f63c57bb4ee656837a773d9bb7dce3",
+      "apps/identity/web/package.json": "0465919a3d43610ccbedc8b9b58d0482c5dac72010aee2987a80b032489b0b0b",
+      "apps/identity-admin/web/package.json": "2c0071a8960564d5eedc6827e4f2843430298f50d37d5a7d8418ea731345b368",
+      "crates/identity-domain/moon.yml": "639fa17a74b4570db9382de2a9910aa5e16535da1c0504278ea38b61e43e04c3",
+      "package.json": "a57a5a1423bd32dfddb4e9e9ef51426763b0f35bd2cd8c8140cbb8ef696137a9"
+    },
+    "toolchains": { "javascript": "1.3.1" },
+    "version": "2.5.6"
+  }
+]

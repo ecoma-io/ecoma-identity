@@ -1,0 +1,20 @@
+# Fixture project map. The three real Workers are mapped; the fourth Worker
+# (identity-reporting) is not, which is the asymmetry check 5 reports.
+# home-web is mapped correctly as a valid fourth deployable.
+vcs:
+  client: git
+  defaultBranch: main
+
+projects:
+  identity-domain: crates/identity-domain
+  identity-application: crates/identity-application
+  identity-oidc: crates/identity-oidc
+  identity-security: crates/identity-security
+  identity-cloudflare: crates/identity-cloudflare
+  identity-testkit: crates/identity-testkit
+  identity-worker: apps/identity/worker
+  identity-web: apps/identity/web
+  identity-admin-worker: apps/identity-admin/worker
+  identity-admin-web: apps/identity-admin/web
+  identity-jobs-worker: apps/identity-jobs/worker
+  home-web: apps/home-web

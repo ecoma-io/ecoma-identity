@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/self-service/v1/account-view.schema.json",
+  "title": "AccountView",
+  "description": "The caller's own account as the user sees it, derived from identity_application::accounts::AccountView. Read by a signed-in user about their own account and by nobody else: there is no actor field on this type or on any command that produces it, which is what makes 'self-service' mechanical rather than a convention. The administrative view of the same account is a DIFFERENT type (AdminUserRow) for exactly that reason.",
+  "type": "object",
+  "x-rust-type": "identity_application::accounts::AccountView",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; the command that fills it (GetAccountQuery) has no body, and no route serves it",
+  "required": [
+    "user_id",
+    "display_name",
+    "role",
+    "emails",
+    "identities",
+    "aal",
+    "step_up_required"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The account's identifier. A transparent newtype over a UUID in Rust, so it is the canonical hyphenated text form on the wire.",
+      "x-serde": "pub user_id: UserId",
+      "x-serde-status": "required",
+      "x-serde-note": "UserId is #[serde(transparent)] over a Uuid."
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "The display name. Bounded by identity_domain::user::User::new: blank, padded, or over the bound is refused by the domain, not by this schema.",
+      "x-serde": "pub display_name: String",
+      "x-serde-status": "required",
+      "x-bounds": {
+        "source": "identity_domain::user::User::new",
+        "note": "the Rust field is a plain String and enforces nothing; the bound lives in the domain constructor"
+      }
+    },
+    "role": {
+      "type": "string",
+      "description": "The platform role. SHOWN, not editable, in the self-service surface. A role here says what an administrator may do to an account; it is never consulted about a merge in another repository (ADR-0005).",
+      "x-serde": "pub role: PlatformRole",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "identity_domain::user::PlatformRole with #[serde(rename_all = \"snake_case\")]",
+        "constraining": "an enum in Rust; the wire values are the snake_case variant names"
+      },
+      "enum": ["member", "support", "administrator", "service"]
+    },
+    "emails": {
+      "type": "array",
+      "description": "The email addresses on the account. Exactly one is primary, enforced by a partial unique index in the database and not by this type.",
+      "x-serde": "pub emails: Vec<AccountEmail>",
+      "x-serde-status": "required",
+      "items": {
+        "$ref": "https://auth.ecoma.io/contracts/self-service/v1/account-view.schema.json#/definitions/accountEmail"
+      }
+    },
+    "identities": {
+      "type": "array",
+      "description": "The external identities linked to the account. The `subject` is present HERE, in the user's own view of their own account, and absent from every administrative view of it — a separate type, not a flag on this one.",
+      "x-serde": "pub identities: Vec<AccountIdentity>",
+      "x-serde-status": "required",
+      "items": {
+        "$ref": "https://auth.ecoma.io/contracts/self-service/v1/account-view.schema.json#/definitions/accountIdentity"
+      }
+    },
+    "aal": {
+      "type": "string",
+      "description": "How strongly THIS SESSION is currently authenticated. Not a property of the account: the same user in two browsers carries two different values.",
+      "x-serde": "pub aal: Aal",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "identity_domain::security::Aal with #[serde(rename_all = \"snake_case\")]",
+        "constraining": "an enum in Rust. The wire values coincide with Aal::as_wire() == \"aal1\" | \"aal2\", and the serde rename is what puts them there."
+      },
+      "enum": ["aal1", "aal2"]
+    },
+    "step_up_required": {
+      "type": "boolean",
+      "description": "Whether sensitive operations will demand a step-up first. REPORTED, not assumed: a user with no second factor enrolled can never satisfy this, which is why it is a field rather than something inferred. A UI may warn; it may not decide the answer.",
+      "x-serde": "pub step_up_required: bool",
+      "x-serde-status": "required"
+    }
+  },
+  "definitions": {
+    "accountEmail": {
+      "title": "AccountEmail",
+      "description": "identity_application::accounts::AccountEmail",
+      "type": "object",
+      "required": ["address", "verified", "primary"],
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The address.",
+          "x-serde": "pub address: String",
+          "x-serde-status": "required"
+        },
+        "verified": {
+          "type": "boolean",
+          "description": "Whether it has been proven. A client keying on an address without reading this has an account-takeover bug.",
+          "x-serde": "pub verified: bool",
+          "x-serde-status": "required"
+        },
+        "primary": {
+          "type": "boolean",
+          "description": "Whether this is the account's sign-in address. Exactly one per account; the guarantee is a partial unique index in the database, not this type.",
+          "x-serde": "pub primary: bool",
+          "x-serde-status": "required"
+        }
+      }
+    },
+    "accountIdentity": {
+      "title": "AccountIdentity",
+      "description": "identity_application::accounts::AccountIdentity",
+      "type": "object",
+      "required": ["provider", "subject", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Which provider asserted it. `saml` is a declared variant because the domain is expected to need it, not because anything implements it — the domain doc says so explicitly.",
+          "x-serde": "pub provider: IdentityProvider",
+          "x-serde-status": "required",
+          "x-accepted-values": {
+            "source": "identity_domain::identity::IdentityProvider with #[serde(rename_all = \"snake_case\")]",
+            "constraining": "an enum in Rust",
+            "reserved": "saml"
+          },
+          "enum": ["oauth", "passkey", "email", "saml"]
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "description": "The provider's identifier for the user. Not a secret — a user's email address is often exactly this value, which is why it is not logged. Bounded at 512 bytes by Identity::new.",
+          "x-serde": "pub subject: String",
+          "x-serde-status": "required"
+        },
+        "label": {
+          "type": ["string", "null"],
+          "maxLength": 200,
+          "description": "The user-chosen label. Bounded at 200 bytes when present by Identity::with_label. Serialised as null when absent, not omitted: AccountIdentity carries no skip_serializing_if.",
+          "x-serde": "pub label: Option<String>",
+          "x-serde-status": "required on the wire, nullable",
+          "x-serde-note": "Option<String> with no skip_serializing_if, so the key is always present."
+        }
+      }
+    }
+  },
+  "x-omission-rule": {
+    "rule": "every field of AccountView, AccountEmail and AccountIdentity is always present. The only nullable field is AccountIdentity.label.",
+    "source": "no skip_serializing_if on any of these types",
+    "test": "identity_application::accounts::tests::an_account_view_does_not_carry_another_users_secrets asserts the serialised view contains no 'password', 'secret', 'token' or 'security_version'"
+  },
+  "x-phase": "Phase 5 — Applications, grants, and the self-service surface"
+}

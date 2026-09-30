@@ -1,0 +1,28 @@
+[package]
+name = "identity-testkit"
+description = "In-memory doubles for the application's ports: repositories, authenticator gates, mail and queue transports. Test-only, ships nothing."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# Depends on the ports it doubles, so a trait added to identity-application
+# without a testkit counterpart is a compile error in every test that wants
+# it. Deliberately does NOT depend on identity-cloudflare: a testkit that
+# wrapped D1 would make the D1-dependent tests the only ones that compile,
+# which is precisely backwards. A test that genuinely needs a real D1 is an
+# integration test and lives under `tests/integration/` with its own
+# workspace membership.
+[dependencies]
+identity-domain = { workspace = true }
+identity-application = { workspace = true }
+identity-oidc = { workspace = true }
+identity-security = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+
+[lints]
+workspace = true

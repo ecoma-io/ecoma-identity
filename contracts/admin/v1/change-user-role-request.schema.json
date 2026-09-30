@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auth.ecoma.io/contracts/admin/v1/change-user-role-request.schema.json",
+  "title": "ChangeUserRole",
+  "description": "The body of an administrative role change, derived from identity_application::administration::ChangeUserRole. It carries the AdminContext, so the actor and the session they act under travel with the command rather than being inferred at the transport — which is what gives the AAL2 check somewhere to happen.",
+  "type": "object",
+  "x-rust-type": "identity_application::administration::ChangeUserRole",
+  "x-serde-status": "the type is IMPLEMENTED as a shape; ChangeUserRoleCommand has no body and no route serves it",
+  "required": ["context", "user_id", "new_role"],
+  "additionalProperties": false,
+  "properties": {
+    "context": {
+      "$ref": "https://auth.ecoma.io/contracts/admin/v1/admin-context.schema.json",
+      "description": "Who is asking, and under which session."
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The user whose role changes. May NOT equal context.actor_id — that is the SelfChange refusal, and it is reached before any other rule.",
+      "x-serde": "pub user_id: UserId",
+      "x-serde-status": "required"
+    },
+    "new_role": {
+      "type": "string",
+      "description": "The role to assign. The CURRENT role and the ACTOR's role are not request fields: RoleChangeRequest carries them, but they are resolved by the command that builds that request, from the store, inside the transaction. A body that let a caller state the current role would let a caller lie about it.",
+      "x-serde": "pub new_role: PlatformRole",
+      "x-serde-status": "required",
+      "x-accepted-values": {
+        "source": "identity_domain::user::PlatformRole, serde rename_all = \"snake_case\""
+      },
+      "enum": ["member", "support", "administrator", "service"]
+    }
+  },
+  "x-not-on-the-wire": {
+    "actor_role": "resolved from the actor's session by the command; a caller-supplied actor_role would be a caller claiming its own authority",
+    "current_role": "read from the store inside the transaction",
+    "target_status": "read from the store inside the transaction",
+    "active_administrator_count": "COUNTED inside the same transaction that applies the change. This is the field the whole last-administrator rule turns on, and reading it outside the transaction is the race Phase 6's exit condition names."
+  },
+  "x-success-response": "PlatformRole — the new role. The command's return type is ApplicationResult<PlatformRole>, not the AccountView a self-service command would return, because the administrative surface is a different boundary.",
+  "x-phase": "Phase 6 — Administration"
+}
