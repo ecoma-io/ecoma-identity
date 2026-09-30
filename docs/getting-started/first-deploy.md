@@ -72,7 +72,7 @@ copies:
 it is the decision the development config records: "`identity` in development and
 `identity` in production are the same script name in the same account but
 different environments", selected by which config file you point wrangler at
-(`-c infra/cloudflare/staging/identity.wrangler.jsonc`).
+(`-c infra/cloudflare/staging/identity/wrangler.jsonc`).
 
 Two properties follow from the name being identical and the _file_ being the
 selector, and both are worth stating because the alternative is easy to
@@ -198,7 +198,7 @@ longer applies. Stop and fix it before deploying.
 Secrets go in via `wrangler secret put`, never in a tracked file.
 
 ```bash
-wrangler secret put SIGNING_KEY -c infra/cloudflare/production/identity.wrangler.jsonc
+wrangler secret put SIGNING_KEY -c infra/cloudflare/production/identity/wrangler.jsonc
 ```
 
 Which secrets exist is `DEFERRED` — there is no signing key, because there is no
@@ -250,7 +250,7 @@ pnpm --filter ecoma-identity-web build
 pnpm build          # moon run identity:build identity-admin:build identity-jobs:build
 
 # 3. Upload. This creates an immutable Version. It changes NO traffic.
-wrangler versions upload -c infra/cloudflare/production/identity.wrangler.jsonc
+wrangler versions upload -c infra/cloudflare/production/identity/wrangler.jsonc
 wrangler versions upload -c infra/cloudflare/production/identity-admin.wrangler.jsonc
 wrangler versions upload -c infra/cloudflare/production/identity-jobs.wrangler.jsonc
 ```
@@ -336,7 +336,7 @@ What to look at between steps, given that there is almost nothing to see yet:
 
 | Signal                                 | Where                                                                              |
 | -------------------------------------- | ---------------------------------------------------------------------------------- |
-| The version actually serving           | `wrangler deployments list -c infra/cloudflare/production/identity.wrangler.jsonc` |
+| The version actually serving           | `wrangler deployments list -c infra/cloudflare/production/identity/wrangler.jsonc` |
 | `/ready` answering truthfully          | probe it                                                                           |
 | 501 on the OIDC routes                 | probe one; it is the expected state                                                |
 | 5xx                                    | the Worker log stream                                                              |
@@ -374,7 +374,7 @@ you cannot tell them apart, one of them is wrong and you do not know which.
 ## Add the custom domain
 
 ```bash
-wrangler routes custom <identity-host> -c infra/cloudflare/production/identity.wrangler.jsonc
+wrangler routes custom <identity-host> -c infra/cloudflare/production/identity/wrangler.jsonc
 ```
 
 Optional — the `*.workers.dev` subdomain works. Add it when you want the

@@ -17,6 +17,14 @@
 **/*.rs.bk
 *.pdb
 
+# `worker-build`'s output, in BOTH places it can land. The `apps/**/worker/build/`
+# form is what the tool wrote before the configs named `--out-dir`; the
+# `infra/cloudflare/**/build/` form is what it writes now, and is what wrangler's
+# `main` points at. Neither is source, and `build/` is the name a bundler or a
+# compiled artefact would use in any language, so this rule is written for the
+# whole name rather than for the paths that happen to need it today.
+**/build/
+
 # ---------------------------------------------------------------------------
 # Node
 # ---------------------------------------------------------------------------

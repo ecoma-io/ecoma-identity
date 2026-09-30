@@ -2,7 +2,7 @@
 //
 // What this is NOT: it is not production, and it must never become a second
 // production. Every resource id below is a DIFFERENT resource from the one in
-// infra/cloudflare/production/identity.wrangler.jsonc, and the difference is
+// infra/cloudflare/production/identity/wrangler.jsonc, and the difference is
 // deliberate and checkable: a database that is shared between staging and
 // production is how a staging deploy destroys production data, and the only
 // defence that has ever worked is making the ids visibly different to a human
@@ -31,7 +31,7 @@
 // placeholder there would make every staging deploy a hand-edit. They are still
 // infrastructure identifiers and not secrets (wrangler requires them in
 // config), which is why they are committed while production's are not — see
-// infra/cloudflare/production/identity.wrangler.jsonc for that distinction.
+// infra/cloudflare/production/identity/wrangler.jsonc for that distinction.
 // ---------------------------------------------------------------------------------
 
 {
@@ -55,7 +55,38 @@
 
   "main": "build/index.js",
   "build": {
-    "command": "cd ../../../../apps/identity/worker && cargo install -q \"worker-build@^0.8\" --locked && worker-build --release",
+    // WHY --out-dir IS EXPLICIT, AND WHY IT IS NOT "build".
+    //
+    // `main` is resolved by wrangler against THIS FILE'S OWN DIRECTORY, so
+    // "build/index.js" above means `infra/cloudflare/staging/identity/build/index.js`.
+    // `worker-build`, by contrast, writes to `--out-dir`, which DEFAULTS to
+    // `build` RELATIVE TO ITS OWN WORKING DIRECTORY — and the command below
+    // changes that directory to the crate, so the default lands at
+    // `apps/identity/worker/build/` instead. Two directories, one name.
+    //
+    // The symptom is a check that cannot fail locally and fails in CI with:
+    //
+    //   The expected output file at "build/index.js" was not found after
+    //   running custom build: … worker-build --release
+    //
+    // which names the path it could not find and not the one that was written.
+    // The pkg really was produced — CI logged "Your wasm pkg is ready to
+    // publish at …/apps/identity/worker/build/" — it was simply in the wrong
+    // place for wrangler to look.
+    //
+    // So the output directory is named explicitly here rather than relying on
+    // a default that is relative to a directory this command moves.
+    //
+    // THREE "..", not four, and the difference is not cosmetic. The `cd` runs
+    // from THIS config's own directory, which is four levels below the
+    // repository root (infra/cloudflare/<env>/<w>), so it needs four. The
+    // `--out-dir` is resolved by worker-build AFTER that `cd`, from
+    // `apps/<w>/worker`, which is three levels below the root. Four `..` from
+    // there lands OUTSIDE the repository entirely and the output disappears
+    // into a sibling directory. Both numbers are correct for the directory
+    // each is resolved from, which is exactly why the mismatch stays invisible
+    // until a check looks for the file.
+    "command": "cd ../../../../apps/identity/worker && cargo install -q \"worker-build@^0.8\" --locked && worker-build --release --out-dir ../../../infra/cloudflare/staging/identity/build",
   },
 
   // Staging is production-shaped, so it logs like production and is queryable

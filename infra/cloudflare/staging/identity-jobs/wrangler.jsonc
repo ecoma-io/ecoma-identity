@@ -28,7 +28,38 @@
 
   "main": "build/index.js",
   "build": {
-    "command": "cd ../../../../apps/identity-jobs/worker && cargo install -q \"worker-build@^0.8\" --locked && worker-build --release",
+    // WHY --out-dir IS EXPLICIT, AND WHY IT IS NOT "build".
+    //
+    // `main` is resolved by wrangler against THIS FILE'S OWN DIRECTORY, so
+    // "build/index.js" above means `infra/cloudflare/staging/identity-jobs/build/index.js`.
+    // `worker-build`, by contrast, writes to `--out-dir`, which DEFAULTS to
+    // `build` RELATIVE TO ITS OWN WORKING DIRECTORY — and the command below
+    // changes that directory to the crate, so the default lands at
+    // `apps/identity-jobs/worker/build/` instead. Two directories, one name.
+    //
+    // The symptom is a check that cannot fail locally and fails in CI with:
+    //
+    //   The expected output file at "build/index.js" was not found after
+    //   running custom build: … worker-build --release
+    //
+    // which names the path it could not find and not the one that was written.
+    // The pkg really was produced — CI logged "Your wasm pkg is ready to
+    // publish at …/apps/identity-jobs/worker/build/" — it was simply in the wrong
+    // place for wrangler to look.
+    //
+    // So the output directory is named explicitly here rather than relying on
+    // a default that is relative to a directory this command moves.
+    //
+    // THREE "..", not four, and the difference is not cosmetic. The `cd` runs
+    // from THIS config's own directory, which is four levels below the
+    // repository root (infra/cloudflare/<env>/<w>), so it needs four. The
+    // `--out-dir` is resolved by worker-build AFTER that `cd`, from
+    // `apps/<w>/worker`, which is three levels below the root. Four `..` from
+    // there lands OUTSIDE the repository entirely and the output disappears
+    // into a sibling directory. Both numbers are correct for the directory
+    // each is resolved from, which is exactly why the mismatch stays invisible
+    // until a check looks for the file.
+    "command": "cd ../../../../apps/identity-jobs/worker && cargo install -q \"worker-build@^0.8\" --locked && worker-build --release --out-dir ../../../infra/cloudflare/staging/identity-jobs/build",
   },
 
   "observability": {
@@ -69,7 +100,7 @@
     "consumers": [
       {
         // STAGING queue, matching the producer in
-        // identity.wrangler.jsonc in this directory. brief §2 constraint 22 —
+        // identity/wrangler.jsonc in this directory. brief §2 constraint 22 —
         // the pair stays compatible through the versioned envelope in
         // contracts/events/v1/, not through a config setting.
         "queue": "identity-staging",
