@@ -35,6 +35,14 @@ publish = false
 # It has no D1 binding at all in the bootstrap configuration. It talks to
 # Identity over the service binding when it needs to, and it owns its own
 # dead-letter handling.
+[lib]
+# `cdylib` because `worker-build` refuses anything else for
+# `wasm32-unknown-unknown` ("crate-type must be cdylib to compile to
+# wasm32-unknown-unknown"). `rlib` is kept alongside it so `cargo test` and
+# `cargo doc` have a library to build on the host — without it this crate is
+# unbuildable as a dependency of anything, including its own test harness.
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 worker = { workspace = true }
 serde = { workspace = true }

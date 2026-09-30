@@ -14,9 +14,14 @@
 # the commands below, not in the inputs, not in a comment implying one belongs
 # here. `tooling/scripts/check-architecture.mjs` check 2 judges the actual
 # `cargo metadata` graph, so the absence is mechanical rather than a promise.
-# What this Worker MAY reach for the error and idempotency vocabulary is
-# `identity-security` and `identity-cloudflare` — both below it in the law, and
-# neither of which can evaluate a rule.
+#
+# It also names no `identity-security` and no `identity-cloudflare`, which an
+# earlier version of this comment claimed were safe. They are not: both depend
+# on `identity-domain`, so depending on either carries the identity rule engine
+# in with it and the isolation would be a comment rather than a control. The
+# price is that this crate owns its own copy of the error envelope and the
+# response headers, which `docs/architecture/crate-dependency-law.md` states as
+# the standing cost of the boundary.
 #
 # It owns no identity state, so it holds no D1 binding. `JOBS_KV` holds
 # idempotency keys and dead-letter bookkeeping: losing one costs a duplicate
