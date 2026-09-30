@@ -47,6 +47,8 @@ import path from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { internalReachability, readRustGraph } from "./check-architecture.mjs";
+
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..", "..");
 const SCRIPT = path.join(SCRIPT_DIR, "check-architecture.mjs");
@@ -284,13 +286,45 @@ describe("the canary fixture: a deliberately violating tree", () => {
 
   it("check 2: the Jobs Worker must not depend on identity-domain", () => {
     const check = findingsFor(fixtureRun.report, "boundary-2-jobs-isolation");
+    // The message is `reaches`, not `->`: the check judges transitive
+    // reachability, so a path through an intermediate crate is a violation
+    // with the same force as a direct edge. The fixture carries a direct
+    // edge, and this asserts the violation is reported either way.
     const hit = findingMatching(
       check,
-      /identity-jobs-worker -> identity-domain/,
+      /identity-jobs-worker reaches identity-domain/,
       "check 2 must catch the jobs worker's cargo edge to identity-domain",
     );
     assert.match(hit.file, /apps\/identity-jobs\/worker\/Cargo\.toml$/);
     assert.match(hit.constraint, /§4/);
+  });
+
+  it("check 2: a TRANSITIVE route to identity-domain is also a violation", () => {
+    // The direct-edge assertion above cannot tell a check that reads only
+    // direct edges from one that reads reachability, because the fixture's
+    // edge is direct. This is the case that was silently passing before: a
+    // jobs Worker that depends on a crate which itself depends on
+    // identity-domain carries the rule engine in with it, and the manifest
+    // looks compliant.
+    //
+    // Proven on the REAL tree, not the fixture, because the real tree is the
+    // case that was missed: identity-jobs-worker declares identity-security
+    // and identity-cloudflare, and both reach identity-domain.
+    const real = internalReachability(readRustGraph(), "identity-jobs-worker");
+    const forbidden = [...real.keys()].filter((name) =>
+      /identity-(domain|application)$/.test(name),
+    );
+    assert.ok(
+      forbidden.length > 0,
+      "the real jobs Worker must be shown reaching identity-domain or identity-application transitively — if this fails, the Cargo.toml changed and the check needs re-deriving",
+    );
+    for (const name of forbidden) {
+      const p = real.get(name);
+      assert.ok(
+        p.length >= 2,
+        `${name} must be reached through at least one intermediate crate, or this test is no longer covering the transitive case`,
+      );
+    }
   });
 
   it("check 3: the domain crate must not depend on the Cloudflare runtime", () => {

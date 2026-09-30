@@ -29,14 +29,55 @@ Two absences enforce it, and both are absences rather than prohibitions:
 1. **No D1 binding at all.** The Jobs Worker's bootstrap configuration has no
    identity database. It cannot read identity state because it was never handed
    a way to.
-2. **No dependency on `identity-domain` or `identity-application`.** The
-   manifest names only `identity-cloudflare`, `identity-security`, `worker`,
-   `serde` and `serde_json`. It is structurally incapable of evaluating an
-   identity rule.
+2. **No reachable path to `identity-domain` or `identity-application` — not
+   even transitively.** The prohibition is on _capability_, and a capability is
+   what the compiled program contains, not what one manifest names.
 
 A prohibition ("do not query identity state") is a request. An absence (no
-binding, no dependency) is a control. This is the same reasoning as
+binding, no reachable dependency) is a control. This is the same reasoning as
 [admin-isolation.md](admin-isolation.md), applied to a different boundary.
+
+## The boundary is reachability, not a manifest line
+
+**This section corrects an earlier version of this document, which was wrong in
+a way that mattered.**
+
+It used to say: _"The manifest names only `identity-cloudflare`,
+`identity-security`, `worker`, `serde` and `serde_json`. It is structurally
+incapable of evaluating an identity rule."_ The first sentence was a fact about
+`Cargo.toml`. The second did not follow from it, and it was false. The Jobs
+Worker's `Cargo.toml` does name only those five, and the Jobs Worker can
+nonetheless reach the identity rule engine:
+
+| Worker declares       | which declares                                                                  | which declares    |
+| --------------------- | ------------------------------------------------------------------------------- | ----------------- |
+| `identity-cloudflare` | `identity-domain`, `identity-application`, `identity-oidc`, `identity-security` | `identity-domain` |
+| `identity-security`   | `identity-domain`                                                               | —                 |
+
+Both paths end at `identity-domain`. So the rule engine is compiled into the
+Jobs Worker today, and the manifest that prevents it is not the one the
+isolation depends on.
+
+`pnpm arch` did not catch this, and the reason is worth recording, because a
+gate that is trusted more than it deserves is worse than one that does not
+exist. The `boundary-2-jobs-isolation` check read `cargo metadata` and examined
+only **direct** edges, while its own `catches` text promised to catch "any
+cargo-metadata edge". A direct-edge check on a transitive boundary is a
+false-negative generator. It is now a reachability check over the same graph,
+and it reports both routes.
+
+**What this costs, stated plainly.** The honest reading of §4 is that the Jobs
+Worker cannot use `identity-cloudflare`, `identity-oidc` or `identity-security`
+at all, because every one of them carries `identity-domain` in with it. That
+includes the error envelope and the response builder the other two Workers use,
+which is why the Jobs Worker's route table and response types have to live in
+its own crate for now. That duplication is a real cost and it is the price of
+the isolation, not a workaround for it.
+
+The durable fix is structural: split the wire types and the error vocabulary out
+of the crates that need `identity-domain`, into a crate that does not, and let
+all three Workers share that. Until then the duplication is what compliance
+costs, and `pnpm arch` will say so on every run.
 
 ## Why the dependency absence is the real boundary
 

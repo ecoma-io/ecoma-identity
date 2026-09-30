@@ -326,8 +326,6 @@ dependencies = [
 name = "identity-jobs-worker"
 version = "0.0.0"
 dependencies = [
- "identity-cloudflare",
- "identity-security",
  "serde",
  "serde_json",
  "worker",

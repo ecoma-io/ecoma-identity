@@ -9,18 +9,18 @@ you which manifest edit is a mistake before you make it.
 
 ## Status
 
-| Crate                                        | Permitted internal dependencies                                           | State                                                                                           |
-| -------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `identity-domain`                            | none                                                                      | `IMPLEMENTED`                                                                                   |
-| `identity-application`                       | `identity-domain`                                                         | `IMPLEMENTED`                                                                                   |
-| `identity-oidc`                              | `identity-domain`                                                         | `IMPLEMENTED`                                                                                   |
-| `identity-security`                          | `identity-domain`                                                         | `IMPLEMENTED`                                                                                   |
-| `identity-cloudflare`                        | domain, application, oidc, security                                       | `SCAFFOLDED` — ten adapter modules written; the crate is mid-write and does not compile yet     |
-| `identity-testkit`                           | any, but only as a `dev-dependency`, and never a production dependency    | `DEFERRED` — the crate is a placeholder and no crate names it yet                               |
-| `identity-worker`                            | all of the above                                                          | `DEFERRED`                                                                                      |
-| `identity-admin-worker`                      | all of the above                                                          | `DEFERRED`                                                                                      |
-| `identity-jobs-worker`                       | `identity-cloudflare`, `identity-security`, **not** domain or application | `DEFERRED`                                                                                      |
-| The architecture gate that judges this graph | —                                                                         | `DEFERRED` — `tooling/scripts/check-architecture.mjs` is named in `package.json` as `pnpm arch` |
+| Crate                                        | Permitted internal dependencies                                                                                                                         | State                                                                                           |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `identity-domain`                            | none                                                                                                                                                    | `IMPLEMENTED`                                                                                   |
+| `identity-application`                       | `identity-domain`                                                                                                                                       | `IMPLEMENTED`                                                                                   |
+| `identity-oidc`                              | `identity-domain`                                                                                                                                       | `IMPLEMENTED`                                                                                   |
+| `identity-security`                          | `identity-domain`                                                                                                                                       | `IMPLEMENTED`                                                                                   |
+| `identity-cloudflare`                        | domain, application, oidc, security                                                                                                                     | `SCAFFOLDED` — ten adapter modules written; the crate is mid-write and does not compile yet     |
+| `identity-testkit`                           | any, but only as a `dev-dependency`, and never a production dependency                                                                                  | `DEFERRED` — the crate is a placeholder and no crate names it yet                               |
+| `identity-worker`                            | all of the above                                                                                                                                        | `DEFERRED`                                                                                      |
+| `identity-admin-worker`                      | all of the above                                                                                                                                        | `DEFERRED`                                                                                      |
+| `identity-jobs-worker`                       | **must reach no internal crate** — `identity-cloudflare` and `identity-security` both pull in `identity-domain`, so the arrow as written is a violation | `VIOLATED` — see the section below                                                              |
+| The architecture gate that judges this graph | —                                                                                                                                                       | `DEFERRED` — `tooling/scripts/check-architecture.mjs` is named in `package.json` as `pnpm arch` |
 
 The dependency graph as it exists today is real: the manifests are written and
 they say what this document says. What does not exist yet is the check that
@@ -144,19 +144,29 @@ own router, a fix to the error envelope would land in one and not the others,
 and the three would disagree about what a 500 looks like. The Identity Worker's
 manifest says this in its own comment.
 
-### `identity-jobs-worker` → `identity-cloudflare`, `identity-security` only
+### `identity-jobs-worker` → nothing that reaches `identity-domain`
 
-**The arrow exists** so Jobs can validate a message, apply the consumer
-idempotency contract, and call out to a third party, without ever being able to
-evaluate an identity rule. See [jobs-isolation.md](jobs-isolation.md) for the
-full argument.
+**The arrow does not exist yet, and that is the honest current state.** The
+Jobs Worker's manifest names `identity-cloudflare` and `identity-security`, and
+both of those depend on `identity-domain` — so the rule engine is reachable
+from the Jobs Worker today. The isolation this section describes is the intent;
+the dependency graph does not yet honour it. `pnpm arch` reports both routes and
+exits non-zero until it does.
 
-**What breaks without it** (why `identity-domain` and `identity-application`
-are forbidden): a background worker that can evaluate identity rules can make
-identity decisions, and a queue message is not a trustworthy caller. The Jobs
-Worker's manifest is explicit that the absence is the architecture and not an
-oversight, and it names the exact sentence that starts the erosion: "it only
-needs the `User` type".
+The dependency is forbidden because a background worker that can evaluate
+identity rules can make identity decisions, and a queue message is not a
+trustworthy caller. The Jobs Worker's manifest is explicit that the absence is
+the architecture and not an oversight, and it names the exact sentence that
+starts the erosion: "it only needs the `User` type". See
+[jobs-isolation.md](jobs-isolation.md) for the full argument, including why a
+direct-edge reading of this rule is a false negative.
+
+**The durable fix** is to split the wire types and the error vocabulary out of
+`identity-cloudflare`, `identity-oidc` and `identity-security` into a crate that
+does not depend on `identity-domain`, and let all three Workers depend on that
+one. Until it exists, the Jobs Worker's route table and response types are
+duplicated in its own crate — a real cost, and the price of the isolation rather
+than a workaround for it.
 
 ### `identity-testkit` → anything
 

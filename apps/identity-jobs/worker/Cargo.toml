@@ -10,19 +10,32 @@ publish = false
 
 # The composition root for `identity-jobs`.
 #
-# The absence of `identity-domain` and `identity-application` from this list
-# is the architecture, not an oversight: a background worker that could reach
-# the domain model could reach identity state, and "it only needs the User
-# type" is how that dependency starts. Jobs receives payloads, validates them
-# against `identity-security`'s idempotency gate, and calls out — it has no
-# use-case vocabulary to borrow, so it is not given one.
+# THE ABSENCE IN THIS LIST IS THE ARCHITECTURE, and it is a bigger absence than
+# it first looks. This Worker may not reach `identity-domain` or
+# `identity-application` — not directly, and not through anything else either.
+#
+# That rules out more than the two obvious crates. `identity-cloudflare`,
+# `identity-oidc` and `identity-security` ALL depend on `identity-domain`, so
+# depending on any of them carries the identity rule engine in with it, and the
+# isolation this manifest claims would be a comment rather than a control. A
+# version of this file that named `identity-security` and then explained that it
+# was safe because it only wanted the idempotency gate is exactly the erosion
+# `docs/architecture/jobs-isolation.md` warns about, and `pnpm arch` judges it by
+# REACHABILITY rather than by this manifest, so it does not matter how the
+# dependency is spelled here.
+#
+# The cost is real and is paid on purpose: this Worker does not get to share the
+# error envelope or the response builder the other two deployables use, so its
+# route table, its 501 envelope and its health payload live in this crate. The
+# durable fix is to split those wire types into a crate that does not depend on
+# `identity-domain` and let all three Workers share that one; until it exists,
+# the duplication is what the isolation costs. See
+# `docs/architecture/crate-dependency-law.md`.
 #
 # It has no D1 binding at all in the bootstrap configuration. It talks to
 # Identity over the service binding when it needs to, and it owns its own
 # dead-letter handling.
 [dependencies]
-identity-cloudflare = { workspace = true }
-identity-security = { workspace = true }
 worker = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

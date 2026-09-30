@@ -1158,6 +1158,52 @@ function readRustGraph() {
   return cargoMetadataCache;
 }
 
+/**
+ * Transitive reachability over the INTERNAL graph, with the shortest path to
+ * each reachable crate.
+ *
+ * `edges.get(name).internal` is DIRECT edges only, and reading only that is a
+ * false negative waiting to happen. A boundary expressed as "X must not be able
+ * to evaluate identity rules" is not a statement about the manifest, it is a
+ * statement about what the compiled program contains. `identity-jobs-worker`
+ * declaring `identity-security` looks compliant and is not: `identity-security`
+ * depends on `identity-domain`, so the jobs Worker reaches the identity rule
+ * engine through it. That is exactly the invariant `boundary-2-jobs-isolation`
+ * exists to protect, and the direct-only reading reported it as clean.
+ *
+ * This walks the same graph object the other checks already read — no second
+ * `cargo metadata` call and no new evidence to keep in sync. It returns a Map
+ * from each reachable internal crate to the shortest path from `name`, because
+ * "reachable through identity-security" is a reportable fact and "reachable"
+ * alone is not enough for a reader to act on.
+ *
+ * The testkit exemption is deliberately NOT applied here: that is a judgment
+ * about why an edge exists, and it belongs to the check that owns the law, not
+ * to the graph reader.
+ */
+function internalReachability(graph, name) {
+  const start = graph.edges.get(name);
+  if (!start) return new Map();
+  const paths = new Map();
+  const queue = [];
+  for (const direct of start.internal) {
+    if (direct === name || paths.has(direct)) continue;
+    paths.set(direct, [direct]);
+    queue.push(direct);
+  }
+  for (let i = 0; i < queue.length; i += 1) {
+    const current = queue[i];
+    const edge = graph.edges.get(current);
+    if (!edge) continue;
+    for (const next of edge.internal) {
+      if (next === name || paths.has(next)) continue;
+      paths.set(next, [...paths.get(current), next]);
+      queue.push(next);
+    }
+  }
+  return paths;
+}
+
 /* ------------------------------------------------------------------ *
  * Findings
  * ------------------------------------------------------------------ */
@@ -1634,28 +1680,38 @@ function checkBoundary2JobsIsolation(ctx) {
         reason: "identity-jobs-worker is not a member of the Cargo workspace",
       });
     } else {
+      const direct = edge.internal;
       evidence.push(
-        `identity-jobs-worker internal dependencies: ${edge.internal.join(", ") || "(none)"}`,
+        `identity-jobs-worker direct internal dependencies: ${direct.join(", ") || "(none)"}`,
       );
       const manifest = path.join(REPO_ROOT, edge.manifest);
-      for (const target of edge.internal) {
-        if (!JOBS_FORBIDDEN_INTERNAL.has(target)) continue;
-        const viaTestkit = edge.internal.some(
-          (name) =>
-            TESTKIT_PATH.test(name) &&
-            graph.edges.get(name)?.internal.includes(target),
-        );
-        const reason = viaTestkit
-          ? "reached only through crates/identity-testkit, which is a test-only crate and is exempt"
-          : "a direct edge in the cargo graph";
-        if (viaTestkit) continue;
+      const reachable = internalReachability(graph, "identity-jobs-worker");
+      for (const target of JOBS_FORBIDDEN_INTERNAL) {
+        if (target === "identity-jobs-worker") continue;
+        const pathTo = reachable.get(target);
+        if (!pathTo) continue;
+        // The testkit is exempt because it is test-only. That exemption holds
+        // only while EVERY route to the forbidden crate goes through it, so
+        // the question is whether this path's first hop is the testkit — and a
+        // direct edge is never exempt whatever else also reaches it.
+        const viaTestkit =
+          TESTKIT_PATH.test(pathTo[0]) && !direct.includes(target);
+        if (viaTestkit) {
+          evidence.push(
+            `identity-jobs-worker -> ${target} is reached through crates/identity-testkit, which is test-only and exempt`,
+          );
+          continue;
+        }
+        const how = direct.includes(target)
+          ? "a direct edge in the cargo graph"
+          : `transitively, via ${pathTo.slice(0, -1).join(" -> ")}`;
         report.violation(
           "boundary-2-jobs-isolation",
           manifest,
           1,
-          `identity-jobs-worker -> ${target} (${reason})`,
-          "§4 — apps/identity-jobs/worker must not depend on identity-domain or identity-application",
-          "Remove the dependency. Jobs receives an event, performs an effect and records it; it does not evaluate identity rules, so it must not be able to. If the wire types or the error vocabulary are what you need, they are in identity-oidc and identity-security, which Jobs may depend on.",
+          `identity-jobs-worker reaches ${target} (${how})`,
+          "§4 — apps/identity-jobs/worker must not be able to reach identity-domain or identity-application, directly or through any crate that does",
+          "Remove the edge. Jobs receives an event, performs an effect and records it; it does not evaluate identity rules, so it must not be able to. NOTE: no crate in this workspace is currently safe to depend on for this — identity-oidc, identity-security and identity-cloudflare ALL depend on identity-domain, so any of them carries the rule engine in with it. Until one of them is split so its wire types and error vocabulary live in a crate that does not reach identity-domain, the Jobs Worker's route table, its error envelope and its request types must live in the Worker crate itself. That is a real structural cost and it is the honest price of the isolation, not a workaround.",
         );
       }
     }
@@ -3283,6 +3339,7 @@ export {
   buildContext,
   collectBindings,
   findWranglerConfig,
+  internalReachability,
   main,
   readGitIndex,
   readJsonc,
