@@ -32,6 +32,7 @@
 #![deny(missing_docs)]
 
 pub mod accounts;
+pub mod admin_routes;
 pub mod administration;
 pub mod applications;
 pub mod audit;
