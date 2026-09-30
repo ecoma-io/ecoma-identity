@@ -209,6 +209,13 @@ export default tseslint.config(
       "**/.wrangler/**",
       "**/coverage/**",
       "**/.moon/**",
+      // Agent worktrees are full checkouts of this repository inside it, so
+      // walking them lints the same file N times and — worse — every nested
+      // `tsconfig.json` becomes a candidate `tsconfigRootDir`, which makes
+      // typescript-eslint refuse to parse files that are IN this tree. One
+      // scratch checkout was enough to turn `pnpm lint` red on 18 errors that
+      // had nothing to do with the code being linted.
+      ".claude/**",
       "tooling/scripts/__fixtures__/**",
     ],
   },

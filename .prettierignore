@@ -1,0 +1,17 @@
+# Prettier formats what the repository OWNS. Everything below is either
+# generated, vendored, or a scratch checkout that is not part of the tree.
+#
+# `.claude/worktrees/` is here for the same reason it is in `eslint.config.mjs`:
+# a worktree is a full checkout of this repository nested inside it. Formatting
+# one rewrites an agent's in-flight work behind its back, and a single scratch
+# checkout accounted for 1186 of the 1187 files `pnpm format:check` complained
+# about — which means the check had stopped being able to say anything about
+# the code it exists to judge.
+
+.claude/
+node_modules/
+dist/
+target/
+coverage/
+.moon/
+.wrangler/
