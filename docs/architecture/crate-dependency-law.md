@@ -9,22 +9,23 @@ you which manifest edit is a mistake before you make it.
 
 ## Status
 
-| Crate                                        | Permitted internal dependencies                                                                                                                         | State                                                                                           |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `identity-domain`                            | none                                                                                                                                                    | `IMPLEMENTED`                                                                                   |
-| `identity-application`                       | `identity-domain`                                                                                                                                       | `IMPLEMENTED`                                                                                   |
-| `identity-oidc`                              | `identity-domain`                                                                                                                                       | `IMPLEMENTED`                                                                                   |
-| `identity-security`                          | `identity-domain`                                                                                                                                       | `IMPLEMENTED`                                                                                   |
-| `identity-cloudflare`                        | domain, application, oidc, security                                                                                                                     | `SCAFFOLDED` — ten adapter modules written; the crate is mid-write and does not compile yet     |
-| `identity-testkit`                           | any, but only as a `dev-dependency`, and never a production dependency                                                                                  | `DEFERRED` — the crate is a placeholder and no crate names it yet                               |
-| `identity-worker`                            | all of the above                                                                                                                                        | `DEFERRED`                                                                                      |
-| `identity-admin-worker`                      | all of the above                                                                                                                                        | `DEFERRED`                                                                                      |
-| `identity-jobs-worker`                       | **must reach no internal crate** — `identity-cloudflare` and `identity-security` both pull in `identity-domain`, so the arrow as written is a violation | `VIOLATED` — see the section below                                                              |
-| The architecture gate that judges this graph | —                                                                                                                                                       | `DEFERRED` — `tooling/scripts/check-architecture.mjs` is named in `package.json` as `pnpm arch` |
+| Crate                                        | Permitted internal dependencies                                                                                                                                                           | State                                                                                                                                                                                  |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `identity-domain`                            | none                                                                                                                                                                                      | `IMPLEMENTED`                                                                                                                                                                          |
+| `identity-application`                       | `identity-domain`                                                                                                                                                                         | `IMPLEMENTED`                                                                                                                                                                          |
+| `identity-oidc`                              | `identity-domain`                                                                                                                                                                         | `IMPLEMENTED`                                                                                                                                                                          |
+| `identity-security`                          | `identity-domain`                                                                                                                                                                         | `IMPLEMENTED`                                                                                                                                                                          |
+| `identity-cloudflare`                        | domain, application, oidc, security                                                                                                                                                       | `SCAFFOLDED` — ten adapter modules written; the crate is mid-write and does not compile yet                                                                                            |
+| `identity-testkit`                           | any, but only as a `dev-dependency`, and never a production dependency                                                                                                                    | `DEFERRED` — the crate is a placeholder and no crate names it yet                                                                                                                      |
+| `identity-worker`                            | all of the above                                                                                                                                                                          | `DEFERRED`                                                                                                                                                                             |
+| `identity-admin-worker`                      | all of the above                                                                                                                                                                          | `DEFERRED`                                                                                                                                                                             |
+| `identity-jobs-worker`                       | **must reach no internal crate** — `identity-cloudflare`, `identity-oidc` and `identity-security` all pull in `identity-domain`, so naming any of them carries the rule engine in with it | `IMPLEMENTED` — the manifest names no internal crate at all, and `pnpm arch` verifies that by reachability rather than by direct edge                                                  |
+| The architecture gate that judges this graph | —                                                                                                                                                                                         | `IMPLEMENTED` — `tooling/scripts/check-architecture.mjs`, run as `pnpm arch`, judges this graph from `cargo metadata` and the git index, and `pnpm arch:canary` proves the guard fires |
 
 The dependency graph as it exists today is real: the manifests are written and
-they say what this document says. What does not exist yet is the check that
-judges them, and the code inside the three placeholder crates.
+they say what this document says, and `pnpm arch` judges it on every run. What
+does not exist yet is the code inside the three Worker crates and the bodies
+behind the `identity-application` and `identity-security` traits.
 
 ## The graph
 
@@ -60,13 +61,13 @@ flowchart TD
   AW --> DOM
   AW --> APP
   AW --> CF
-  JW --> CF
-  JW --> SEC
+  JW -.->|"reaches no internal crate — the boundary"| DOM
 ```
 
 `identity-jobs-worker` has no edge to `identity-domain` and none to
-`identity-application`. That absence is the point of the crate and is the
-subject of [jobs-isolation.md](jobs-isolation.md).
+`identity-application` — not a direct one and not one arriving through any
+other crate. That absence is the point of the crate and is the subject of
+[jobs-isolation.md](jobs-isolation.md).
 
 ## The arrows, and what each one is for
 
@@ -138,20 +139,27 @@ and the binding names, because that is what wiring _is_. They may not contain
 policy.
 
 **What this prevents:** the health routes, the OIDC route table, the error
-envelope and the request-id plumbing all come from `identity-cloudflare`, so the
-three Workers cannot drift apart on any of them. If each Worker assembled its
-own router, a fix to the error envelope would land in one and not the others,
-and the three would disagree about what a 500 looks like. The Identity Worker's
-manifest says this in its own comment.
+envelope and the request-id plumbing come from `identity-cloudflare`, so the
+Identity and Admin Workers cannot drift apart on any of them. If each of those
+two assembled its own router, a fix to the error envelope would land in one and
+not the other, and the two would disagree about what a 500 looks like. The
+Identity Worker's manifest says this in its own comment.
+
+**The Jobs Worker is the exception, and the exception is the point.** It is
+also a composition root, and it is forbidden from reaching the crates that own
+those shared types — so it carries its own copies of the envelope and the
+response headers. Two of the three Workers are kept in step by a shared crate;
+the third is kept in step by a test and by
+`contracts/shared/v1/error-envelope.schema.json`, which is the authority for
+all three. The duplication is a known, bounded cost, and removing it requires
+splitting the wire types into a crate that does not reach `identity-domain` —
+not relaxing the boundary.
 
 ### `identity-jobs-worker` → nothing that reaches `identity-domain`
 
-**The arrow does not exist yet, and that is the honest current state.** The
-Jobs Worker's manifest names `identity-cloudflare` and `identity-security`, and
-both of those depend on `identity-domain` — so the rule engine is reachable
-from the Jobs Worker today. The isolation this section describes is the intent;
-the dependency graph does not yet honour it. `pnpm arch` reports both routes and
-exits non-zero until it does.
+**The arrow exists in no form, and the gate proves it.** The Jobs Worker's
+manifest names `worker`, `serde` and `serde_json` and nothing internal. That
+is not an oversight in the graph: it is the boundary, expressed as an absence.
 
 The dependency is forbidden because a background worker that can evaluate
 identity rules can make identity decisions, and a queue message is not a
@@ -161,12 +169,16 @@ starts the erosion: "it only needs the `User` type". See
 [jobs-isolation.md](jobs-isolation.md) for the full argument, including why a
 direct-edge reading of this rule is a false negative.
 
+**What it costs.** The Jobs Worker does not get to share the error envelope or
+the response builder the other two deployables use, so its route table, its 501
+envelope and its health payload live in its own crate. That duplication is a
+real cost and is the price of the isolation rather than a workaround for it.
+
 **The durable fix** is to split the wire types and the error vocabulary out of
 `identity-cloudflare`, `identity-oidc` and `identity-security` into a crate that
-does not depend on `identity-domain`, and let all three Workers depend on that
-one. Until it exists, the Jobs Worker's route table and response types are
-duplicated in its own crate — a real cost, and the price of the isolation rather
-than a workaround for it.
+depends on `identity-domain` through nothing, and let all three Workers depend
+on that one. Until it exists, the duplication is what compliance costs, and
+`pnpm arch` will keep the graph honest in the meantime.
 
 ### `identity-testkit` → anything
 
@@ -186,9 +198,11 @@ wearing a convenience's clothes.
 2. **`identity-application` names only `identity-domain`.** Not
    `identity-oidc`, not `identity-security`, not `identity-cloudflare`. Not
    `identity-testkit`.
-3. **`identity-jobs-worker` names neither `identity-domain` nor
-   `identity-application`.** This is the one most likely to be broken by a
-   well-meaning "I just need the error type" edit.
+3. **`identity-jobs-worker` reaches neither `identity-domain` nor
+   `identity-application`** — by any route, not just a direct one. This is the
+   one most likely to be broken by a well-meaning "I just need the error type"
+   edit, because every crate it might reach the error type _through_ depends on
+   `identity-domain`. `pnpm arch` walks reachability for exactly this reason.
 4. **Nothing reaches the frontends.** `crates/**` and `apps/*/worker/**` may not
    import from `apps/*/web/**`. The BFF is a boundary, not a shared library. A
    shared TypeScript type between a Vue app and its Worker would put browser-

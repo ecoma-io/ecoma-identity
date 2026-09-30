@@ -10,14 +10,14 @@ in [event-model.md](event-model.md).
 
 ## Status
 
-| Fact                                                                                                               | State                                                                                                                             |
-| ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/identity-jobs/worker/Cargo.toml` names no `identity-domain` and no `identity-application`                    | `IMPLEMENTED` — the manifest is written that way today                                                                            |
-| The Jobs Worker has no `IDENTITY_DB` binding                                                                       | `PLANNED` — decided; the configuration that proves it is `DEFERRED`                                                               |
-| The Jobs Worker holds an `IDENTITY` service binding for narrow internal endpoints                                  | `PLANNED` — decided; the client is `DEFERRED`                                                                                     |
-| The Jobs Worker consumes `IDENTITY_QUEUE`                                                                          | `PLANNED` — decided; the consumer is `DEFERRED`                                                                                   |
-| The three event types (`identity.email.send.v1`, `identity.security.notification.v1`, `identity.audit.archive.v1`) | `IMPLEMENTED` as type names in `identity-domain`; no producer and no consumer exist                                               |
-| The consumer idempotency contract                                                                                  | `DEFERRED` — the sequence is specified in [event-model.md](event-model.md); **no trait for it exists yet** in `identity-security` |
+| Fact                                                                                                               | State                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/identity-jobs/worker/Cargo.toml` names no `identity-domain` and no `identity-application`                    | `IMPLEMENTED` — and by no route at all, which is the actual rule; `pnpm arch` walks reachability and fails the build if one appears |
+| The Jobs Worker has no `IDENTITY_DB` binding                                                                       | `PLANNED` — decided; the configuration that proves it is `DEFERRED`                                                                 |
+| The Jobs Worker holds an `IDENTITY` service binding for narrow internal endpoints                                  | `PLANNED` — decided; the client is `DEFERRED`                                                                                       |
+| The Jobs Worker consumes `IDENTITY_QUEUE`                                                                          | `PLANNED` — decided; the consumer is `DEFERRED`                                                                                     |
+| The three event types (`identity.email.send.v1`, `identity.security.notification.v1`, `identity.audit.archive.v1`) | `IMPLEMENTED` as type names in `identity-domain`; no producer and no consumer exist                                                 |
+| The consumer idempotency contract                                                                                  | `DEFERRED` — the sequence is specified in [event-model.md](event-model.md); **no trait for it exists yet** in `identity-security`   |
 
 ## The rule
 
@@ -39,45 +39,51 @@ binding, no reachable dependency) is a control. This is the same reasoning as
 
 ## The boundary is reachability, not a manifest line
 
-**This section corrects an earlier version of this document, which was wrong in
-a way that mattered.**
+**This section records a real defect that was found here, and fixed. It is kept
+because the reasoning is the rule, not because the violation is still open.**
 
 It used to say: _"The manifest names only `identity-cloudflare`,
 `identity-security`, `worker`, `serde` and `serde_json`. It is structurally
 incapable of evaluating an identity rule."_ The first sentence was a fact about
 `Cargo.toml`. The second did not follow from it, and it was false. The Jobs
-Worker's `Cargo.toml` does name only those five, and the Jobs Worker can
+Worker's `Cargo.toml` did name only those five, and the Jobs Worker could
 nonetheless reach the identity rule engine:
 
-| Worker declares       | which declares                                                                  | which declares    |
+| Worker declared       | which declared                                                                  | which declared    |
 | --------------------- | ------------------------------------------------------------------------------- | ----------------- |
 | `identity-cloudflare` | `identity-domain`, `identity-application`, `identity-oidc`, `identity-security` | `identity-domain` |
 | `identity-security`   | `identity-domain`                                                               | —                 |
 
-Both paths end at `identity-domain`. So the rule engine is compiled into the
-Jobs Worker today, and the manifest that prevents it is not the one the
-isolation depends on.
+Both paths end at `identity-domain`. So the rule engine was compiled into the
+Jobs Worker, and the manifest comment that claimed otherwise was describing a
+false absence.
 
-`pnpm arch` did not catch this, and the reason is worth recording, because a
-gate that is trusted more than it deserves is worse than one that does not
-exist. The `boundary-2-jobs-isolation` check read `cargo metadata` and examined
-only **direct** edges, while its own `catches` text promised to catch "any
+`pnpm arch` did not catch it, and the reason is worth keeping, because a gate
+that is trusted more than it deserves is worse than one that does not exist.
+The `boundary-2-jobs-isolation` check read `cargo metadata` and examined only
+**direct** edges, while its own `catches` text promised to catch "any
 cargo-metadata edge". A direct-edge check on a transitive boundary is a
-false-negative generator. It is now a reachability check over the same graph,
-and it reports both routes.
+false-negative generator.
 
-**What this costs, stated plainly.** The honest reading of §4 is that the Jobs
-Worker cannot use `identity-cloudflare`, `identity-oidc` or `identity-security`
-at all, because every one of them carries `identity-domain` in with it. That
-includes the error envelope and the response builder the other two Workers use,
-which is why the Jobs Worker's route table and response types have to live in
-its own crate for now. That duplication is a real cost and it is the price of
+**What fixed it was the code, not the check.** All three internal names came
+out of the manifest, the check was rewritten to walk reachability over the same
+graph, the canary gained a fixture case that a direct-edge reading walks
+straight through, and a test asserts the _real_ tree reaches no rule engine. A
+gate must not be widened to make a tree pass, and none of that happened: the
+tree stopped reaching the crate.
+
+**What this costs, stated plainly.** The honest reading of this section is that
+the Jobs Worker cannot use `identity-cloudflare`, `identity-oidc` or
+`identity-security` at all, because every one of them carries `identity-domain`
+in with it. That includes the error envelope and the response builder the other
+two Workers use, which is why the Jobs Worker's route table and response types
+live in its own crate. That duplication is a real cost and it is the price of
 the isolation, not a workaround for it.
 
 The durable fix is structural: split the wire types and the error vocabulary out
 of the crates that need `identity-domain`, into a crate that does not, and let
 all three Workers share that. Until then the duplication is what compliance
-costs, and `pnpm arch` will say so on every run.
+costs.
 
 ## Why the dependency absence is the real boundary
 
@@ -95,9 +101,10 @@ fact about the past, and a user suspended a second after the message was
 published would still be suspended-by-the-time-of-the-message. A decision made
 from a stale local copy is a decision made from a lie.
 
-The dangerous shape is the one where the vocabulary is available. Then Jobs has
-enough to write something that looks like a rule — a check on a field, a
-comparison against a status — and the check is wrong in a way no type system
+The dangerous shape is the one where the vocabulary is available — and it is
+the shape this repository was in until the reachability check found it. Then
+Jobs has enough to write something that looks like a rule — a check on a field,
+a comparison against a status — and the check is wrong in a way no type system
 can catch, because the check is not about types. It is about who is allowed to
 do what, and that is precisely the judgement `identity-application` exists to
 own.
