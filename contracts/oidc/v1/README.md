@@ -5,10 +5,11 @@ and OpenID Connect surface accepts and returns, and — per operation — whethe
 that behaviour exists today.
 
 **The single most important sentence in this file: no route in this directory
-serves anything yet.** `apps/identity/worker/src/lib.rs` is a one-line
-placeholder, so no binary exists to answer on any path. The schemas below are
-derived from the Rust types and they are correct about _shape_; they are not a
-claim about _behaviour_, and they are not evidence that anything works.
+serves a protocol document yet.** `apps/identity/worker/src/lib.rs` dispatches,
+and every one of the seven protocol paths below answers **501** with a
+`not_implemented` envelope. The schemas are derived from the Rust types and they
+are correct about _shape_; they are not a claim about _behaviour_, and a 501 on
+each of these paths is the observable proof that nothing here works.
 
 ## The route table, and the honest status of each route
 
@@ -18,37 +19,37 @@ against it. `Route::is_implemented()` is the one honest answer to "is OIDC
 implemented", and the smoke test and the `/ready` probe both read it — so the
 answer is the same one everywhere and cannot drift.
 
-| Path                                | `Route` variant | Status                                | Phase             | Success body                     |
-| ----------------------------------- | --------------- | ------------------------------------- | ----------------- | -------------------------------- |
-| `/.well-known/openid-configuration` | `Discovery`     | `DEFERRED`                            | 4 — OIDC provider | `discovery-document.schema.json` |
-| `/.well-known/jwks.json`            | `Jwks`          | `DEFERRED`                            | 4 — OIDC provider | `jwk-set.schema.json`            |
-| `/oauth/authorize`                  | `Authorize`     | `DEFERRED`                            | 4 — OIDC provider | 302 redirect; see below          |
-| `/oauth/token`                      | `Token`         | `DEFERRED`                            | 4 — OIDC provider | `token-response.schema.json`     |
-| `/oauth/userinfo`                   | `UserInfo`      | `DEFERRED`                            | 4 — OIDC provider | `userinfo-response.schema.json`  |
-| `/oauth/revoke`                     | `Revoke`        | `DEFERRED`                            | 4 — OIDC provider | RFC 7009 empty 200               |
-| `/oauth/logout`                     | `Logout`        | `DEFERRED`                            | 4 — OIDC provider | 302 to a post-logout target      |
-| `/health`                           | `Health`        | `IMPLEMENTED` in the route table only | —                 | probe body, `ok: true`           |
-| `/ready`                            | `Ready`         | `IMPLEMENTED` in the route table only | —                 | probe body, `ok: true`           |
+| Path                                | `Route` variant | Status                              | Phase             | Success body                     |
+| ----------------------------------- | --------------- | ----------------------------------- | ----------------- | -------------------------------- |
+| `/.well-known/openid-configuration` | `Discovery`     | `DEFERRED` — answers 501            | 4 — OIDC provider | `discovery-document.schema.json` |
+| `/.well-known/jwks.json`            | `Jwks`          | `DEFERRED` — answers 501            | 4 — OIDC provider | `jwk-set.schema.json`            |
+| `/oauth/authorize`                  | `Authorize`     | `DEFERRED` — answers 501            | 4 — OIDC provider | 302 redirect; see below          |
+| `/oauth/token`                      | `Token`         | `DEFERRED` — answers 501            | 4 — OIDC provider | `token-response.schema.json`     |
+| `/oauth/userinfo`                   | `UserInfo`      | `DEFERRED` — answers 501            | 4 — OIDC provider | `userinfo-response.schema.json`  |
+| `/oauth/revoke`                     | `Revoke`        | `DEFERRED` — answers 501            | 4 — OIDC provider | RFC 7009 empty 200               |
+| `/oauth/logout`                     | `Logout`        | `DEFERRED` — answers 501            | 4 — OIDC provider | 302 to a post-logout target      |
+| `/health`                           | `Health`        | `IMPLEMENTED` — 200                 | —                 | probe body, `ok: true`           |
+| `/ready`                            | `Ready`         | `IMPLEMENTED` — 200, `ready: false` | —                 | probe body, `ok: true`           |
 
 Two rows in that table need a reader who will not flinch.
 
-**`/health` and `/ready` are not served, and this table does not claim they
-are.** `Route::is_implemented()` returns `true` for exactly these two routes,
-and that is deliberate: they are the two routes this bootstrap _intends_ to
-serve, they are not protocol routes, and asserting they were unimplemented
-would be asserting a lie. But `is_implemented()` is a statement about the
-protocol surface. Whether a binary serves it is `DEFERRED`, because the Worker
-crate that would serve it is a placeholder. `docs/README.md` records this
-distinction rather than papering over it, and so does this file. The status
-column says "in the route table only" for exactly that reason.
+**`/health` and `/ready` are served, and neither claims a capability.**
+`Route::is_implemented()` returns `true` for exactly these two routes, and that
+is deliberate: they are the two routes this bootstrap _intends_ to serve, they
+are not protocol routes, and asserting they were unimplemented would be asserting
+a lie. The Identity Worker answers both with a 200. `/ready`'s body reports
+`ready: false` and `authentication: "not_implemented"`, and its `protocol_routes`
+block counts **protocol routes only** — `declared: 7, implemented: 0` — because
+counting all nine entries of `Route::ALL` would put `"implemented": 2` on a
+readiness report for a provider that authenticates nobody.
 
-**Every protocol route is `DEFERRED`, and each is contracted to answer 501 with
-a `not_implemented` envelope** — not 404. A 501 tells a client to stop; a 404
+**Every protocol route is `DEFERRED`, and each answers 501 with a
+`not_implemented` envelope** — not 404. A 501 tells a client to stop; a 404
 tells a scanner an endpoint is missing. Silently 404-ing a declared route would
 make an incomplete bootstrap indistinguishable from a wrong discovery document.
-The envelope is `contracts/shared/v1/not-implemented-envelope.schema.json`.
-That it is _contracted_ rather than _observed_ is the honest phrasing: the
-response builder that emits it is not in a Worker yet.
+The envelope is `contracts/shared/v1/not-implemented-envelope.schema.json`, and
+`cargo test -p identity-worker` asserts the status, the code and the exact message
+of all seven.
 
 ## Authentication
 

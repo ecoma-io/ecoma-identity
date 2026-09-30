@@ -8,16 +8,17 @@ handlers exist yet.
 
 ## Status
 
-| Fact                                                                  | State                                                                                       |
-| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Three deployables named `identity`, `identity-admin`, `identity-jobs` | `PLANNED` — decided; the configuration that proves it is `DEFERRED`                         |
-| The binding set of each Worker                                        | `PLANNED` — decided; the `wrangler.jsonc` files are `DEFERRED`                              |
-| The OIDC route table and its 501 contract                             | `IMPLEMENTED` — `identity-oidc`'s `Route` enum is real and tested                           |
-| The health routes `/health` and `/ready`                              | `DEFERRED` — declared in the route table; the Worker that would serve them is a placeholder |
-| All three Worker `lib.rs` files                                       | `DEFERRED` — one-line placeholders                                                          |
+| Fact                                                                  | State                                                                                          |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Three deployables named `identity`, `identity-admin`, `identity-jobs` | `PLANNED` — decided; the configuration that proves it is `DEFERRED`                            |
+| The binding set of each Worker                                        | `PLANNED` — decided; the `wrangler.jsonc` files are `DEFERRED`                                 |
+| The OIDC route table and its 501 contract                             | `IMPLEMENTED` — `identity-oidc`'s `Route` enum is real and tested                              |
+| The health routes `/health` and `/ready`                              | `IMPLEMENTED` on `identity`; `DEFERRED` on the other two                                       |
+| The `identity` Worker `lib.rs`                                        | `IMPLEMENTED` — the `fetch` entrypoint, the route dispatch, the two probes and the 501 surface |
+| The `identity-admin` and `identity-jobs` Worker `lib.rs`              | `DEFERRED` — one-line placeholders                                                             |
 
-The route table below is `IMPLEMENTED` as **data**. The thing that dispatches on
-it is not.
+The route table below is `IMPLEMENTED` as **data**, and the thing that dispatches
+on it is `IMPLEMENTED` on `identity` and `DEFERRED` on the other two.
 
 ## The three deployables
 
@@ -70,35 +71,47 @@ the Worker (which dispatches on it) and the contract fixtures in
 handler is what makes it impossible for a route to exist in the dispatcher and
 be missing from the discovery document.
 
-| Route       | Path                                | Access mode                  | State                                                                                                                               |
-| ----------- | ----------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `Discovery` | `/.well-known/openid-configuration` | public                       | `SCAFFOLDED` — the document is built by `DiscoveryDocument::bootstrap` as data, but no Worker serves it and there is no signing key |
-| `Jwks`      | `/.well-known/jwks.json`            | public                       | `SCAFFOLDED` — the JWK set is a type; there is no key material and therefore no key set                                             |
-| `Authorize` | `/oauth/authorize`                  | browser, session             | `DEFERRED`                                                                                                                          |
-| `Token`     | `/oauth/token`                      | public, client-authenticated | `DEFERRED`                                                                                                                          |
-| `UserInfo`  | `/oauth/userinfo`                   | bearer token                 | `DEFERRED`                                                                                                                          |
-| `Revoke`    | `/oauth/revoke`                     | client-authenticated         | `DEFERRED`                                                                                                                          |
-| `Logout`    | `/oauth/logout`                     | session                      | `DEFERRED`                                                                                                                          |
-| `Health`    | `/health`                           | public                       | `DEFERRED` — declared; no Worker serves it yet                                                                                      |
-| `Ready`     | `/ready`                            | public                       | `DEFERRED` — declared; no Worker serves it yet                                                                                      |
+| Route       | Path                                | Access mode                  | State                                                                                                                           |
+| ----------- | ----------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `Discovery` | `/.well-known/openid-configuration` | public                       | `DEFERRED` — 501 on a real binary. The document is built by `DiscoveryDocument::bootstrap` as data, but there is no signing key |
+| `Jwks`      | `/.well-known/jwks.json`            | public                       | `DEFERRED` — 501 on a real binary. The JWK set is a type; there is no key material                                              |
+| `Authorize` | `/oauth/authorize`                  | browser, session             | `DEFERRED` — 501                                                                                                                |
+| `Token`     | `/oauth/token`                      | public, client-authenticated | `DEFERRED` — 501                                                                                                                |
+| `UserInfo`  | `/oauth/userinfo`                   | bearer token                 | `DEFERRED` — 501                                                                                                                |
+| `Revoke`    | `/oauth/revoke`                     | client-authenticated         | `DEFERRED` — 501                                                                                                                |
+| `Logout`    | `/oauth/logout`                     | session                      | `DEFERRED` — 501                                                                                                                |
+| `Health`    | `/health`                           | public                       | `IMPLEMENTED` — 200 with a liveness body. It claims liveness and nothing else                                                   |
+| `Ready`     | `/ready`                            | public                       | `IMPLEMENTED` — 200, and the body reports `ready: false` and `authentication: "not_implemented"`                                |
 
 `Route::is_implemented()` returns `false` for every protocol route and `true` for
-exactly `Health` and `Ready`. Three things read that one function, so the answer
+exactly `Health` and `Ready`. Four things read that one function, so the answer
 cannot drift:
 
+- the dispatcher in `apps/identity/worker/src/lib.rs`,
+- the `/ready` probe's own count of the protocol routes,
 - the smoke test that runs after a version upload,
-- the `/ready` probe,
 - a test in `identity-oidc` that fails if anyone marks a protocol route
   implemented without updating the discovery document and the probe together.
 
-**An honest caveat about that last row.** `is_implemented()` says `true` for
-`/health` and `/ready` because they are live _in the protocol surface_: they are
-the two routes this bootstrap does intend to serve, they are not protocol routes,
-and asserting they were unimplemented would be asserting a lie. But the Worker
-crates are placeholders, so nothing is actually serving them over HTTP yet. The
-route table is a statement about the contract; whether a binary serves it is
-`DEFERRED`. The `docs/README.md` status table records this distinction rather
-than papering over it.
+**The distinction between the two health routes and the protocol routes is
+load-bearing, and the readiness report draws it.** `is_implemented()` says `true`
+for `/health` and `/ready` because they are live _in the protocol surface_: they
+are the two routes this bootstrap does intend to serve, they are not protocol
+routes, and asserting they were unimplemented would be asserting a lie. The
+`protocol_routes` block in the `/ready` body counts **protocol routes only** and
+reports `implemented: 0`, because counting all nine entries of `Route::ALL`
+would put `"implemented": 2` on a readiness report for a provider that
+authenticates nobody. A test asserts that exclusion.
+
+The two `Health` and `Ready` answers are 200 while `ready` is `false`, and that
+is deliberate rather than contradictory: the deploy ladder's smoke step and
+health gate require a 2xx from both probes, and the 200 means **the Worker is up
+and answered**. "This instance may authenticate someone" is the separate `ready`
+field, and it is `false`.
+
+**What is still `DEFERRED`:** the `identity-admin` and `identity-jobs`
+composition roots. Their `lib.rs` files are one-line placeholders, so those two
+deployables serve nothing.
 
 ### The 501 contract
 
@@ -110,6 +123,37 @@ indistinguishable from a wrong discovery document.
 The envelope is `ApplicationError::NotImplemented`, whose `code()` is
 `not_implemented`. Nothing is inferred from this that is not true: the response
 does not claim an authentication flow exists.
+
+**`identity` implements this contract today, and here is the exact routing
+table it dispatches on** (`plan()` in `apps/identity/worker/src/lib.rs`, resolved
+through `identity_oidc::route::find_by_path`):
+
+| Path                                | Status | Body                                                            |
+| ----------------------------------- | ------ | --------------------------------------------------------------- |
+| `/.well-known/openid-configuration` | 501    | `not_implemented` envelope naming the path                      |
+| `/.well-known/jwks.json`            | 501    | `not_implemented` envelope naming the path                      |
+| `/oauth/authorize`                  | 501    | `not_implemented` envelope naming the path                      |
+| `/oauth/token`                      | 501    | `not_implemented` envelope naming the path                      |
+| `/oauth/userinfo`                   | 501    | `not_implemented` envelope naming the path                      |
+| `/oauth/revoke`                     | 501    | `not_implemented` envelope naming the path                      |
+| `/oauth/logout`                     | 501    | `not_implemented` envelope naming the path                      |
+| `/health`                           | 200    | liveness body — `ok`, `service`, `detail`                       |
+| `/ready`                            | 200    | readiness body — `ready: false`, `authentication`, route counts |
+| anything else                       | 404    | `not_found` envelope naming the entity, not echoing the path    |
+
+Two details of that table are decisions rather than defaults. The 501 body is
+`TransportError::Unimplemented` rather than `ApplicationError::NotImplemented`,
+because only the former renders the message the contract pins in
+`contracts/shared/v1/not-implemented-envelope.schema.json`. And the 404 body does
+**not** echo the requested path: the client supplied it, so echoing it tells
+them nothing they did not know, while a body that reflects probe input is a body
+that can be pushed around.
+
+The 501 is also deliberately **not** `ErrorEnvelope::status()`, which maps the
+`not_implemented` code to 500. The status on the wire is 501; a client that sees
+500 retries, and retrying an endpoint that will never exist is a retry storm
+against a route that cannot be fixed by retrying. A test pins the divergence so a
+future change to either side is noticed.
 
 ## What each Worker may never do
 

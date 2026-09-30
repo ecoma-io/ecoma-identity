@@ -684,17 +684,23 @@ jobs:
 
           # What is asserted, and why it is not more: `Route::is_implemented()`
           # in crates/identity-oidc returns true for /health and /ready and
-          # false for every protocol route, and the Worker composition roots
-          # are one-line placeholders at platform bootstrap. So a 2xx from
-          # /health is the contract this repository can make TODAY; anything
-          # stronger would be a test asserting a capability that does not
-          # exist, which is the one thing AGENTS.md forbids outright.
+          # false for every protocol route, and the identity Worker dispatches
+          # on that same table. So a 2xx from /health and /ready is the contract
+          # this repository makes TODAY; anything stronger would be a test
+          # asserting a capability that does not exist, which is the one thing
+          # AGENTS.md forbids outright.
+          #
+          # A 200 from /ready means the Worker is up and answered. It does NOT
+          # mean the instance can authenticate anyone: /ready's body carries
+          # `ready: false` and `authentication: "not_implemented"` alongside its
+          # 200, and that distinction is the point of the endpoint.
           #
           # What this deliberately does NOT do is treat a 501 as a pass. A 501
-          # on /health is a broken health endpoint, and at the moment the
-          # Worker serves no route at all this step will FAIL — which is the
-          # correct, honest state for a platform whose Workers are placeholders
-          # and whose deployments have not begun.
+          # on /health is a broken health endpoint. For `identity-admin` and
+          # `identity-jobs` this step currently FAILS, because those two Worker
+          # composition roots are still one-line placeholders and serve no route
+          # at all — which is the correct, honest state for deployables that have
+          # not been built yet.
           for ROUTE in /health /ready; do
             STATUS="$(curl --silent --show-error --max-time 15 \
               -o /dev/null --write-out '%{http_code}' \

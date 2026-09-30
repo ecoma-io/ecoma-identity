@@ -10,9 +10,11 @@ their own documents, and the decisions have ADRs.
 
 ## Status
 
-Everything in the request-path section below is `DEFERRED`. The three Worker
-crates are one-line placeholders. This document describes a shape that is decided
-and not built, and the status table says so on every row.
+Everything in the request-path section below is `DEFERRED` **except** the two
+health probes. The `identity` Worker is real and dispatches; the other two
+Worker crates are one-line placeholders. This document describes a shape that is
+decided and, for the `identity` Worker, partly built; the status table says so on
+every row.
 
 | Component                                              | State                                                                                                                                                                                                                        |
 | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -21,7 +23,7 @@ and not built, and the status table says so on every row.
 | The application-layer command and query traits         | `SCAFFOLDED` — traits with no bodies                                                                                                                                                                                         |
 | The security gates (`identity-security`)               | `SCAFFOLDED` — traits with no bodies                                                                                                                                                                                         |
 | The platform adapters (`identity-cloudflare`)          | `SCAFFOLDED` — ten adapter modules are written (D1, KV, Queues, rate limiting, request, response, error, secrets, clock, ids); the crate is mid-write, does not compile yet, and its `crypto` module is declared but absent. |
-| `identity` Worker                                      | `DEFERRED` — placeholder                                                                                                                                                                                                     |
+| `identity` Worker                                      | `IMPLEMENTED` — the `fetch` entrypoint, the route dispatch, the two probes and the 501 surface. No flow behind any of the protocol routes.                                                                                   |
 | `identity-admin` Worker                                | `DEFERRED` — placeholder                                                                                                                                                                                                     |
 | `identity-jobs` Worker                                 | `DEFERRED` — placeholder                                                                                                                                                                                                     |
 | `apps/identity/web`                                    | `SCAFFOLDED` — written and building; renders deferred states                                                                                                                                                                 |
@@ -169,11 +171,14 @@ GET /health   → liveness: the process is up
 GET /ready    → readiness: this instance may receive traffic
 ```
 
-`/ready` is the honesty endpoint. When it is built it must report that
-authentication is **not implemented**, and the docs must agree with it. It is
-`DEFERRED`: the routes are declared in the route table and
-`Route::is_implemented()` claims they are live, but the Worker that would serve
-them is a placeholder, so nothing reports anything today.
+`/ready` is the honesty endpoint, and it reports truthfully: it answers **200**
+and its body carries `ready: false` with `authentication: "not_implemented"` and
+a count of zero implemented protocol routes. The 200 is what the deploy ladder's
+smoke step and health gate require, and it means "this Worker is up and
+answered" — not "this instance can authenticate anyone". Those are two different
+claims and the body keeps them in two different fields. `identity` serves both
+probes today; the other two Workers serve neither yet, because their composition
+roots are placeholders.
 
 ## What each component is for
 
