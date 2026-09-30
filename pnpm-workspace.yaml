@@ -17,6 +17,12 @@ packages:
 #     a missing binary.
 #   - esbuild (via vite/vitest): its postinstall installs the platform binary.
 #     Same reasoning; without it the Vue builds fail with an opaque message.
+#   - lefthook: its postinstall is how the binary becomes executable. The npm
+#     package for a platform this machine does not run has no `bin` to copy, so
+#     the executable bits have to be set by the install itself. Without the
+#     allow-list entry, `pnpm install` in CI does not warn and carry on — it
+#     fails outright with ERR_PNPM_IGNORED_BUILDS, which is the behaviour the
+#     comment above describes. Found by running the pipeline, not by reading it.
 # Keep the allow-list complete: every "Ignored build scripts" line in an
 # install log is one missing entry.
 # Shape note: pnpm 11 replaced onlyBuiltDependencies / neverBuiltDependencies /
@@ -25,6 +31,7 @@ packages:
 # clone with a broken wrangler while every install still "succeeds".
 allowBuilds:
   esbuild: true
+  lefthook: true
   wrangler: true
 
 minimumReleaseAgeExclude:
