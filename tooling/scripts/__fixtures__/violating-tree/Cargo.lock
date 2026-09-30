@@ -275,6 +275,7 @@ dependencies = [
 name = "identity-jobs-worker"
 version = "0.0.0"
 dependencies = [
+ "identity-cloudflare",
  "identity-domain",
  "identity-security",
  "worker",
