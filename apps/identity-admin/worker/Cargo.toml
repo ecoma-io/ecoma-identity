@@ -21,6 +21,20 @@ publish = false
 # does NOT take an `IDENTITY_DB` binding. `tooling/scripts/check-architecture.mjs`
 # enforces both, because a manifest-level omission is the only kind of
 # boundary that cannot be worked around by a well-meaning import.
+[lib]
+# `cdylib` because `worker-build` refuses anything else for
+# `wasm32-unknown-unknown` ("crate-type must be cdylib to compile to
+# wasm32-unknown-unknown"). `rlib` is kept alongside it so `cargo test` and
+# `cargo doc` have a library to build on the host — without it this crate is
+# unbuildable as a dependency of anything, including its own test harness.
+#
+# This section was MISSING here while the other two Workers carried it, and the
+# only thing that found it was a real `wrangler deploy --dry-run`: the check
+# below compiles the Worker and `worker-build` refused it with the error above,
+# buried in a Node ChildProcess dump at the end of a five-minute build. The
+# third Worker to be written is the one that lacked the line.
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 identity-domain = { workspace = true }
 identity-application = { workspace = true }
