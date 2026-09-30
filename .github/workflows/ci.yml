@@ -122,6 +122,21 @@ jobs:
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
         with:
           toolchain: stable
+          # `wasm32-unknown-unknown` is an INPUT to this job, not only to the
+          # two that compile a Worker directly. `moon ci` runs each affected
+          # project's `build` and `package`, and those tasks are the
+          # deployables' actual deliverable — `cargo build -p
+          # identity-jobs-worker --locked --target wasm32-unknown-unknown`.
+          # Without the target installed, `rustc` fails with
+          # `error[E0463]: can't find crate for core`, which reads like a
+          # broken crate rather than a missing target: `core` is not a
+          # dependency of anything, it is the target's standard library.
+          #
+          # Every host test in the same job passed in the run that surfaced
+          # this, so the toolchain was not broken — only half of it was
+          # present. The other two rust-toolchain call sites in this
+          # repository already declared the target; this one did not.
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: ". -> target"
