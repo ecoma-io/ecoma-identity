@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Ecoma Identity \u2014 the identity and authentication control plane for the Ecoma organisation.",
+  "description": "Ecoma Identity — the identity and authentication control plane for the Ecoma organisation.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -37,6 +37,7 @@
     "@types/node": "^26.6.3",
     "eslint": "^10.11.0",
     "jsdom": "^28.0.0",
+    "lefthook": "2.1.9",
     "prettier": "^3.9.9",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.69.0",
