@@ -8,4 +8,4 @@ edition = "2024"
 # platform; this edge is the one that proves check 3 reads the graph rather
 # than grepping for a `worker` line in a manifest.
 [dependencies]
-worker = { version = "0.8.7", features = ["d1"] }
+worker = { path = "../../vendor/worker", features = ["d1"] }

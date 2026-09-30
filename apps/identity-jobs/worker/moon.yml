@@ -153,13 +153,25 @@ tasks:
       "$MOON_WORKSPACE_ROOT/node_modules/.bin/wrangler" deploy --dry-run --config wrangler.jsonc
     options:
       cache: false
-    # Project-relative, because a project-level `inputs:` block resolves
-    # against the project root and not against the workspace root. Spelling
-    # `apps/identity-jobs/worker/src/**` here would look for
-    # `apps/identity-jobs/worker/apps/identity-jobs/worker/src/**` and fail to
-    # parse. The wrangler config lives outside this project and is therefore
-    # not an input; `cache: false` below makes that irrelevant to correctness.
+    # Project-relative, and BARE: a project-level `inputs:` block resolves
+    # against the project root and not against the workspace root, and the
+    # `@files(…)` / `@globs(…)` token wrappers do not parse here — moon 2.5.6
+    # fails the whole config with "Failed to create glob from pattern
+    # apps/identity-jobs/worker/@globs(src/**/*)", which is how this was
+    # found: on the first CI run in this repository's history, after the
+    # install was fixed and the task could finally be reached.
+    #
+    # Verified against moon 2.5.6; the token form is a root-workspace spelling
+    # and the bare form is the project-level one. The other two Workers'
+    # `wrangler-validate` blocks already carried this correction, and the one
+    # written most recently did not — the comment that documents a rule is
+    # only as good as the newest file that has to obey it.
+    #
+    # The wrangler config lives outside this project and is therefore not an
+    # input. `cache: false` above makes that irrelevant: the task re-runs
+    # every time, so a changed wrangler config can never be answered from a
+    # stale cache.
     inputs:
-      - "@files(Cargo.toml)"
-      - "@globs(src/**/*)"
+      - "Cargo.toml"
+      - "src/**/*"
     outputs: []

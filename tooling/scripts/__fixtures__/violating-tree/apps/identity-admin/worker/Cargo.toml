@@ -6,4 +6,4 @@ edition = "2024"
 [dependencies]
 identity-application = { path = "../../../crates/identity-application" }
 identity-cloudflare = { path = "../../../crates/identity-cloudflare" }
-worker = { version = "0.8.7", features = ["d1"] }
+worker = { path = "../../../vendor/worker", features = ["d1"] }

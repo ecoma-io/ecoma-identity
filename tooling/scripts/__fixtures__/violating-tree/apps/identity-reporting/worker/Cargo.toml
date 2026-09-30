@@ -8,4 +8,4 @@ edition = "2024"
 # .moon/workspace.yml, nor infra/cloudflare/, nor release-please-config.json.
 [dependencies]
 identity-application = { path = "../../../crates/identity-application" }
-worker = { version = "0.8.7" }
+worker = { path = "../../../vendor/worker" }

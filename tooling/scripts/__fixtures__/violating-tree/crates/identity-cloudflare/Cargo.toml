@@ -8,4 +8,4 @@ identity-domain = { path = "../identity-domain" }
 identity-application = { path = "../identity-application" }
 identity-oidc = { path = "../identity-oidc" }
 identity-security = { path = "../identity-security" }
-worker = { version = "0.8.7", features = ["d1"] }
+worker = { path = "../../vendor/worker", features = ["d1"] }

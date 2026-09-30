@@ -409,7 +409,22 @@ describe("the canary fixture: a deliberately violating tree", () => {
       /identity-domain -> worker/,
       "check 3 must catch identity-domain's dependency on the `worker` crate",
     );
-    assert.match(hit.found, /crates\.io/);
+    // The finding names the EDGE and the rule it breaks. It deliberately does
+    // not name where `worker` came from: the guard reads `dep.name` out of the
+    // `cargo metadata` resolve graph and never inspects `dep.source`, so a
+    // registry crate and a path dependency named `worker` are the same
+    // violation, and a message that named the registry would be asserting
+    // something the check never looked at.
+    //
+    // This assertion used to require `crates.io` in `found`, and it passed for
+    // a reason nobody intended — a DIFFERENT check's `fix` line contains the
+    // phrase "Take a dependency (crates.io, the npm registry)", so the regex
+    // was satisfiable by text this check does not own. It only started failing
+    // when the fixture's `worker` became a path dependency, which is the whole
+    // point: the assertion was testing the fixture's packaging, not the
+    // boundary.
+    assert.match(hit.found, /identity-domain -> worker/);
+    assert.match(hit.constraint, /§1/);
   });
 
   it("check 4: the backend must not import or name a frontend package", () => {
