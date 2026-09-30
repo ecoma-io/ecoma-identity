@@ -299,32 +299,51 @@ describe("the canary fixture: a deliberately violating tree", () => {
     assert.match(hit.constraint, /§4/);
   });
 
-  it("check 2: a TRANSITIVE route to identity-domain is also a violation", () => {
-    // The direct-edge assertion above cannot tell a check that reads only
-    // direct edges from one that reads reachability, because the fixture's
-    // edge is direct. This is the case that was silently passing before: a
-    // jobs Worker that depends on a crate which itself depends on
-    // identity-domain carries the rule engine in with it, and the manifest
-    // looks compliant.
+  it("check 2: the REAL jobs Worker reaches no identity rule engine", () => {
+    // The other half of the pair. The fixture proves the guard FIRES; this
+    // proves the tree is CLEAN, and it is a reachability assertion rather than
+    // a manifest grep precisely because the manifest is not the question.
     //
-    // Proven on the REAL tree, not the fixture, because the real tree is the
-    // case that was missed: identity-jobs-worker declares identity-security
-    // and identity-cloudflare, and both reach identity-domain.
-    const real = internalReachability(readRustGraph(), "identity-jobs-worker");
-    const forbidden = [...real.keys()].filter((name) =>
-      /identity-(domain|application)$/.test(name),
+    // A direct-edge reading would pass this test too, which is why it is not
+    // the only one: together they pin both the capability and the state.
+    const reachable = internalReachability(
+      readRustGraph(),
+      "identity-jobs-worker",
     );
+    const forbidden = [...reachable.keys()].filter((n) =>
+      /identity-(domain|application)$/.test(n),
+    );
+    assert.deepEqual(
+      forbidden,
+      [],
+      `the real jobs Worker must reach no identity rule engine, but reaches ${forbidden.join(", ")} — if this fires, the violation is real and pnpm arch is right to exit non-zero`,
+    );
+  });
+
+  it("check 2: a TRANSITIVE route to identity-domain is also a violation", () => {
+    // The check must read reachability, not just direct edges. The fixture
+    // carries BOTH kinds of edge, so this test proves a direct-edge check
+    // cannot pass here: a check that read only `edge.internal` would report the
+    // direct violation and stay silent about the route through
+    // identity-cloudflare, which is the shape that shipped in the real tree
+    // and passed silently.
+    const check = findingsFor(fixtureRun.report, "boundary-2-jobs-isolation");
+    const hit = findingMatching(
+      check,
+      /identity-jobs-worker reaches identity-domain/,
+      "check 2 must catch the jobs worker's reach to identity-domain",
+    );
+    assert.match(hit.file, /apps\/identity-jobs\/worker\/Cargo\.toml$/);
+    assert.match(hit.constraint, /§4/);
+
+    // The report must NAME the route, not merely flag the crate. "Reachable"
+    // with no path is not something a reader can act on, and the whole point of
+    // walking the graph rather than reading a manifest is that the path is the
+    // actionable part.
     assert.ok(
-      forbidden.length > 0,
-      "the real jobs Worker must be shown reaching identity-domain or identity-application transitively — if this fails, the Cargo.toml changed and the check needs re-deriving",
+      check.findings.some((f) => /transitively, via /.test(f.found)),
+      "check 2 must report at least one violation as a TRANSITIVE route and name the intermediate crate",
     );
-    for (const name of forbidden) {
-      const p = real.get(name);
-      assert.ok(
-        p.length >= 2,
-        `${name} must be reached through at least one intermediate crate, or this test is no longer covering the transitive case`,
-      );
-    }
   });
 
   it("check 3: the domain crate must not depend on the Cloudflare runtime", () => {

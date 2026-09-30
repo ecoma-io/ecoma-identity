@@ -3,12 +3,22 @@ name = "identity-jobs-worker"
 version = "0.0.0"
 edition = "2024"
 
-# VIOLATION (check 2, dependency half): §4 says Jobs must not depend on
-# identity-domain or identity-application. The edge is a plain path dependency,
-# so `cargo metadata` reports it as a resolved graph edge — the check reads the
-# graph, and a `[workspace = true` indirection would hide the same edge from a
-# manifest grep.
+# VIOLATION (check 2, dependency half): §4 says Jobs must not be able to REACH
+# identity-domain or identity-application. Two edges, deliberately different in
+# kind, because the check has to catch both and a check that reads only one of
+# them is a false-negative generator:
+#
+#   * `identity-domain` directly — the obvious case.
+#   * `identity-cloudflare`, which depends on identity-domain. The manifest
+#     below names no forbidden crate for this route at all; the rule engine
+#     arrives one hop away. This is the shape that shipped in the real tree and
+#     passed silently, because a direct-edge check never sees it.
+#
+# `identity-security` is here too and is also a second-hop route to
+# identity-domain, so a check that special-cases one intermediate crate still
+# fails here.
 [dependencies]
 identity-domain = { path = "../../../crates/identity-domain" }
+identity-cloudflare = { path = "../../../crates/identity-cloudflare" }
 identity-security = { path = "../../../crates/identity-security" }
 worker = { version = "0.8.7", features = ["d1", "queue"] }
