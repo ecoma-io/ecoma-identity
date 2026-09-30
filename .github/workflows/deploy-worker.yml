@@ -56,13 +56,21 @@ name: deploy-worker
 on:
   workflow_call:
     inputs:
-      # The wrangler worker name, which is also the moon project alias, the
+      # The wrangler worker name, which is also the moon project id, the
       # release-please component and the git tag prefix. One string, four
       # meanings, deliberately: a tag, a version id and a worker name that can
       # be compared by eye are worth more than a consistent naming scheme that
       # includes the language a project happens to be written in.
+      #
+      # "the moon project id" rather than "an alias for it", which is what this
+      # said until the staging deploy failed at `moon run "$WORKER:package"`
+      # with `project_graph::unknown_id`. The three names used to be aliases
+      # declared in the root `moon.yml`, which moon 2.5.6 does not implement;
+      # the deployables are now REGISTERED under these names in
+      # `.moon/workspace.yml`. If you ever see a moon project id spelled
+      # `identity-worker`, that is the crate name and no command will resolve it.
       worker:
-        description: "Repository component name (identity | identity-admin | identity-jobs): the moon project, the config directory, and the release tag prefix"
+        description: "Repository component name (identity | identity-admin | identity-jobs): the moon project id, the config directory, and the release tag prefix"
         required: true
         type: string
 

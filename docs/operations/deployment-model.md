@@ -82,9 +82,20 @@ afterwards.
 The names are identical across wrangler, moon, release-please, git tags and
 Cloudflare version tags, deliberately. A tag, a version id and a worker name that
 can be compared by eye are worth more than a consistent naming scheme that
-includes the language a project happens to be written in. The moon project IDs
-are `identity-worker` and friends; the _aliases_ are the deployable names, and
-`moon run identity:dev` resolves through the alias.
+includes the language a project happens to be written in.
+
+The moon project IDs **are** the deployable names. They used to be the crate
+names — `identity-worker`, `identity-admin-worker`, `identity-jobs-worker` —
+with the deployable names registered as _aliases_ in a `projects:` block in the
+root `moon.yml`. Moon 2.5.6 has no alias mechanism for projects: the root
+`projects:` key declares _global_ projects, `ProjectConfig` in moon's own source
+carries no `aliases` field, and the block was accepted and ignored without a
+warning. `moon run identity:dev` and `moon run identity:package` both failed with
+`project_graph::unknown_id`, which took the staging deploy down with them —
+`deploy-worker.yml` runs `moon run "$WORKER:package"` with `WORKER=identity`
+before every upload, so no deploy of any Worker had ever succeeded.
+`docs/architecture/worker-architecture.md` records the corrected spelling, and
+ADR-0002's consequence table carries it.
 
 ## Per-project moon tasks
 

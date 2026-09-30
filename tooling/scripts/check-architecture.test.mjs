@@ -631,4 +631,76 @@ describe("the real tree: what a green run is allowed to claim", () => {
       );
     }
   });
+
+  /**
+   * Every deployable's moon project id must be its DEPLOYABLE name, and — the
+   * half that matters — moon must be able to resolve it.
+   *
+   * Why this is a test and not a comment. The three deployables used to be
+   * registered as `identity-worker`, `identity-admin-worker` and
+   * `identity-jobs-worker`, with the deployable names declared as aliases in a
+   * `projects:` block in the root `moon.yml`. Moon 2.5.6 has no project-alias
+   * mechanism: that root key declares GLOBAL projects, `ProjectConfig` in
+   * moon's own source carries no `aliases` field at all, and the block was
+   * accepted and ignored without a warning. `moon run identity:package` — the
+   * exact call `deploy-worker.yml` makes before every single upload — died with
+   * `project_graph::unknown_id`, and no deploy of any Worker had ever
+   * succeeded.
+   *
+   * `boundary-5-worker-registration` stayed green throughout, because it asked
+   * whether a project NAMED AFTER THE CRATE was mapped in `.moon/workspace.yml`.
+   * It could not ask whether any command resolved, and a gate that verifies a
+   * declaration is well-formed is not a gate that verifies the declaration
+   * works. This test is the missing half: it runs moon.
+   *
+   * It shells out to the same `moon` the workflows run, so a future moon
+   * upgrade that changes how project ids resolve fails HERE rather than in a
+   * 3am deploy.
+   */
+  it("moon can resolve each deployable by the name the deploy workflows use", () => {
+    const names = ["identity", "identity-admin", "identity-jobs"];
+    for (const name of names) {
+      const result = spawnSync(
+        "pnpm",
+        ["exec", "moon", "project", name, "--json"],
+        {
+          cwd: REPO_ROOT,
+          encoding: "utf8",
+          maxBuffer: 16 * 1024 * 1024,
+        },
+      );
+      assert.equal(
+        result.status,
+        0,
+        `moon cannot resolve a project named "${name}" — the deployable name is not the moon\n` +
+          `project id.\n` +
+          `  deploy-worker.yml runs \`moon run "$WORKER:package"\` with WORKER=${name} before\n` +
+          `  every upload, so this is a staging deploy that cannot start.\n` +
+          `  AGENTS.md and README.md both document \`moon run ${name}:dev\`.\n` +
+          `  stderr:\n${result.stderr}\n  stdout:\n${result.stdout}`,
+      );
+      const project = JSON.parse(result.stdout);
+      assert.equal(
+        project.id,
+        name,
+        `moon resolved "${name}" to a different project`,
+      );
+      // `package` is the task a promotion depends on, so it is the one that
+      // must exist — not merely `format`, which every project inherits from
+      // the root file whether or not it is the right task for that language.
+      //
+      // `tasks` is an object keyed by task id, not an array. Asserted against
+      // the real shape rather than assumed, because an assertion that reads
+      // `.some()` off an object throws a TypeError that says nothing about
+      // moon, and a canary that dies on its own bug teaches nobody to trust it.
+      assert.ok(
+        project.tasks &&
+          typeof project.tasks === "object" &&
+          "package" in project.tasks,
+        `the project "${name}" has no \`package\` task — a promotion needs the release\n` +
+          `  wasm build, and \`build\` is the same target without --release.\n` +
+          `  tasks present: ${Object.keys(project.tasks ?? {}).join(", ") || "(none)"}`,
+      );
+    }
+  });
 });

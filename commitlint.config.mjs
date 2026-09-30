@@ -58,13 +58,18 @@ export default {
         "identity-cloudflare",
         "identity-testkit",
         // ---- apps/ — the three Workers and the two web apps ---------------
-        // The deployable aliases from the root `moon.yml`, not the moon
-        // project ids: a deployable is called `identity`, `identity-admin`
-        // and `identity-jobs` everywhere a human reads a name (wrangler
-        // worker names, release-please components, Cloudflare version tags),
-        // and a commit header is a human-readable surface. The two Worker
-        // crates behind an alias are `identity-worker`, `identity-admin-worker`
-        // and `identity-jobs-worker`; the frontends are the two `*-web` names.
+        // These are the moon PROJECT IDS, and since the deployables were
+        // registered under their own names they ARE the deployable names,
+        // not aliases for the crate names. A deployable is called `identity`,
+        // `identity-admin` and `identity-jobs` everywhere a human reads a name
+        // (wrangler worker names, release-please components, git tags, Cloudflare
+        // version tags), and a commit header is a human-readable surface. The
+        // Worker crates behind them are `identity-worker`,
+        // `identity-admin-worker` and `identity-jobs-worker`; the frontends are
+        // the two `*-web` names.
+        // No `-worker` scope exists, and that is deliberate: a commit that
+        // touched `apps/identity/worker/` says `identity`, because the scope
+        // names the deployable and not the crate it happens to be written as.
         "identity",
         "identity-admin",
         "identity-jobs",

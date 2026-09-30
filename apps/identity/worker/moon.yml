@@ -10,9 +10,14 @@
 # `tooling/scripts/check-architecture.mjs` judges the dependency law from
 # `cargo metadata`, so none of that can be undone by a manifest edit.
 #
-# This is the file `moon run identity:dev` and the `identity:*` aliases in the
-# root `moon.yml` resolve to. The root file maps the deployment-boundary name
-# `identity` onto this project's id `identity-worker`.
+# This project is registered in `.moon/workspace.yml` under its DEPLOYABLE
+# NAME — `identity` — not under its crate name `identity-worker`, so
+# `moon run identity:dev` and the `moon run identity:package` that
+# `deploy-worker.yml` runs before every upload both address this project
+# directly. Moon 2.5.6 has no project-alias mechanism: the root `moon.yml`
+# used to carry a `projects:` map claiming to map `identity` onto
+# `identity-worker`, moon silently ignored it, and the staging deploy failed
+# at the build step. `docs/operations/deployment-model.md` records it.
 
 $schema: https://moonrepo.dev/schemas/moon.json
 

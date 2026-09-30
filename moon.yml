@@ -13,17 +13,30 @@ $schema: https://moonrepo.dev/schemas/moon.json
 # of record, and a moon-cached cargo task that misses an input (a workspace-
 # level dependency change, a lint config) would report a stale verdict as
 # green. Slow and honest beats fast and wrong.
-
-projects:
-  # Deployment-boundary aliases. A deployable is called `identity`,
-  # `identity-admin` and `identity-jobs` everywhere that matters — wrangler
-  # worker names, release-please components, git tags, Cloudflare Version
-  # tags — so the moon project IDs match them rather than leaking the language
-  # a project happens to be written in. `moon run identity:dev` is the local
-  # command from AGENTS.md; the alias is what makes it resolve.
-  identity: identity-worker
-  identity-admin: identity-admin-worker
-  identity-jobs: identity-jobs-worker
+#
+# THERE IS NO `projects:` BLOCK HERE, and the absence is a correction rather
+# than an omission. This file used to carry
+#
+#   projects:
+#     identity: identity-worker
+#     identity-admin: identity-admin-worker
+#     identity-jobs: identity-jobs-worker
+#
+# with a comment explaining that the map is what makes `moon run identity:dev`
+# resolve. It never did: moon 2.5.6 reads that key as GLOBAL projects, has no
+# alias mechanism for projects at all, and ignored the block without a word.
+# `moon run identity:dev` — the command in AGENTS.md and README.md — failed
+# with `project_graph::unknown_id`, as did the staging deploy that runs
+# `moon run "$WORKER:package"` with the same names. The deployable names are
+# now the PROJECT IDS in `.moon/workspace.yml`, which is the only place moon
+# reads project names from and the only place a new module must be declared.
+# `docs/operations/deployment-model.md` owns the naming story; ADR-0002
+# records the mapping as a consequence of the three-deployable law.
+#
+# Having two maps was the hazard, not one of them: a reader who added a
+# project to the root file and not to the workspace file would see no error
+# anywhere, because a global-project declaration for a path inside this
+# repository is itself silently dropped.
 
 tasks:
   # ---- format / lint / typecheck -------------------------------------------

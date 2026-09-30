@@ -100,27 +100,33 @@ in the tree. That is a known gap, not a mistake you made.
 
 ## The project layout
 
-Eleven projects in `.moon/workspace.yml`, exposed under the deployable names as
-aliases:
+Eleven projects in `.moon/workspace.yml`, each registered under the name it is
+addressed by:
 
-| moon project            | Path                          | Alias                |
-| ----------------------- | ----------------------------- | -------------------- |
-| `identity-domain`       | `crates/identity-domain`      | —                    |
-| `identity-application`  | `crates/identity-application` | —                    |
-| `identity-oidc`         | `crates/identity-oidc`        | —                    |
-| `identity-security`     | `crates/identity-security`    | —                    |
-| `identity-cloudflare`   | `crates/identity-cloudflare`  | —                    |
-| `identity-testkit`      | `crates/identity-testkit`     | —                    |
-| `identity-worker`       | `apps/identity/worker`        | **`identity`**       |
-| `identity-web`          | `apps/identity/web`           | —                    |
-| `identity-admin-worker` | `apps/identity-admin/worker`  | **`identity-admin`** |
-| `identity-admin-web`    | `apps/identity-admin/web`     | —                    |
-| `identity-jobs-worker`  | `apps/identity-jobs/worker`   | **`identity-jobs`**  |
+| moon project           | Path                          |
+| ---------------------- | ----------------------------- |
+| `identity-domain`      | `crates/identity-domain`      |
+| `identity-application` | `crates/identity-application` |
+| `identity-oidc`        | `crates/identity-oidc`        |
+| `identity-security`    | `crates/identity-security`    |
+| `identity-cloudflare`  | `crates/identity-cloudflare`  |
+| `identity-testkit`     | `crates/identity-testkit`     |
+| `identity`             | `apps/identity/worker`        |
+| `identity-web`         | `apps/identity/web`           |
+| `identity-admin`       | `apps/identity-admin/worker`  |
+| `identity-admin-web`   | `apps/identity-admin/web`     |
+| `identity-jobs`        | `apps/identity-jobs/worker`   |
 
-The aliases are why `moon run identity:dev` resolves. A deployable is called
-`identity` everywhere that matters — wrangler worker name, release-please
-component, git tag, Cloudflare version tag — so a tag, a version and a wrangler
-name can be compared by eye.
+**A deployable's moon project ID is its deployable name** — `identity`, not
+`identity-worker` — so `moon run identity:dev` resolves, and so a tag, a version
+id, a wrangler worker name and a project id can be compared by eye. The
+`*‑worker` spellings are the _crate_ names (`apps/identity/worker/Cargo.toml`),
+which is a different namespace and says nothing about which commands work.
+
+They used to be the moon ids, with the deployable names declared as aliases in a
+`projects:` block in the root `moon.yml`. Moon 2.5.6 does not have that
+mechanism and silently ignored the block, so none of those commands resolved
+until the ids were renamed.
 
 There is **no per-project `moon.yml` in any project yet.** The root `moon.yml`
 defines the task vocabulary with JavaScript-flavoured defaults; a Rust project

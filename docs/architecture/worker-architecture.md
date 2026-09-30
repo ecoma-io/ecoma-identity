@@ -31,12 +31,19 @@ Worker requires an ADR and proof it cannot live in one of the three.
 | `identity-admin` | `apps/identity-admin/worker` | The administrative BFF and its own session. Reaches identity only through a private service binding.                              | Yes, but only to its own session and its own web app |
 | `identity-jobs`  | `apps/identity-jobs/worker`  | A background side-effect worker: email, security notifications, audit archival. Owns no identity state.                           | No — no public route at all                          |
 
-The moon project aliases match the deployable names, not the language: in
-`moon.yml`, `identity`, `identity-admin` and `identity-jobs` alias
-`identity-worker`, `identity-admin-worker` and `identity-jobs-worker`. A
-deployable is called `identity` everywhere that matters — wrangler worker name,
-release-please component, git tag, Cloudflare version tag — so that a tag, a
-version and a wrangler name can be compared by eye.
+The moon project IDs match the deployable names, not the language: in
+`.moon/workspace.yml`, the three deployables are registered as `identity`,
+`identity-admin` and `identity-jobs`. A deployable is called `identity`
+everywhere that matters — moon project id, wrangler worker name, release-please
+component, git tag, Cloudflare version tag — so that a tag, a version and a
+wrangler name can be compared by eye.
+
+They used to be registered under their crate names (`identity-worker` and
+friends) with the deployable names declared as aliases in a `projects:` block in
+the root `moon.yml`. Moon 2.5.6 has no project-alias mechanism and silently
+ignored that block, so nothing addressed a deployable by its own name and every
+staging deploy failed before its first upload. `docs/operations/deployment-model.md`
+records the correction.
 
 ## The binding table
 

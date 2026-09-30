@@ -203,8 +203,8 @@ jobs:
       # when the ruleset landed.
       #
       # The value is rendered to a STRING, because `moon` reads `--force` from
-      # the environment rather than as a flag. Two earlier attempts at this step
-      # were each wrong in a way that only CI could show:
+      # the environment rather than as a flag. Three earlier attempts at this
+      # step were each wrong in a way only CI could show:
       #
       #   1. `inputs.force == 'true' && '--force' || ''` interpolated a flag
       #      into the run text. `inputs.force` is `type: boolean`, so GitHub
@@ -214,16 +214,34 @@ jobs:
       #      fixed the boolean comparison and then handed the flag to
       #      `pnpm exec`, whose own argument parser rejects a valueless option:
       #      `error: a value is required for '--force' but none was supplied`.
+      #   3. Setting `MOON_FORCE` unconditionally from the expression — which
+      #      is what (1) and (2) were reaching for — and letting the shell
+      #      branch. `inputs.force && 'true' || ''` evaluates to the EMPTY
+      #      STRING whenever the input is false, and moon does not treat a bare
+      #      `MOON_FORCE=` as "off": an unset variable reads as absent, a set
+      #      variable reads as present with a value, and "" is a value that is
+      #      neither 'true' nor 'false'. Same error, same exit code 2, from a
+      #      step that had been rewritten specifically to stop producing it.
       #
-      # `MOON_FORCE` is the documented environment form of the same flag — moon
+      # `MOON_FORCE` is the documented environment form of the flag — moon
       # declares `[env: MOON_FORCE=]` on `-f, --force` — so the flag never
-      # reaches pnpm's parser at all, and the expression's job reduces to
-      # "true or nothing". Verified both ways on this machine before committing:
-      # `MOON_FORCE=true` runs every project, `MOON_FORCE=` runs the affected
-      # set.
+      # reaches pnpm's parser at all. The expression's job is only to turn the
+      # boolean into one of the two words moon accepts.
+      #
+      # Which is why the three values are distinguishable here, and why the
+      # difference between the last two is not cosmetic:
+      #
+      #   env -u MOON_FORCE   -> exit 0   absent
+      #   MOON_FORCE=        -> exit 2   present, value "", unparseable
+      #   MOON_FORCE=false   -> exit 0   present, parses, off
+      #   MOON_FORCE=true    -> exit 1   present, parses, runs everything
+      #
+      # Verified on this machine in all four states before committing, because
+      # the first version of this fix compared UNSET against TRUE, passed
+      # locally, and failed in CI on the third state it had never tried.
       - name: Affected tasks (moon ci)
         env:
-          MOON_FORCE: ${{ inputs.force && 'true' || '' }}
+          MOON_FORCE: ${{ inputs.force && 'true' || 'false' }}
         run: pnpm exec moon ci --summary minimal
 
       # The `#[ignore]`d invariants, run as a job rather than as part of the

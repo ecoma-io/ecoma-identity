@@ -2892,7 +2892,25 @@ function buildContext() {
       dir: path.join(appsRoot, name, "worker"),
       relDir: rel(path.join(appsRoot, name, "worker")),
       cargoToml,
-      project: `${workerName}-worker`,
+      // The moon project id is the DEPLOYABLE'S NAME, not the crate's.
+      //
+      // It used to be `${workerName}-worker`, with the deployment name mapped
+      // onto it by a `projects:` block in the ROOT `moon.yml`. Moon 2.5.6 has
+      // no alias mechanism for projects — `ProjectConfig` in moon's own source
+      // has no `aliases` field, and the root `projects:` key declares GLOBAL
+      // projects, which this block was not — so the map was silently inert and
+      // `moon run identity:package` failed with `project_graph::unknown_id`.
+      // That is the exact call `deploy-worker.yml` makes before every upload,
+      // so the staging deploy had never succeeded.
+      //
+      // Deriving the id here from the crate name is what let the gate stay
+      // green through all of it: it was checking that a project NAMED AFTER
+      // the crate was mapped in `.moon/workspace.yml`, and never that any
+      // command a human or a workflow actually runs could resolve. The id is
+      // now the name that `.moon/workspace.yml` has to agree with, which is
+      // the name the wrangler configs, the release-please components and the
+      // deploy lane matrix all use.
+      project: workerName,
       manifest: text,
     });
   }

@@ -19,8 +19,33 @@ projects:
   identity-cloudflare: crates/identity-cloudflare
   identity-testkit: crates/identity-testkit
   # apps/
-  identity-worker: apps/identity/worker
+  #
+  # THE THREE DEPLOYABLES ARE REGISTERED UNDER THEIR DEPLOYMENT NAMES, and
+  # that is a correction rather than a preference. They used to be registered
+  # as `identity-worker`, `identity-admin-worker` and `identity-jobs-worker`,
+  # with the deployment names mapped onto them by a `projects:` block in the
+  # ROOT `moon.yml`. Moon 2.5.6 has no such mechanism: the root key declares
+  # GLOBAL projects, `ProjectConfig` has no `aliases` field at all (moon names
+  # its own doc `https://moonrepo.dev/docs/config/project`, and the parser
+  # lists every field it accepts when you use a wrong one), and the block was
+  # silently inert. Every command that used a deployment name died with
+  #
+  #   Error: project_graph::unknown_id
+  #     x No project has been configured with the identifier or alias identity.
+  #
+  # which is how `deploy-worker.yml` failed its staging build: it runs
+  # `moon run "$WORKER:package"` with `WORKER=identity`, taken from the
+  # deployment-boundary name the lane matrix uses, and the staging deploy had
+  # never once succeeded.
+  #
+  # `boundary-5-worker-registration` reads this map and asks whether the
+  # project's id matches the Worker the directory implies. That check asks
+  # whether the id names the CRATE; it cannot ask whether the id is REACHABLE,
+  # so it stayed green across the whole time the aliases resolved to nothing.
+  # A gate that verifies a declaration is well-formed is not a gate that
+  # verifies the declaration works.
+  identity: apps/identity/worker
   identity-web: apps/identity/web
-  identity-admin-worker: apps/identity-admin/worker
+  identity-admin: apps/identity-admin/worker
   identity-admin-web: apps/identity-admin/web
-  identity-jobs-worker: apps/identity-jobs/worker
+  identity-jobs: apps/identity-jobs/worker
