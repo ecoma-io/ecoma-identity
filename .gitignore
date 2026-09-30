@@ -26,6 +26,21 @@ coverage/
 *.tsbuildinfo
 
 # ---------------------------------------------------------------------------
+# moon's task cache.
+#
+# `.moon/cache/` is generated state: task hashes and the workspace graph, both of
+# which change on almost every run and both of which are a function of the
+# machine that ran them. Tracking them produces merge conflicts that carry no
+# information — two developers running different tasks get two different graphs
+# — and it makes `git status` permanently dirty.
+#
+# The cache directory ships its own `CACHEDIR.TAG` precisely so tools skip it.
+# `.moon/workspace.yml` and `.moon/toolchains.yml` are the two files that are
+# NOT cache, and they are deliberately not covered by this rule.
+# ---------------------------------------------------------------------------
+.moon/cache/
+
+# ---------------------------------------------------------------------------
 # Secrets. Nothing below may ever be tracked; the `.example` files are what gets
 # committed, and they carry the shape of a value with no value in it.
 # ---------------------------------------------------------------------------

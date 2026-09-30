@@ -1,7 +1,0 @@
-{
-  "lastHash": "14970a1cc4cc5fe090992558c548921f7e2f684b4303c9742a998048688c2b82",
-  "pluginInputPaths": [
-    "apps/identity/web/package.json",
-    "apps/identity-admin/web/package.json"
-  ]
-}

@@ -1,3 +1,15 @@
+# Toolchain versions, pinned in one place.
+#
+# `proto` reads this file and every tool below is the exact version CI will
+# install, so a developer's laptop and a workflow run the same moon, the same
+# proto and the same pnpm. Without the `pnpm` line, proto resolves pnpm from
+# whatever it happens to have cached and a task that shells out to `pnpm`
+# fails with "This project requires pnpm 12.8.1 … but this version has not
+# been installed" — a failure that reads like a missing dependency and is
+# actually a missing pin. `package.json`'s `packageManager` field is what
+# proto reads to decide the *required* version; this file is what makes the
+# *installed* one match.
 moon = "2.5.6"
 proto = "0.62.3"
 cocogitto = "7.0.0"
+pnpm = "12.8.1"

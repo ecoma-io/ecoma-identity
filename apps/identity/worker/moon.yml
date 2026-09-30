@@ -96,7 +96,7 @@ tasks:
     # `../../../../apps/identity/worker` against the process working directory.
     # Verified: with `--cwd` the custom build cannot find the crate; run from
     # the config's own directory it does.
-    script: 'cd "$MOON_WORKSPACE_ROOT/infra/cloudflare/development/identity" && pnpm exec wrangler dev --config wrangler.jsonc'
+    script: 'cd "$MOON_WORKSPACE_ROOT/infra/cloudflare/development/identity" && "$MOON_WORKSPACE_ROOT/node_modules/.bin/wrangler" dev --config wrangler.jsonc'
     options:
       runInCI: false
     inputs: []
@@ -114,17 +114,34 @@ tasks:
 
   # ---------------------------------------------------------------------------
   # wrangler:validate — `wrangler deploy --dry-run` against the DEVELOPMENT
-  # config. Dry-run compiles the Worker and runs wrangler's own checks without
-  # uploading, so it is a real check of the thing that ships rather than a
-  # command that exits 0.
+  # config. Dry-run runs wrangler's own checks without uploading, so it is a
+  # real check of the thing that ships rather than a command that exits 0.
   #
-  # If `wrangler` is not installed this fails loudly and non-zero: pnpm exits
-  # 1 with `Command "wrangler" not found`, moon propagates the non-zero exit.
-  # A `|| true` here would make "the check did not run" indistinguishable from
-  # "the check passed", which is the one outcome this task must never produce.
+  # It runs the preflight FIRST, and that ordering is the point. `wrangler
+  # deploy --dry-run` executes the config's `build.command` before any of its
+  # own checks, and that command is `cargo install worker-build`, whose
+  # dependency graph reaches `openssl-sys` and therefore needs the system
+  # OpenSSL headers. On a machine without them, wrangler dies with a bare
+  # `exit code 1` and the real error sits in a timestamped file under
+  # ~/.config/.wrangler/logs/ — a failing check reported in a way that costs a
+  # debugging session, which is the same defect as a check reporting success
+  # without running. The preflight names the missing prerequisite instead.
+  #
+  # The preflight is NOT a substitute for the dry-run and does not claim to be:
+  # it performs none of wrangler's checks. It only refuses to spend a dry-run
+  # on a machine where the build half is known-impossible.
+  #
+  # If `wrangler` is not installed this fails loudly and non-zero: the binary
+  # path is absolute and non-existent, the shell exits 127, moon propagates the
+  # non-zero exit. A `|| true` here would make "the check did not run"
+  # indistinguishable from "the check passed", which is the one outcome this
+  # task must never produce.
   # ---------------------------------------------------------------------------
   wrangler-validate:
-    script: 'cd "$MOON_WORKSPACE_ROOT/infra/cloudflare/development/identity" && pnpm exec wrangler deploy --dry-run --config wrangler.jsonc'
+    script: |
+      cd "$MOON_WORKSPACE_ROOT/infra/cloudflare/development/identity" || exit 1
+      node "$MOON_WORKSPACE_ROOT/tooling/scripts/check-worker-build-prereqs.mjs" "$PWD" || exit 1
+      "$MOON_WORKSPACE_ROOT/node_modules/.bin/wrangler" deploy --dry-run --config wrangler.jsonc
     options:
       cache: false
     # Project-relative, and BARE: a project-level `inputs:` block resolves
