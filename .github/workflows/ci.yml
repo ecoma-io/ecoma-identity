@@ -193,8 +193,32 @@ jobs:
       # to nothing else: a forced run on a pull request would defeat the very
       # property this job exists for, so it is reachable only by a deliberate
       # dispatch.
+      #
+      # The input arrives through `env:` and is tested by the shell, and both
+      # halves of that are load-bearing.
+      #
+      # The `env:` hop is what the org's own rule
+      # `workflow-expression-interpolated-into-run` requires: GitHub substitutes
+      # `${{ }}` into the script text before the shell sees it, so an expression
+      # spliced into a `run:` line is a command-injection sink. The rule
+      # covered `inputs.*` precisely because dispatch inputs are attacker-
+      # reachable on a fork. This line was the one finding in the whole tree
+      # when the ruleset landed.
+      #
+      # The shell test is because `inputs.force` is `type: boolean`, so GitHub
+      # passes the BOOLEAN. The expression this replaced was
+      # `inputs.force == 'true' && '--force' || ''` — a boolean compared
+      # against a string, which is never equal, so `--force` silently never
+      # fired. The escape hatch this job documents has not existed until now.
       - name: Affected tasks (moon ci)
-        run: pnpm exec moon ci ${{ inputs.force == 'true' && '--force' || '' }} --summary minimal
+        env:
+          MOON_FORCE: ${{ inputs.force }}
+        run: |
+          if [ "$MOON_FORCE" = "true" ]; then
+            pnpm exec moon ci --force --summary minimal
+          else
+            pnpm exec moon ci --summary minimal
+          fi
 
       # The `#[ignore]`d invariants, run as a job rather than as part of the
       # affected graph: they are a standing question ("how much of the security

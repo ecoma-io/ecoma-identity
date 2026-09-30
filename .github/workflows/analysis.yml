@@ -127,17 +127,18 @@ jobs:
       # rule that has quietly stopped matching passes every scan below by
       # finding nothing.
       #
-      # NOTE FOR THE NEXT EDITOR: `.github/semgrep/` DOES NOT EXIST IN THIS
-      # TREE YET. This repository's remaining deliverable set did not include
-      # the ruleset, and the org convention (loom, archkeep, runtime-trail and
-      # six others) keeps it at `.github/semgrep/{workflows.yaml,
-      # workflows.test.yaml}`. The two commands below are wired to that path so
-      # the ruleset drops in without editing this workflow — and until it does,
-      # `semgrep --test` on a missing directory is a failure, which is the
-      # correct state: an analysis that reports "no findings" because its rules
-      # are missing is the one failure mode this job exists to make loud. Copy
-      # the two files from a sibling repository in the same commit that adds the
-      # first rule they are meant to enforce.
+      # The ruleset arrived with the first run of this job, which is the only
+      # reason it is here: `semgrep scan --config .github/semgrep` on a missing
+      # directory exits 7 with no message, and the job that exists to make a
+      # silent analysis loud was the thing being silent. `workflows.yaml` and
+      # `workflows.test.yaml` are copied byte-for-byte from the six sibling
+      # repositories that share them (md5 876acdb5… and dea5384b…), so this
+      # repository enforces the same organisation-wide workflow rules rather
+      # than a private copy that could drift.
+      #
+      # The rules found a real command-injection sink in ci.yml on the run that
+      # first executed them, in a line that had been there since the workflow
+      # was written. See the comment on the `Affected tasks (moon ci)` step.
       - name: Test the rules against their fixtures
         run: semgrep --test --config .github/semgrep .github/semgrep
 
