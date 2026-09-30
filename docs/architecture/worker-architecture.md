@@ -13,7 +13,7 @@ handlers exist yet.
 | Three deployables named `identity`, `identity-admin`, `identity-jobs` | `PLANNED` — decided; the configuration that proves it is `DEFERRED`                            |
 | The binding set of each Worker                                        | `PLANNED` — decided; the `wrangler.jsonc` files are `DEFERRED`                                 |
 | The OIDC route table and its 501 contract                             | `IMPLEMENTED` — `identity-oidc`'s `Route` enum is real and tested                              |
-| The health routes `/health` and `/ready`                              | `IMPLEMENTED` on `identity`; `DEFERRED` on the other two                                       |
+| The health routes `/health` and `/ready`                              | `IMPLEMENTED` on `identity` and `identity-admin`; `DEFERRED` on `identity-jobs`                |
 | The `identity` Worker `lib.rs`                                        | `IMPLEMENTED` — the `fetch` entrypoint, the route dispatch, the two probes and the 501 surface |
 | The `identity-admin` and `identity-jobs` Worker `lib.rs`              | `DEFERRED` — one-line placeholders                                                             |
 

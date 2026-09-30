@@ -11,24 +11,24 @@ their own documents, and the decisions have ADRs.
 ## Status
 
 Everything in the request-path section below is `DEFERRED` **except** the two
-health probes. The `identity` Worker is real and dispatches; the other two
-Worker crates are one-line placeholders. This document describes a shape that is
-decided and, for the `identity` Worker, partly built; the status table says so on
-every row.
+health probes. The `identity` and `identity-admin` Workers are real and
+dispatch; the `identity-jobs` crate is still a one-line placeholder. This
+document describes a shape that is decided and, for two of the three Workers,
+built; the status table says so on every row.
 
-| Component                                              | State                                                                                                                                                                                                                        |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The domain model (`identity-domain`)                   | `IMPLEMENTED`                                                                                                                                                                                                                |
-| The OIDC route table and wire shapes (`identity-oidc`) | `IMPLEMENTED` as data                                                                                                                                                                                                        |
-| The application-layer command and query traits         | `SCAFFOLDED` — traits with no bodies                                                                                                                                                                                         |
-| The security gates (`identity-security`)               | `SCAFFOLDED` — traits with no bodies                                                                                                                                                                                         |
-| The platform adapters (`identity-cloudflare`)          | `SCAFFOLDED` — ten adapter modules are written (D1, KV, Queues, rate limiting, request, response, error, secrets, clock, ids); the crate is mid-write, does not compile yet, and its `crypto` module is declared but absent. |
-| `identity` Worker                                      | `IMPLEMENTED` — the `fetch` entrypoint, the route dispatch, the two probes and the 501 surface. No flow behind any of the protocol routes.                                                                                   |
-| `identity-admin` Worker                                | `DEFERRED` — placeholder                                                                                                                                                                                                     |
-| `identity-jobs` Worker                                 | `DEFERRED` — placeholder                                                                                                                                                                                                     |
-| `apps/identity/web`                                    | `SCAFFOLDED` — written and building; renders deferred states                                                                                                                                                                 |
-| `apps/identity-admin/web`                              | `SCAFFOLDED` — written and building; renders deferred states                                                                                                                                                                 |
-| Identity D1 schema                                     | `DEFERRED` — the forward-only rule is decided; the migrations are being written                                                                                                                                              |
+| Component                                              | State                                                                                                                                                                                                                                  |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The domain model (`identity-domain`)                   | `IMPLEMENTED`                                                                                                                                                                                                                          |
+| The OIDC route table and wire shapes (`identity-oidc`) | `IMPLEMENTED` as data                                                                                                                                                                                                                  |
+| The application-layer command and query traits         | `SCAFFOLDED` — traits with no bodies                                                                                                                                                                                                   |
+| The security gates (`identity-security`)               | `SCAFFOLDED` — traits with no bodies                                                                                                                                                                                                   |
+| The platform adapters (`identity-cloudflare`)          | `SCAFFOLDED` — ten adapter modules are written (D1, KV, Queues, rate limiting, request, response, error, secrets, clock, ids); the crate is mid-write, does not compile yet, and its `crypto` module is declared but absent.           |
+| `identity` Worker                                      | `IMPLEMENTED` — the `fetch` entrypoint, the route dispatch, the two probes and the 501 surface. No flow behind any of the protocol routes.                                                                                             |
+| `identity-admin` Worker                                | `IMPLEMENTED` — the `fetch` entrypoint, the route dispatch, the two probes and the 501 surface. It holds no database and reaches identity only through the `IDENTITY` service binding. No administration flow exists behind any route. |     |
+| `identity-jobs` Worker                                 | `DEFERRED` — placeholder                                                                                                                                                                                                               |
+| `apps/identity/web`                                    | `SCAFFOLDED` — written and building; renders deferred states                                                                                                                                                                           |
+| `apps/identity-admin/web`                              | `SCAFFOLDED` — written and building; renders deferred states                                                                                                                                                                           |
+| Identity D1 schema                                     | `DEFERRED` — the forward-only rule is decided; the migrations are being written                                                                                                                                                        |
 
 ## The system
 
