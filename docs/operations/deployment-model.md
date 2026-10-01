@@ -1,7 +1,7 @@
 # Deployment model
 
 What this document is: how Cloudflare's model actually works, which command
-does what, the three deployables, and the canary ladder with its two human gates.
+does what, the deployables, and the canary ladder with its two human gates.
 
 What this document is **not**: a runbook. The step-by-step commands for the
 first deploy are in
@@ -13,14 +13,15 @@ The model is decided; nothing has been uploaded.
 
 ## Status
 
-| Fact                                                                  | State                                                                                                                                                                                                       |
-| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Three deployables named `identity`, `identity-admin`, `identity-jobs` | `IMPLEMENTED` — the count is enforced by `pnpm arch`, and all nine wrangler configs exist                                                                                                                   |
-| The task names CI and the deploy workflows address                    | `IMPLEMENTED` — the root `moon.yml` defines them                                                                                                                                                            |
-| The Version / Deployment / Promotion model                            | `PLANNED` — decided; nothing uploaded                                                                                                                                                                       |
-| The canary ladder and its two human gates                             | `PLANNED` — decided in ADR-0014; the workflows carrying them are `DEFERRED`                                                                                                                                 |
-| `wrangler` pinned at 4.144.0                                          | `IMPLEMENTED` — `package.json` devDependencies                                                                                                                                                              |
-| Every environment                                                     | `SCAFFOLDED` — all nine configs exist under `infra/cloudflare/<environment>/<worker>/wrangler.jsonc`, and their binding matrices are judged by `pnpm arch`; nothing is deployed and no account ids are real |
+| Fact                                                                           | State                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Three Identity deployables named `identity`, `identity-admin`, `identity-jobs` | `IMPLEMENTED` — the count is enforced by `pnpm arch`, and all nine wrangler configs exist                                                                                                                         |
+| A fourth deployable, `home-web`, on Workers + Assets                           | `SCAFFOLDED` — the application, its three configs, and its release component exist and the count is enforced by `pnpm arch`. **Not deployed**: nothing uploaded, no release, no promotion, no rollback            |
+| The task names CI and the deploy workflows address                             | `IMPLEMENTED` — the root `moon.yml` defines them                                                                                                                                                                  |
+| The Version / Deployment / Promotion model                                     | `PLANNED` — decided; nothing uploaded                                                                                                                                                                             |
+| The canary ladder and its two human gates                                      | `PLANNED` — decided in ADR-0014 for `identity` and in ADR-0016 for `home-web`; the workflows carrying them are `DEFERRED`                                                                                         |
+| `wrangler` pinned at 4.144.0                                                   | `IMPLEMENTED` — `package.json` devDependencies                                                                                                                                                                    |
+| Every environment                                                              | `SCAFFOLDED` — all twelve configs exist under `infra/cloudflare/<environment>/<deployable>/wrangler.jsonc`, and their binding matrices are judged by `pnpm arch`; nothing is deployed and no account ids are real |
 
 ## The Cloudflare model, exactly
 
@@ -71,18 +72,27 @@ version, which is convenient and is the wrong tool in an incident where you need
 to name exactly which version — naming it is what makes the action reviewable
 afterwards.
 
-## The three deployables
+## The deployables
 
-| Deployable       | wrangler worker name | moon project     | Releases with                               |
-| ---------------- | -------------------- | ---------------- | ------------------------------------------- |
-| `identity`       | `identity`           | `identity`       | A frontend and its BFF are one release unit |
-| `identity-admin` | `identity-admin`     | `identity-admin` | Same rule                                   |
-| `identity-jobs`  | `identity-jobs`      | `identity-jobs`  | Its own; no frontend                        |
+| Deployable       | wrangler worker name | moon project     | Releases with                                                                      |
+| ---------------- | -------------------- | ---------------- | ---------------------------------------------------------------------------------- |
+| `identity`       | `identity`           | `identity`       | A frontend and its BFF are one release unit                                        |
+| `identity-admin` | `identity-admin`     | `identity-admin` | Same rule                                                                          |
+| `identity-jobs`  | `identity-jobs`      | `identity-jobs`  | Its own; no frontend                                                               |
+| `home-web`       | `home-web`           | `home-web`       | **Its own, alone** — a Nuxt/Nitro application, not a Worker paired with a frontend |
 
 The names are identical across wrangler, moon, release-please, git tags and
 Cloudflare version tags, deliberately. A tag, a version id and a worker name that
 can be compared by eye are worth more than a consistent naming scheme that
 includes the language a project happens to be written in.
+
+`home-web` is a deployable on this repository's own terms, which means it has all
+four of those names and its own `home-web-v*` tag family — and it means the
+thing constraint 8 says about a frontend and its BFF **does not apply to it**.
+`home-web` is the frontend; there is no BFF behind it to pair with, and its
+release unit contains nothing else. A change to `home-web` releases `home-web`
+and nothing further, and a change to `identity` releases `identity` and its own
+web app without touching `home-web`.
 
 The moon project IDs **are** the deployable names. They used to be the crate
 names — `identity-worker`, `identity-admin-worker`, `identity-jobs-worker` —
@@ -96,6 +106,72 @@ warning. `moon run identity:dev` and `moon run identity:package` both failed wit
 before every upload, so no deploy of any Worker had ever succeeded.
 `docs/architecture/worker-architecture.md` records the corrected spelling, and
 ADR-0002's consequence table carries it.
+
+## What is uploaded for `home-web`, which is not a Worker build
+
+Every one of the three Identity Workers is uploaded as a wasm module that wrangler
+bundles from a Cargo build. `home-web` is uploaded as a **Nitro server build**,
+and the difference is visible in three places:
+
+|                      | `identity` (and admin, jobs)                                                        | `home-web`                                                         |
+| -------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Build task           | `moon run <name>:package` → `cargo build --release --target wasm32-unknown-unknown` | `moon run home-web:package` → `nuxt build`, then verify `.output/` |
+| Uploaded entry point | The wasm module                                                                     | `.output/server/index.mjs`                                         |
+| Static assets        | `apps/<app>/web/dist/` → `ASSETS`                                                   | `.output/public/` → `ASSETS`                                       |
+| Config bindings      | D1, KV, queues, service bindings, rate limiters — per environment                   | **`ASSETS` only**, in every environment                            |
+
+The upload mechanism is identical: `wrangler versions upload --no-bundle`, then
+promotion by version id. Only the bytes differ. `--no-bundle` matters here for a
+second reason beyond the first three — for a Nitro build there is no
+`build.command` for wrangler to re-run, so re-bundling would bundle whatever was
+in `.output/` at that moment rather than the bytes the `package` task verified.
+
+### Its smoke contract
+
+The three Identity Workers are smoke tested by requiring `/health` and `/ready`
+to answer 200. `home-web` has neither route — it is a public site, not an Identity
+Worker, and it holds no readiness state to report. Its smoke contract is:
+
+1. `GET /` answers **200**;
+2. the HTML contains the landing page's stable markers (`<title>Ecoma</title>`
+   and `Fair-code labor OS`) — so that a 200 from an error page or a redirect
+   does not pass;
+3. one emitted `/_nuxt/` client asset is served, as a **nonempty JavaScript
+   response** — so that a version whose `.output/public` did not reach the asset
+   bundle fails rather than serving an inert page.
+
+That is the same three assertions `apps/home-web/tests/worker-smoke.test.mjs`
+makes against a local `wrangler dev --local` runtime. The remote check is the
+local check, not a weaker edition of it; if one changes, both change in the same
+commit.
+
+The health gate between canary steps works the same way but asks a smaller
+question — is the host answering — and for `home-web` it probes `/` rather than
+`/health`, for the same reason.
+
+### Its probe hosts are separate, deliberately
+
+Each deployable has its own repository variable for the host its smoke test
+probes:
+
+| Deployable       | Staging                                 | Production                                 |
+| ---------------- | --------------------------------------- | ------------------------------------------ |
+| Identity Workers | `SMOKE_PROBE_BASE_URL`                  | `SMOKE_PROBE_BASE_URL`                     |
+| `home-web`       | `HOME_WEB_STAGING_SMOKE_PROBE_BASE_URL` | `HOME_WEB_PRODUCTION_SMOKE_PROBE_BASE_URL` |
+
+Two separate sets rather than one, because a landing-page assertion made against
+Identity's host would report a green run for a public site it never requested.
+An absent `home-web` variable **fails the run**; it never falls back to the
+Identity host.
+
+**One thing this smoke test does not prove, and it is worth knowing which thing.**
+The smoke job probes the lane's **live host**, not a version-preview URL for the
+bytes it just uploaded. So it cannot distinguish a freshly uploaded version from
+whatever the host was serving a moment ago; what proves the upload is
+`wrangler versions upload` exiting zero and the version id resolving from its tag.
+What the smoke job _does_ prove is that the host is answering the contract this
+repository declares. The canary health gate is the step that observes new bytes,
+because a canary percentage routes a real share of requests to them.
 
 ## Per-project moon tasks
 
@@ -152,6 +228,35 @@ wrangler versions upload
   → 100% traffic        (fully automatic, no approval)
 ```
 
+`home-web` — **the same ladder as `identity`, two gates and all**:
+
+```
+wrangler versions upload
+  → smoke test: / plus a /_nuxt/ client asset
+  → 1%   traffic        (automatic)
+  → health gate         (automatic; probes /, aborts on a failed probe)
+  → 10%  traffic        (automatic — the policy limit)
+  ═══ HUMAN GATE 1 ═══
+  → 50%  traffic        (requires environment: production approval)
+  ═══ HUMAN GATE 2 ═══
+  → 100% traffic        (requires environment: production approval)
+```
+
+`home-web` gets the gated ladder despite holding no identity state, because
+ADR-0016 explicitly records that it covers constraint 19. The reasoning is worth
+stating rather than assuming: the gates are not about holding sensitive data, they
+are about **who the deployable speaks for**. `identity` is on the request path for
+every authentication decision, and `home-web` is the organisation's public face —
+the thing whose outage is the most visible and the hardest to distinguish from
+being down. Its blast radius is the public presence rather than the credential
+store, which is a different risk rather than no risk.
+
+This was a real decision, not a default. Treating `home-web` like
+`identity-admin` and `identity-jobs` — automatic, no gate — would have been
+consistent with those two and would have contradicted ADR-0016, which says
+otherwise. Where the two disagree, the ADR wins; see
+[../adr/0016-home-web-fourth-deployable.md](../adr/0016-home-web-fourth-deployable.md).
+
 **The two human gates, and what they are for.** The ladder is not ceremony; each
 gate exists because of a specific failure the percentage below it cannot catch.
 
@@ -178,28 +283,56 @@ ladder. Their smoke test is the gate. Adding a human approval to an automatic
 deploy of a worker with no public route buys nothing and costs a deployment that
 happens when somebody happens to be looking.
 
+**Why `home-web` does get them**, when the argument above would seem to exclude
+it: it is the opposite of `identity-jobs` on the public-route question. It serves
+the public internet, and a bad version at 100% is a broken public website that
+nobody in this repository has a health dashboard for. It is also the deployable
+most likely to be deployed on an ordinary afternoon, which is exactly the
+schedule pressure the 50% gate exists to survive.
+
 **The gate is a CI environment, not a convention.** In GitHub Actions this is an
 `environment:` key on the promoting job, configured to require reviewers. That
 matters because a convention is a decision somebody makes under time pressure,
-and an environment is a thing the runner refuses to pass. The identity
-promotion jobs for 50% and 100% carry `environment: production`; the jobs at 1%
-and 10% do not.
+and an environment is a thing the runner refuses to pass. The identity and
+`home-web` promotion jobs for 50% and 100% carry `environment: production`; the
+jobs at 1% and 10% do not.
 
 ## Environments
 
 Three environments, one per directory under `infra/cloudflare/`:
 
-| Environment | Directory                       | Deployed by                                                             | Approval                 |
-| ----------- | ------------------------------- | ----------------------------------------------------------------------- | ------------------------ |
-| development | `infra/cloudflare/development/` | `wrangler dev` locally                                                  | none                     |
-| staging     | `infra/cloudflare/staging/`     | Automatically, after a merge to the default branch (constraint 16)      | none                     |
-| production  | `infra/cloudflare/production/`  | Post-tag, automatic build/upload/smoke (constraint 18), then the ladder | Two gates, identity only |
+| Environment | Directory                       | Deployed by                                                             | Approval                             |
+| ----------- | ------------------------------- | ----------------------------------------------------------------------- | ------------------------------------ |
+| development | `infra/cloudflare/development/` | `wrangler dev` locally                                                  | none                                 |
+| staging     | `infra/cloudflare/staging/`     | Automatically, after a merge to the default branch (constraint 16)      | none                                 |
+| production  | `infra/cloudflare/production/`  | Post-tag, automatic build/upload/smoke (constraint 18), then the ladder | Two gates, `identity` and `home-web` |
+
+Each environment directory holds one subdirectory per deployable, and
+`home-web` is in all three alongside the Workers:
+
+```
+infra/cloudflare/
+├── development/  identity/  identity-admin/  identity-jobs/  home-web/
+├── staging/      identity/  identity-admin/  identity-jobs/  home-web/
+└── production/   identity/  identity-admin/  identity-jobs/  home-web/
+```
+
+Twelve configs in total. The script name inside each is not always the directory
+name — staging appends `-staging` (`identity-staging`, `identity-admin-staging`,
+`identity-jobs-staging`, `home-web-staging`) so that a staging deploy cannot
+overwrite production's default environment. `home-web`'s configs need no injected
+resource ids, because it declares no resource bindings; the other three declare
+D1, KV and queue ids, which the production lane substitutes into a generated copy
+of the config that is deleted in the same job.
 
 Staging deploys automatically after a merge; that is the constraint, and it is
 why a merge to the default branch is not a local event but the trigger for a
-deployment. The staging environment has its own database and its own KV; nothing
-is shared with production, because a shared staging database is a staging
-environment that can corrupt production data through a test.
+deployment. Staging has no canary ladder for any deployable — there are no end
+users to protect at 1%, and a ladder there would slow the rehearsal without
+making it more informative. The staging environment has its own database and its
+own KV; nothing is shared with production, because a shared staging database is a
+staging environment that can corrupt production data through a test. `home-web`
+has no database or KV at all, so this is a statement about the Identity Workers.
 
 ## What is deployed from what
 
@@ -219,6 +352,12 @@ build output feeds the Rust build output, and both are inside the one version. A
 version that serves a new API with an old UI, or an old API with a new UI, is a
 version that was built from the wrong directory, and the packaging is what makes
 that a packaging failure rather than a judgement call.
+
+`home-web` satisfies point 3 by the same mechanism and is not subject to
+constraint 8 at all, because there is no BFF in its release unit. Its three
+inputs reduce to two: the Nitro server build, and the `.output/public/` assets it
+serves through `ASSETS`. Its bindings are empty, and that is recorded as an
+empty set rather than as a list of things it declines to use.
 
 ## Version identity and traceability
 

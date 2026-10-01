@@ -5,8 +5,8 @@ one service that owns users, identities, sessions, authenticators and
 applications, and answers **"who is this request made by"** for every other
 Ecoma repository.
 
-It is three Cloudflare Workers, a Rust workspace, two web apps, and the gates
-that keep those three Workers apart.
+It is three Cloudflare Workers, a Rust workspace, two web apps, an independent
+public Nuxt/Nitro application, and the gates that keep those three Workers apart.
 
 ---
 
@@ -42,22 +42,27 @@ the phase that builds each deferred piece, with the exit condition for each.
 **If a document or a surface in this repository describes behaviour that does
 not exist, that is a bug in the document** — please report it.
 
-## The three deployables
+## The four deployables
 
-| Deployable       | Owns                                               | Must never                         |
-| ---------------- | -------------------------------------------------- | ---------------------------------- |
-| `identity`       | The identity database. The single source of truth. | Trust a second writer.             |
-| `identity-admin` | An operator console. No data of its own.           | Hold a database.                   |
-| `identity-jobs`  | Background side effects. No identity state.        | Decide anything about an identity. |
+| Deployable       | Owns                                                 | Must never                                                |
+| ---------------- | ---------------------------------------------------- | --------------------------------------------------------- |
+| `identity`       | The identity database. The single source of truth.   | Trust a second writer.                                    |
+| `identity-admin` | An operator console. No data of its own.             | Hold a database.                                          |
+| `identity-jobs`  | Background side effects. No identity state.          | Decide anything about an identity.                        |
+| `home-web`       | The public-facing web application. No Identity data. | Call Identity, hold a session, or import Identity crates. |
 
 The Admin Worker reaches identity **only** through a private service binding.
 The Jobs Worker consumes queue messages and performs effects; it does not
 evaluate identity rules and its crate cannot even name the types that would let
-it. Those two absences are the most load-bearing constraints in the repository
-and they are enforced mechanically, not by convention — see
+it. `home-web` is an independent Nuxt/Nitro application on Workers + Workers
+Assets; it has no Identity binding and no internal crate dependency.
+
+Those absences are the most load-bearing constraints in the repository and they
+are enforced mechanically, not by convention — see
 `tooling/scripts/check-architecture.mjs`.
 
-There is no fourth Worker without an ADR (`docs/adr/0002-three-deployables-and-no-more.md`).
+There is no fifth Worker without an ADR (`docs/adr/0002-three-deployables-and-no-more.md`,
+superseded on the count by `docs/adr/0016-home-web-fourth-deployable.md`).
 
 ## What identity is not
 
@@ -78,14 +83,17 @@ decision (`docs/adr/0005-no-business-authorization.md`).
 proto install          # moon, proto, cocogitto
 pnpm install
 
-# The three Workers, each in its own terminal.
+# The three Identity Workers, each in its own terminal.
 moon run identity:dev
 moon run identity-admin:dev
 moon run identity-jobs:dev
 
-# The two web apps.
+# The two Identity web apps.
 pnpm --filter identity-web dev
 pnpm --filter identity-admin-web dev
+
+# The public home-web application (independent, no Identity runtime).
+moon run home-web:dev
 ```
 
 Then read [`docs/getting-started/local-development.md`](docs/getting-started/local-development.md).

@@ -1,29 +1,34 @@
 # Worker architecture
 
-What this document is: the three Workers, the bindings each one holds, the
-routes each one serves, and the specific things each one may never do.
+What this document is: the Workers, the bindings each one holds, the routes each
+one serves, and the specific things each one may never do.
 
 What this document is **not**: a handler-by-handler description. None of the
 handlers exist yet.
 
 ## Status
 
-| Fact                                                                  | State                                                                                                                                                                                                         |
-| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Three deployables named `identity`, `identity-admin`, `identity-jobs` | `PLANNED` — decided; the configuration that proves it is `DEFERRED`                                                                                                                                           |
-| The binding set of each Worker                                        | `PLANNED` — decided; the `wrangler.jsonc` files are `DEFERRED`                                                                                                                                                |
-| The OIDC route table and its 501 contract                             | `IMPLEMENTED` — `identity-oidc`'s `Route` enum is real and tested                                                                                                                                             |
-| The health routes `/health` and `/ready`                              | `IMPLEMENTED` on all three. `/ready` answers **503** on `identity-jobs`, because it has no queue consumer — a probe that reads only the status line is the common case, and a 200 there would claim otherwise |     |
-| The `identity` Worker `lib.rs`                                        | `IMPLEMENTED` — the `fetch` entrypoint, the route dispatch, the two probes and the 501 surface                                                                                                                |
-| The `identity-admin` and `identity-jobs` Worker `lib.rs`              | `DEFERRED` — one-line placeholders                                                                                                                                                                            |
+| Fact                                                                           | State                                                                                                                                                                                                                          |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Three Identity deployables named `identity`, `identity-admin`, `identity-jobs` | `PLANNED` — decided; the configuration that proves it is `DEFERRED`                                                                                                                                                            |
+| The binding set of each Worker                                                 | `PLANNED` — decided; the `wrangler.jsonc` files are `DEFERRED`                                                                                                                                                                 |
+| The OIDC route table and its 501 contract                                      | `IMPLEMENTED` — `identity-oidc`'s `Route` enum is real and tested                                                                                                                                                              |
+| The health routes `/health` and `/ready`                                       | `IMPLEMENTED` on all three. `/ready` answers **503** on `identity-jobs`, because it has no queue consumer — a probe that reads only the status line is the common case, and a 200 there would claim otherwise                  |     |
+| The `identity` Worker `lib.rs`                                                 | `IMPLEMENTED` — the `fetch` entrypoint, the route dispatch, the two probes and the 501 surface                                                                                                                                 |
+| The `identity-admin` and `identity-jobs` Worker `lib.rs`                       | `DEFERRED` — one-line placeholders                                                                                                                                                                                             |
+| The fourth deployable `home-web` and its `ASSETS`-only binding set             | `SCAFFOLDED` — the application is written, builds, and serves its landing page under a local Worker runtime. **Not deployed**: no Cloudflare upload, staging or production deployment, release, promotion, or rollback has run |
 
 The route table below is `IMPLEMENTED` as **data**, and the thing that dispatches
 on it is `IMPLEMENTED` on `identity` and `DEFERRED` on the other two.
 
-## The three deployables
+## The three Identity deployables
 
-Constraint 7 of the founding list: **exactly three deployables**. A fourth
-Worker requires an ADR and proof it cannot live in one of the three.
+Constraint 7 of the founding list: **exactly three Identity Worker deployables**.
+A fourth Identity Worker requires an ADR and proof it cannot live in one of the
+three. ADR-0016 added a fourth deployable to this repository, `home-web`, and
+explicitly noted that it is **not** a fourth Identity Worker — it is described in
+[the next section](#the-fourth-deployable-home-web) and it holds nothing that
+appears in this table.
 
 | Deployable       | Crate                        | Role                                                                                                                              | Public?                                              |
 | ---------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
@@ -33,10 +38,12 @@ Worker requires an ADR and proof it cannot live in one of the three.
 
 The moon project IDs match the deployable names, not the language: in
 `.moon/workspace.yml`, the three deployables are registered as `identity`,
-`identity-admin` and `identity-jobs`. A deployable is called `identity`
+`identity-admin` and `identity-jobs`, and `home-web` is registered alongside them
+under its own name. A deployable is called `identity`
 everywhere that matters — moon project id, wrangler worker name, release-please
 component, git tag, Cloudflare version tag — so that a tag, a version and a
-wrangler name can be compared by eye.
+wrangler name can be compared by eye. The same rule holds for `home-web`, whose
+component, tag family and production script name are all `home-web`.
 
 They used to be registered under their crate names (`identity-worker` and
 friends) with the deployable names declared as aliases in a `projects:` block in
@@ -44,6 +51,30 @@ the root `moon.yml`. Moon 2.5.6 has no project-alias mechanism and silently
 ignored that block, so nothing addressed a deployable by its own name and every
 staging deploy failed before its first upload. `docs/operations/deployment-model.md`
 records the correction.
+
+## The fourth deployable: `home-web`
+
+| Deployable | Crate                     | Role                                                                                                                                                                                      | Public?                                      |
+| ---------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `home-web` | **None — it is not Rust** | The organisation's public-facing web application: Nuxt 4 / Nitro compiled to a Cloudflare Worker with a Workers Assets binding. Holds no identity state and depends on no internal crate. | Yes — the public marketing site, prerendered |
+
+`home-web` is deliberately **not** a fourth Identity Worker, and the distinction
+is worth being precise about, because `identity` and `identity-admin` each ship a
+web app too and the two situations look alike:
+
+- `identity` and `identity-admin` are Rust Workers that own (or deliberately do
+  not own) identity state, each serving its own frontend from its own `ASSETS`
+  binding as part of one release unit (ADR-0015). Their web apps are _inside_ the
+  Identity plane.
+- `home-web` **is** the frontend. It is not a composition root, it has no
+  `apps/home-web/worker/` directory, and there is no Rust crate behind it. It has
+  no release unit with any Worker.
+
+There is no `build.command` running `worker-build` for it, no wasm target, and no
+`cargo` step in its deploy path — its release artefact is the `.output/` tree
+that `home-web:package` builds and verifies. Its production deployment follows
+the gated canary ladder that `identity` follows (ADR-0016 covers constraint 19);
+its staging deployment is automatic, like every other deployable.
 
 ## The binding table
 
@@ -69,6 +100,29 @@ Note also what the Jobs Worker has **no** `RATE_LIMITER`. It is a queue
 consumer, not an endpoint that a browser can reach, so it is not a rate-limit
 target; its protection is the queue's own at-least-once delivery and the
 consumer's idempotency check, neither of which is implemented.
+
+### `home-web`'s bindings, which are a different kind of claim
+
+`home-web` has no row in that table, and adding one would be the wrong shape. It
+holds exactly one binding, and it is not on any axis the table measures:
+
+| Binding  | `home-web`             | What it is                                                                       |
+| -------- | ---------------------- | -------------------------------------------------------------------------------- |
+| `ASSETS` | **yes — nothing else** | The prerendered site and its `/_nuxt/` client assets, served by the Nitro Worker |
+
+There is no `—`, because there is nothing to elide: `home-web` has no `IDENTITY_DB`
+row to dash, no `IDENTITY` service-binding row to dash, no `JOBS_KV` row. Its three
+environment configs under `infra/cloudflare/{development,staging,production}/home-web/`
+declare `ASSETS` and nothing else. The architecture gate refuses an Identity
+binding there, which is what makes the absence a property of the system rather
+than a fact about today's files — see
+[trust-boundaries.md](trust-boundaries.md) §10.
+
+`home-web` has no `/health` and no `/ready` either, so the route table below does
+not describe it. Its route is `/`, prerendered at build time; its deploy smoke
+contract is that `/` answers 200 with the rendered landing page and one emitted
+`/_nuxt/` client asset, asserted by `apps/home-web/tests/worker-smoke.test.mjs`
+locally and by the deploy workflow remotely.
 
 ## The routes the Identity Worker serves
 
@@ -217,6 +271,11 @@ This is a real cost, and it is paid on purpose. Three independent routers mean
 three places for a security fix to land in two of them. The shared adapter
 crate is why a fix lands in all three or none.
 
+`home-web` is not a participant in any of this. It has no crate, no router, and
+no adapter — which is the practical reason it cannot drift from these three,
+rather than any enforcement that keeps it in step. That is a benefit of having no
+Identity coupling at all, not a fourth copy of the pattern.
+
 ## Related
 
 - [trust-boundaries.md](trust-boundaries.md) — where the lines are.
@@ -224,4 +283,5 @@ crate is why a fix lands in all three or none.
   depend on.
 - [admin-isolation.md](admin-isolation.md), [jobs-isolation.md](jobs-isolation.md)
   — the two negative boundaries in full.
-- [overview.md](overview.md) — the request paths through all three.
+- [overview.md](overview.md) — the request paths through all three Identity
+  deployables, and the fourth deployable outside the plane.

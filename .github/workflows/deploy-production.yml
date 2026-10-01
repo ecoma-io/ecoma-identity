@@ -1,4 +1,4 @@
-# PRODUCTION. On a release tag, for all three deployables.
+# PRODUCTION. On a release tag, for all four deployables.
 #
 # This is the file the wrangler configs at `infra/cloudflare/production/*` name
 # as the thing that injects their placeholder ids, and it is the only workflow in
@@ -25,11 +25,11 @@
 # For `identity-admin` and `identity-jobs`: these bytes are serving 100% of
 # production traffic.
 #
-# For `identity`: the two human gates at 50% and at 100% have passed, in that
-# order, by two approvals on the `production` environment.
+# For `identity` and `home-web`: the two human gates at 50% and at 100% have
+# passed, in that order, by two approvals on the `production` environment.
 #
-# For all three: NONE of this establishes that authentication works. At platform
-# bootstrap the three Worker composition roots are one-line placeholders
+# For all four: NONE of this establishes that authentication works. At platform
+# bootstrap the three Identity Worker composition roots are one-line placeholders
 # (`docs/README.md`) and every declared protocol route answers 501. A green run
 # of this file means "these bytes are serving", and the smoke test in
 # `deploy-worker.yml` will FAIL until the Workers are implemented — which is the
@@ -51,19 +51,20 @@
 
 on:
   # Release Please's tag. `identity-v0.1.0` and `identity-admin-v0.1.0` arrive as
-  # SEPARATE pushes and each triggers a run — the three components release
+  # SEPARATE pushes and each triggers a run — the four components release
   # independently (`release-please-config.json` uses
   # `separate-pull-requests: true`), and `identity-jobs` has no relationship to
   # whether `identity` shipped today.
   #
-  # The `identity-*` prefix is why the three tags do not fight: the pattern is
+  # The `identity-*` prefix is why the three Identity tags do not fight: the pattern is
   # matched per component below, and each job ignores a tag that is not its
-  # own. Without that, every tag would run all three deploys.
+  # own. `home-web-v*` is a separate family for the independent public deployable.
   push:
     tags:
       - "identity-v*"
       - "identity-admin-v*"
       - "identity-jobs-v*"
+      - "home-web-v*"
   # Deploy a specific component at a specific existing tag, without waiting for
   # the next release. This is the recovery path when a tag exists but its
   # deployable never reached production, and it is deliberately the ONLY way to
@@ -73,7 +74,7 @@ on:
   workflow_dispatch:
     inputs:
       worker:
-        description: "Component to deploy (identity | identity-admin | identity-jobs)"
+        description: "Component to deploy (identity | identity-admin | identity-jobs | home-web)"
         required: true
         type: string
       tag:
@@ -240,6 +241,47 @@ jobs:
           "PRODUCTION_IDENTITY_QUEUE_DLQ": "${{ vars.PRODUCTION_IDENTITY_QUEUE_DLQ }}",
           "PRODUCTION_JOBS_KV_NAMESPACE_ID": "${{ vars.PRODUCTION_JOBS_KV_NAMESPACE_ID }}"
         }
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.PRODUCTION_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.PRODUCTION_CLOUDFLARE_ACCOUNT_ID }}
+
+  # ---------------------------------------------------------------------------
+  # `home-web` — the public web application. ADR-0016 explicitly covers SC-19,
+  # so production follows the same gated ladder as `identity`: 1% → 10% → 50%
+  # (approval) → 100% (approval). It holds no Identity data, no session, no
+  # service binding, but it is a public surface whose blast radius includes
+  # the organisation's public presence.
+  # ---------------------------------------------------------------------------
+  home-web:
+    name: Production — home-web (canary ladder, two human gates)
+    if: >-
+      startsWith(github.ref, 'refs/tags/home-web-v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.worker == 'home-web')
+    uses: ./.github/workflows/deploy-worker.yml
+    permissions:
+      contents: read
+    with:
+      worker: home-web
+      worker-name: home-web
+      environment: production
+      tag: ${{ inputs.tag || github.ref_name }}
+      lane: production
+      # Same ladder as identity: ADR-0016 covers SC-19.
+      canary: "[1,10]"
+      policy-limit-percentage: 50
+      final-percentage: 100
+      requires-approval: true
+      # home-web has no Identity bindings, no D1, no KV, no queues.
+      # Empty injections is the honest value.
+      injections: "{}"
+      # The production public host. SEPARATE from SMOKE_PROBE_BASE_URL, which is
+      # the Identity production host. This one is load-bearing twice over here,
+      # because production is the only lane that walks the canary ladder: it
+      # supplies both the smoke job's landing-page host and the health gate's
+      # liveness route between the 1% and 10% promotions. Unset, the ladder
+      # refuses to start rather than gating one deployment's traffic on
+      # another's host.
+      home-smoke-base-url: ${{ vars.HOME_WEB_PRODUCTION_SMOKE_PROBE_BASE_URL }}
     secrets:
       CLOUDFLARE_API_TOKEN: ${{ secrets.PRODUCTION_CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.PRODUCTION_CLOUDFLARE_ACCOUNT_ID }}

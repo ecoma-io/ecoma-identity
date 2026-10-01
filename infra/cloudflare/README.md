@@ -12,7 +12,7 @@ file deliberately restates none of them.
 
 | Fact                                                                      | State                                                                                    |
 | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Nine wrangler configs, three environments by three Workers                | `IMPLEMENTED` — all nine exist, and `pnpm arch` judges their binding matrices            |
+| Twelve wrangler configs, three environments by four deployables           | `IMPLEMENTED` — all twelve exist, and `pnpm arch` judges their binding matrices          |
 | Every config parses and passes wrangler's own validation                  | `IMPLEMENTED` — `moon run :wrangler-validate` compiles each one in CI against a dry run  |
 | Staging deploys automatically on merge to `main`                          | `IMPLEMENTED` — `.github/workflows/deploy.yml`                                           |
 | Production deploys on a release tag, `identity` through a two-gate ladder | `IMPLEMENTED` — `.github/workflows/deploy-production.yml`                                |
@@ -24,18 +24,18 @@ file deliberately restates none of them.
 **No environment has ever been deployed.** Everything below describes a shape
 that exists and a process that would run, not a service that is running.
 
-## The nine configs
+## The twelve configs
 
-Three environments by three Workers, and the directory layout is what the deploy
+Three environments by four deployables, and the directory layout is what the deploy
 workflows address — `deploy-worker.yml` builds its path from
 `infra/cloudflare/<environment>/<worker>/wrangler.jsonc`, so renaming a
 directory breaks both workflows at once.
 
-| Environment    | `identity`         | `identity-admin`         | `identity-jobs`         |
-| -------------- | ------------------ | ------------------------ | ----------------------- |
-| `development/` | `identity`         | `identity-admin`         | `identity-jobs`         |
-| `staging/`     | `identity-staging` | `identity-admin-staging` | `identity-jobs-staging` |
-| `production/`  | `identity`         | `identity-admin`         | `identity-jobs`         |
+| Environment    | `identity`         | `identity-admin`         | `identity-jobs`         | `home-web`         |
+| -------------- | ------------------ | ------------------------ | ----------------------- | ------------------ |
+| `development/` | `identity`         | `identity-admin`         | `identity-jobs`         | `home-web`         |
+| `staging/`     | `identity-staging` | `identity-admin-staging` | `identity-jobs-staging` | `home-web-staging` |
+| `production/`  | `identity`         | `identity-admin`         | `identity-jobs`         | `home-web`         |
 
 **The staging suffix is a safety property, not a naming convention.** Staging is
 a separate Cloudflare script rather than a separate environment of the
@@ -81,7 +81,8 @@ owner, fix the other in the same commit" rule in `AGENTS.md`.
 
 ## How the production placeholders are injected
 
-The nine placeholder tokens that appear in the production configs:
+The nine placeholder tokens that appear in the Identity production configs
+(`home-web` has none — it holds no database, no KV, no queues):
 
 | Token                                        | Config                                                  |
 | -------------------------------------------- | ------------------------------------------------------- |
@@ -134,12 +135,12 @@ control, and this file will not claim otherwise.
 
 ## What each deploy workflow does with these files
 
-| Workflow                                                               | Trigger                                   | Configs it uses                           | Injects ids                       | Approval                                       |
-| ---------------------------------------------------------------------- | ----------------------------------------- | ----------------------------------------- | --------------------------------- | ---------------------------------------------- |
-| [deploy.yml](../../.github/workflows/deploy.yml)                       | merge to `main`                           | all three `staging/`                      | no — ids are in the tracked files | none, anywhere                                 |
-| [deploy-production.yml](../../.github/workflows/deploy-production.yml) | a release tag, or dispatch with a tag     | all three `production/`                   | yes — into a generated copy       | two gates on `identity`; none on admin or jobs |
-| [rollback.yml](../../.github/workflows/rollback.yml)                   | dispatch only, never automatic            | **none — it reads no config at all**      | no                                | n/a — a human always                           |
-| [ci.yml](../../.github/workflows/ci.yml)                               | pull request, merge queue, push to `main` | all nine, via `wrangler deploy --dry-run` | no                                | n/a — CI never deploys                         |
+| Workflow                                                               | Trigger                                   | Configs it uses                             | Injects ids                       | Approval                                                      |
+| ---------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------- | --------------------------------- | ------------------------------------------------------------- |
+| [deploy.yml](../../.github/workflows/deploy.yml)                       | merge to `main`                           | all four `staging/`                         | no — ids are in the tracked files | two gates on `identity` and `home-web`; none on admin or jobs |
+| [deploy-production.yml](../../.github/workflows/deploy-production.yml) | a release tag, or dispatch with a tag     | all four `production/`                      | yes — into a generated copy       | two gates on `identity` and `home-web`; none on admin or jobs |
+| [rollback.yml](../../.github/workflows/rollback.yml)                   | dispatch only, never automatic            | **none — it reads no config at all**        | no                                | n/a — a human always                                          |
+| [ci.yml](../../.github/workflows/ci.yml)                               | pull request, merge queue, push to `main` | all twelve, via `wrangler deploy --dry-run` | no                                | n/a — CI never deploys                                        |
 
 The CI row is the one that is easy to misread: `wrangler-validate` compiles each
 Worker against its **development** config on every pull request. It proves a
@@ -153,13 +154,14 @@ existing version id, which is a routing rule over a Worker name — so it needs
 which means no source tree exists on its runner and a build cannot happen there
 even by accident (ADR-0013).
 
-## Adding an environment or a Worker
+## Adding an environment or a deployable
 
 Neither is a small change and neither is a config edit:
 
-- **A fourth Worker** needs an ADR before any code lands
-  ([ADR-0002](../../docs/adr/0002-three-deployables-and-no-more.md)), because
-  the count of three is enforced by `pnpm arch`.
+- **A fifth deployable** needs an ADR before any code lands
+  ([ADR-0002](../../docs/adr/0002-three-deployables-and-no-more.md) and
+  [ADR-0016](../../docs/adr/0016-home-web-fourth-deployable.md)), because the
+  count of four is enforced by `pnpm arch`.
 - **A fourth environment** needs its own row in every table in this file, its own
   `vars` block, and an answer to "which Cloudflare account" — staging and
   production must be different accounts or visibly different ids, because a
@@ -169,12 +171,12 @@ Neither is a small change and neither is a config edit:
 
 - [docs/operations/deployment-model.md](../../docs/operations/deployment-model.md)
   — the Version / Deployment / Promotion model and the ladder. The owner.
-- [docs/operations/rollback.md](../../docs/operations/rollback.md) — the three
+- [docs/operations/rollback.md](../../docs/operations/rollback.md) — the four
   rollback paths, and why none of them rebuilds.
 - [docs/operations/release-process.md](../../docs/operations/release-process.md)
   — who releases and who deploys, and why those are different people.
 - [docs/architecture/worker-architecture.md](../../docs/architecture/worker-architecture.md)
   — which bindings each Worker may hold. `boundary-1-admin-d1` and
-  `boundary-2-jobs-isolation` judge these nine files.
+  `boundary-2-jobs-isolation` judge these twelve files.
 - [ADR-0013](../../docs/adr/0013-immutable-worker-versions.md) — upload is not
   promotion, which is why these files are addressed by version id.

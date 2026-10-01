@@ -1,0 +1,25 @@
+// Wrangler configuration for home-web.
+//
+// This is the development configuration. Staging and production configs live
+// under infra/cloudflare/{staging,production}/home-web/wrangler.jsonc and are
+// the ones the deploy workflow actually uses. This file is for local
+// development (`nuxt dev` uses Nitro's built-in dev server, but `nuxt preview`
+// and production builds read from here).
+//
+// See docs/adr/0016-home-web-fourth-deployable.md for what home-web must never
+// hold: no IDENTITY_DB, no Identity service bindings, no Identity crate
+// dependency.
+
+{
+  "name": "home-web",
+  "main": ".output/server/index.mjs",
+  "compatibility_date": "2024-09-19",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Workers Assets — Nitro's cloudflare-module preset configures this
+  // automatically. The assets binding is named ASSETS and points at
+  // .output/public/ at build time.
+  "assets": {
+    "binding": "ASSETS",
+  },
+}

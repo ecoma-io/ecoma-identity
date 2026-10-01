@@ -346,6 +346,13 @@ jobs:
       - name: Build the web apps (their dist/ is inside the version)
         run: pnpm --filter @ecoma-io/identity-web --filter @ecoma-io/identity-admin-web run build
 
+      # Build home-web's Nuxt/Nitro artifact before validating its wrangler config.
+      # home-web is not a Rust Worker; it uses `moon run home-web:package` which
+      # builds the Nitro server and verifies the output. This runs after the SPA
+      # builds because it is an independent deployable with no Worker dependency.
+      - name: Build home-web (Nuxt/Nitro application)
+        run: pnpm exec moon run home-web:package
+
       - name: Validate every wrangler config (real dry-run, uploads nothing)
         run: pnpm exec moon run :wrangler-validate
 

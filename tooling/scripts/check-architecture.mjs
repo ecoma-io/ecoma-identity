@@ -51,14 +51,26 @@ const EXIT_USAGE = 64;
  * Vocabulary. These names are the law's names, not this file's.
  * ------------------------------------------------------------------ */
 
-/** The three deployables. §7: a fourth requires an ADR and proof. */
-const DEPLOYABLES = ["identity", "identity-admin", "identity-jobs"];
+/**
+ * The four deployables. ADR-0016 added home-web as a fourth, independent
+ * deployable — the public-facing web application running Nuxt/Nitro on
+ * Cloudflare Workers + Workers Assets.
+ */
+const DEPLOYABLES = ["identity", "identity-admin", "identity-jobs", "home-web"];
 
-/** The `wrangler.jsonc` `name` of the deployable an `apps/<dir>` directory is. */
+/**
+ * The `wrangler.jsonc` `name` of the deployable an `apps/<dir>` directory is.
+ *
+ * `home-web` is NOT a Rust Worker — it has no `worker/Cargo.toml`. It is a
+ * Nuxt/Nitro application whose runtime is Cloudflare Workers + Workers Assets.
+ * The architecture gate recognizes it by its directory structure and its
+ * wrangler config, not by a Cargo manifest.
+ */
 const WORKER_NAMES = {
   identity: "identity",
   "identity-admin": "identity-admin",
   "identity-jobs": "identity-jobs",
+  "home-web": "home-web",
 };
 
 /** §2/§3: the D1 binding name. Only the Identity Worker may hold it. */
@@ -156,6 +168,30 @@ const FRONTEND_PACKAGES = [
   "vitest",
   "happy-dom",
   "jsdom",
+];
+
+/** ADR-0016: the public site must not name an Identity implementation. */
+const HOME_WEB_FORBIDDEN_IDENTIFIERS = [
+  "identity-domain",
+  "identity_domain",
+  "identity-application",
+  "identity_application",
+  "identity-oidc",
+  "identity_oidc",
+  "identity-security",
+  "identity_security",
+  "identity-cloudflare",
+  "identity_cloudflare",
+  "identity-testkit",
+  "identity_testkit",
+  "identity-admin",
+  "identity_admin",
+  "identity-jobs",
+  "identity_jobs",
+  "IDENTITY",
+  "IDENTITY_DB",
+  "IDENTITY_ADMIN",
+  "IDENTITY_JOBS",
 ];
 
 /**
@@ -1388,36 +1424,37 @@ const CHECKS = [
   },
   {
     id: "boundary-4-no-frontend-in-backend",
-    title: "Nothing in the backend imports or names a frontend package",
+    title:
+      "Backends do not import frontends, and home-web does not import Identity",
     constraint:
-      "§8 and the brief's check 4 — the BFF behind a frontend is one release unit, not a shared library; crates/** and apps/*/worker/** may not import from apps/*/web/** or name a frontend package",
+      "§8 — crates/** and apps/*/worker/** may not import from apps/*/web/** or name a frontend package; ADR-0016 — apps/home-web/** may not import or name an Identity crate or deployable",
     catches:
-      "an import specifier resolving into an apps/*/web/ directory, an import of another app's web by relative path, and the name of a known frontend package in a source file, a manifest or a CSS/link tag",
+      "an import specifier resolving into an apps/*/web/ directory, the name of a known frontend package in backend source, and an Identity crate or deployable import or package dependency in apps/home-web",
     doesNotCatch:
-      "a frontend package this script has not heard of — the name list is the small, explicit one in FRONTEND_PACKAGES, and an unlisted Vue-ecosystem package is a gap in that list, not a false negative in the mechanism",
+      "a frontend package this script has not heard of, an Identity dependency hidden behind a generated artifact that contains no Identity identifier, or a runtime request to an undeclared URL; the explicit vocabulary is FRONTEND_PACKAGES and HOME_WEB_FORBIDDEN_IDENTIFIERS, and a new spelling must extend it rather than be assumed covered",
     run: checkBoundary4NoFrontend,
   },
   {
     id: "boundary-5-worker-registration",
-    title: "Every Worker project is registered in all four places",
+    title: "Every deployable is registered in its required control planes",
     constraint:
-      "§7 — exactly three deployables, a fourth requires an ADR and proof; brief check 5 — a new apps/*/worker must appear in .moon/workspace.yml, the root Cargo.toml members, infra/cloudflare/ and release-please-config.json",
+      "ADR-0016 — identity, identity-admin and identity-jobs register in Moon, Cargo, infra and Release Please; home-web registers in Moon, infra and Release Please because Nuxt/Nitro, not Cargo, is its runtime",
     catches:
-      "an apps/*/worker/ with a Cargo.toml that any one of those four does not mention; a per-project moon.yml missing, or naming a different Worker than the directory implies; and a wrangler config whose declared name matches no known Worker",
+      "a Rust Worker missing its Cargo, Moon, infra or Release Please registration; home-web missing its Moon, infra or Release Please registration; a required project moon.yml missing; or a wrangler config whose declared name matches no deployable",
     doesNotCatch:
-      "a Worker directory with no Cargo.toml at all — a Worker is defined here as a `worker/Cargo.toml`, and a `worker/` directory holding only a `wrangler.jsonc` is reported as an untracked project by `deploymentable-count` instead",
+      "a non-Rust deployable other than the ADR-0016 home-web shape — deploymentable-count rejects that unknown shape rather than guessing its required registrations",
     run: checkBoundary5WorkerRegistration,
   },
   {
     id: "deploymentable-count",
-    title: "Exactly three deployables",
+    title: "Exactly four deployables",
     constraint:
-      "§7 — exactly three deployables: identity, identity-admin, identity-jobs",
+      "ADR-0016 — exactly four deployables: identity, identity-admin, identity-jobs and home-web",
     catches:
-      "a fourth apps/*/worker/ project, a missing one, and a directory under apps/ that is neither a deployable nor a frontend (the operator frontend, `apps/identity-admin/web`, is a known non-deployable; anything else unrecognised fails)",
+      "a fifth apps/*/worker/ project, a missing required deployable, a malformed home-web shape, and a directory under apps/ that is neither a deployable nor a frontend",
     doesNotCatch:
-      "a second Worker inside a known deployable's directory (an `apps/identity/other-worker/`), which is a path this script does not walk — a `worker/Cargo.toml` is a Worker, and that one has no `worker/` in its path",
-    run: checkExactlyThreeDeployables,
+      "a second Worker nested inside a known deployable directory (for example apps/identity/other-worker/), which is not the apps/<name>/worker/Cargo.toml shape this check defines as a Rust Worker",
+    run: checkExactlyFourDeployables,
   },
   {
     id: "monorepo-self-contained",
@@ -1826,6 +1863,7 @@ function checkBoundary4NoFrontend(ctx) {
       exempt: TESTKIT_PATH,
     })),
   ];
+  const homeWebDir = path.join(REPO_ROOT, "apps", "home-web");
   let importCount = 0;
   const reported = new Set();
   /**
@@ -1914,6 +1952,113 @@ function checkBoundary4NoFrontend(ctx) {
         );
       }
     }
+  }
+  if (isDirectory(homeWebDir)) {
+    // ADR-0016 is enforced at executable dependency surfaces only. Markdown and
+    // comments may — and should — name the things this app must not hold; a
+    // guard that fails on that documentation teaches people to erase the law.
+    // Imports cover Nuxt/Vue source, while manifests and Wrangler configs cover
+    // package and binding declarations. The latter are read as JSONC so a bare
+    // word in a description cannot stand in for a real capability.
+    const homeWebImportExtensions = new Set([
+      ".ts",
+      ".tsx",
+      ".mts",
+      ".cts",
+      ".js",
+      ".mjs",
+      ".cjs",
+      ".vue",
+    ]);
+    let homeWebSourceFiles = 0;
+    let homeWebImportSpecifiers = 0;
+    for (const file of walkFiles(homeWebDir)) {
+      if (!homeWebImportExtensions.has(path.extname(file))) continue;
+      const text = readTextOrNull(file);
+      if (text === null) continue;
+      homeWebSourceFiles += 1;
+      for (const match of importSpecifiers(text)) {
+        homeWebImportSpecifiers += 1;
+        const forbidden = HOME_WEB_FORBIDDEN_IDENTIFIERS.find(
+          (name) => match.value === name || match.value.startsWith(`${name}/`),
+        );
+        if (!forbidden) continue;
+        report.violation(
+          "boundary-4-no-frontend-in-backend",
+          file,
+          match.line,
+          `home-web imports Identity implementation "${match.value}"`,
+          "ADR-0016 — apps/home-web may not import an Identity crate or deployable",
+          "Remove the import. home-web is a public application with no Identity state, service binding or internal crate dependency; it may link to an Identity URL, but it must not import or invoke Identity implementation details.",
+        );
+      }
+    }
+
+    const packageFile = path.join(homeWebDir, "package.json");
+    const packageJson = readJsonc(packageFile);
+    if (!packageJson.ok) {
+      report.violation(
+        "boundary-4-no-frontend-in-backend",
+        packageFile,
+        1,
+        `apps/home-web/package.json ${packageJson.error}`,
+        "ADR-0016 — home-web dependencies must be mechanically readable",
+        "Use valid JSON. The public site's dependency boundary cannot be judged from an unreadable manifest.",
+      );
+    } else {
+      const sections = [
+        "dependencies",
+        "devDependencies",
+        "peerDependencies",
+        "optionalDependencies",
+      ];
+      for (const section of sections) {
+        const dependencies = packageJson.data?.[section];
+        if (dependencies === undefined) continue;
+        if (
+          dependencies === null ||
+          typeof dependencies !== "object" ||
+          Array.isArray(dependencies)
+        ) {
+          report.violation(
+            "boundary-4-no-frontend-in-backend",
+            packageFile,
+            lineOf(packageJson.text, `"${section}"`) ?? 1,
+            `apps/home-web/package.json has a non-object ${section} declaration`,
+            "ADR-0016 — home-web dependencies must be mechanically readable",
+            `Declare ${section} as an object, or remove it. A malformed dependency section cannot be checked for an Identity package.`,
+          );
+          continue;
+        }
+        for (const dependency of Object.keys(dependencies)) {
+          const forbidden = HOME_WEB_FORBIDDEN_IDENTIFIERS.find(
+            (name) => dependency === name || dependency.startsWith(`${name}/`),
+          );
+          if (!forbidden) continue;
+          report.violation(
+            "boundary-4-no-frontend-in-backend",
+            packageFile,
+            lineOf(packageJson.text, `"${dependency}"`) ?? 1,
+            `apps/home-web/package.json declares Identity dependency "${dependency}" in ${section}`,
+            "ADR-0016 — home-web may not depend on an Identity crate or deployable",
+            "Remove the dependency. A public site may link to Identity's public URL, but it does not install an Identity implementation package.",
+          );
+        }
+      }
+    }
+    evidence.push(
+      `home-web executable source files scanned: ${homeWebSourceFiles}`,
+    );
+    evidence.push(
+      `home-web import specifiers scanned: ${homeWebImportSpecifiers}`,
+    );
+  } else {
+    report.skip("boundary-4-no-frontend-in-backend", {
+      check: "boundary-4-no-frontend-in-backend",
+      file: homeWebDir,
+      reason:
+        "apps/home-web/ does not exist, so the ADR-0016 isolation half did not run",
+    });
   }
   evidence.push(`import specifiers resolved: ${importCount}`);
   return { skipped: false, evidence };
@@ -2126,17 +2271,200 @@ function checkBoundary5WorkerRegistration(ctx) {
     checkReleasePleaseRegistration(worker);
   }
 
-  // A wrangler config naming a Worker nobody declared: a deployable that is
-  // registered in exactly one of the four places, which is the worst state.
+  // home-web is Nuxt/Nitro rather than Cargo, so it has no Cargo registration.
+  // Its required registrations are Moon, its own manifest, every environment's
+  // Wrangler config and Release Please. It also has no binding surface beyond
+  // Workers Assets: a public site does not acquire state by becoming a fourth
+  // variation of an Identity Worker.
+  const homeWeb = ctx.homeWeb;
+  if (!homeWeb) {
+    report.violation(
+      "boundary-5-worker-registration",
+      path.join(REPO_ROOT, "apps", "home-web"),
+      null,
+      'ADR-0016 deployable "home-web" is absent from apps/home-web/',
+      "ADR-0016 — home-web is an independent fourth deployable",
+      "Create the Nuxt/Nitro application under apps/home-web/, or remove ADR-0016 through a new decision. The deployable count cannot drift silently.",
+    );
+  } else {
+    if (moonProjects.status !== "ok") {
+      report.skip("boundary-5-worker-registration", {
+        check: "boundary-5-worker-registration",
+        file: ".moon/workspace.yml",
+        reason: moonProjects.reason,
+      });
+    } else if (!moonProjects.projects.has("home-web")) {
+      report.violation(
+        "boundary-5-worker-registration",
+        path.join(REPO_ROOT, ".moon", "workspace.yml"),
+        null,
+        "apps/home-web is not mapped as the home-web project in .moon/workspace.yml",
+        "ADR-0016 — home-web is an independent Moon project",
+        "Add `home-web: apps/home-web` to .moon/workspace.yml. Without it moon ci cannot run the public site's real checks.",
+      );
+    } else {
+      const registration = moonProjects.projects.get("home-web");
+      if (registration.root !== "apps/home-web") {
+        report.violation(
+          "boundary-5-worker-registration",
+          path.join(REPO_ROOT, ".moon", "workspace.yml"),
+          null,
+          `home-web is mapped to ${registration.root}, not apps/home-web`,
+          "ADR-0016 — the public site's Moon project is rooted at apps/home-web",
+          "Point the home-web project at apps/home-web. A project id that resolves to a different directory is a deployable task graph judging the wrong source.",
+        );
+      } else if (!registration.tags.includes("home-web")) {
+        report.violation(
+          "boundary-5-worker-registration",
+          path.join(homeWeb.dir, "moon.yml"),
+          null,
+          "home-web has no home-web Moon tag",
+          "AGENTS.md — every module has tags that module-boundaries.config.mjs judges",
+          "Declare `tags:` with `- home-web` in apps/home-web/moon.yml. A project without its policy tag has no enforceable dependency law.",
+        );
+      } else {
+        evidence.push("home-web: mapped and tagged in Moon");
+      }
+    }
+
+    const projectMoon = path.join(homeWeb.dir, "moon.yml");
+    if (!exists(projectMoon)) {
+      report.violation(
+        "boundary-5-worker-registration",
+        homeWeb.dir,
+        null,
+        "apps/home-web has no moon.yml",
+        "ADR-0016 — home-web has an independent Moon task graph",
+        "Create apps/home-web/moon.yml with real format, lint, typecheck, test, build, package and wrangler-validate tasks.",
+      );
+    }
+
+    const config = ctx.wranglerFor("home-web");
+    if (!config || !config.path) {
+      report.violation(
+        "boundary-5-worker-registration",
+        infraDir,
+        null,
+        "no wrangler config found for home-web under infra/cloudflare/",
+        "ADR-0016 — home-web deploys through Cloudflare Workers + Workers Assets",
+        "Add development, staging and production home-web wrangler.jsonc files. An independent deployable without its environment configs cannot be uploaded or promoted.",
+      );
+    } else {
+      for (const env of ENVIRONMENTS) {
+        const matches = config.all.filter((one) => one.env === env);
+        if (matches.length === 0) {
+          report.violation(
+            "boundary-5-worker-registration",
+            infraDir,
+            null,
+            `home-web has no ${env} wrangler config`,
+            "ADR-0016 — every home-web environment is an independent deploy target",
+            `Add infra/cloudflare/${env}/home-web/wrangler.jsonc. A missing environment config is not an implicit reuse of another lane.`,
+          );
+          continue;
+        }
+        for (const one of matches) {
+          if (one.error || one.flavour !== "jsonc") {
+            report.violation(
+              "boundary-5-worker-registration",
+              one.path,
+              1,
+              `home-web ${env} wrangler config is not readable JSONC`,
+              "ADR-0016 — home-web bindings must be mechanically readable in every environment",
+              "Use a valid wrangler.jsonc file. The binding and output-path checks cannot certify a config they cannot parse.",
+            );
+            continue;
+          }
+          const expectedName =
+            env === "staging" ? "home-web-staging" : "home-web";
+          if (one.data?.name !== expectedName) {
+            report.violation(
+              "boundary-5-worker-registration",
+              one.path,
+              lineOf(one.text, '"name"'),
+              `home-web ${env} config declares name "${one.data?.name}" instead of "${expectedName}"`,
+              "ADR-0016 — staging has a distinct script name; development and production use home-web",
+              "Set the wrangler name to the environment's expected script name. A staging config must not deploy over production.",
+            );
+          }
+          for (const binding of one.bindings) {
+            report.violation(
+              "boundary-5-worker-registration",
+              one.path,
+              binding.line,
+              `home-web ${env} config declares ${binding.kind} binding "${binding.name}"`,
+              "ADR-0016 — home-web holds no Identity binding, state binding or server-side configuration binding",
+              "Remove the binding. The only Cloudflare integration home-web needs is the Workers Assets binding, represented by the assets key rather than a binding table.",
+            );
+          }
+          for (const unknown of one.unclassified ?? []) {
+            report.violation(
+              "boundary-5-worker-registration",
+              one.path,
+              unknown.line,
+              `home-web ${env} config contains unclassified key "${unknown.key}" (${unknown.why})`,
+              "ADR-0016 — a public deployable's binding surface must be explicit and empty",
+              "Remove the key or classify it only after an ADR establishes why the public site needs that Cloudflare capability.",
+            );
+          }
+        }
+      }
+    }
+    checkReleasePleaseRegistration(homeWeb);
+  }
+
+  // A wrangler config naming a deployable nobody declared: a deployable that is
+  // registered in exactly one of the required places, which is the worst state.
   for (const orphan of ctx.wranglerOrphans) {
     report.violation(
       "boundary-5-worker-registration",
       orphan.path,
       lineOf(orphan.text, '"name"'),
-      `wrangler config declares name "${orphan.declaredName}" but no apps/<name>/worker/Cargo.toml declares that Worker`,
-      "brief check 5 — a deployable is registered in all four places or in none",
-      "Either delete the config, or create the Worker project and register it. A wrangler config with no project behind it is a fourth deployable that nobody wrote an ADR for (§7).",
+      `wrangler config declares name "${orphan.declaredName}" but no known deployable owns that Worker`,
+      "ADR-0016 — a deployable is registered in its required control planes or not at all",
+      "Either delete the config, or create and register the matching deployable. A wrangler config with no project behind it is a fifth deployable that has no ADR.",
     );
+  }
+  const homeWebAppConfig = path.join(
+    REPO_ROOT,
+    "apps",
+    "home-web",
+    "wrangler.jsonc",
+  );
+  if (exists(homeWebAppConfig)) {
+    const parsed = readJsonc(homeWebAppConfig);
+    if (!parsed.ok) {
+      report.violation(
+        "boundary-5-worker-registration",
+        homeWebAppConfig,
+        1,
+        `apps/home-web/wrangler.jsonc ${parsed.error}`,
+        "ADR-0016 — home-web's local Worker configuration must be mechanically readable",
+        "Use valid JSONC. A local configuration that cannot be read cannot be certified as holding no state or Identity binding.",
+      );
+    } else {
+      const collected = collectBindings(parsed.data, parsed.text);
+      for (const binding of collected.bindings) {
+        report.violation(
+          "boundary-5-worker-registration",
+          homeWebAppConfig,
+          binding.line,
+          `home-web local config declares ${binding.kind} binding "${binding.name}"`,
+          "ADR-0016 — home-web holds no Identity binding, state binding or server-side configuration binding",
+          "Remove the binding. Workers Assets is declared through the assets key; home-web needs no other Worker binding.",
+        );
+      }
+      for (const unknown of collected.unclassified) {
+        report.violation(
+          "boundary-5-worker-registration",
+          homeWebAppConfig,
+          unknown.line,
+          `home-web local config contains unclassified key "${unknown.key}" (${unknown.why})`,
+          "ADR-0016 — home-web's binding surface must be explicit and empty",
+          "Remove the key or classify it only after an ADR establishes why the public site needs that Cloudflare capability.",
+        );
+      }
+    }
   }
   if (cargoMembers.ok) {
     evidence.push(
@@ -2152,9 +2480,16 @@ function checkBoundary5WorkerRegistration(ctx) {
   return { skipped: false, evidence };
 }
 
-/** Brief check 6 — exactly three deployables, and nothing else under apps/. */
-function checkExactlyThreeDeployables(ctx) {
-  const { report, workers, appDirs } = ctx;
+/**
+ * Brief check 6 — exactly four deployables, and nothing else under apps/.
+ *
+ * ADR-0016 added home-web as a fourth, independent deployable — the public-
+ * facing web application running Nuxt/Nitro on Cloudflare Workers + Workers
+ * Assets. Unlike the three Identity Workers, home-web has no `worker/Cargo.toml`;
+ * it is recognized by its wrangler config and its Nuxt structure.
+ */
+function checkExactlyFourDeployables(ctx) {
+  const { report, workers, appDirs, webRoots } = ctx;
   if (appDirs.length === 0) {
     return {
       skipped: true,
@@ -2162,49 +2497,93 @@ function checkExactlyThreeDeployables(ctx) {
       reason: "no apps/* directory exists",
     };
   }
-  const names = workers.map((w) => w.name).sort();
-  for (const name of names) {
+
+  // Rust Workers (have worker/Cargo.toml)
+  const rustWorkers = workers.map((w) => w.name).sort();
+
+  // home-web is a deployable without a Rust Worker — check for its wrangler config
+  const homeWebDir = path.join(REPO_ROOT, "apps", "home-web");
+  const homeWebWrangler =
+    isDirectory(homeWebDir) &&
+    (exists(path.join(homeWebDir, "wrangler.jsonc")) ||
+      exists(path.join(homeWebDir, "wrangler.json")) ||
+      exists(path.join(homeWebDir, "wrangler.toml")));
+  const homeWebNuxt =
+    isDirectory(homeWebDir) && exists(path.join(homeWebDir, "nuxt.config.ts"));
+
+  const allDeployables = [...rustWorkers];
+  if (homeWebWrangler && homeWebNuxt) {
+    allDeployables.push("home-web");
+  }
+  allDeployables.sort();
+
+  // Check for undeclared Rust Workers
+  for (const name of rustWorkers) {
     if (DEPLOYABLES.includes(name)) continue;
     report.violation(
       "deploymentable-count",
       path.join(REPO_ROOT, "apps", name, "worker", "Cargo.toml"),
       1,
-      `a fourth deployable: apps/${name}/worker is a Worker project named "${name}"`,
-      "§7 — exactly three deployables: identity, identity-admin, identity-jobs; a fourth requires an ADR and proof it cannot live in one of the three",
-      "Write the ADR first, and the proof. Until then, the work belongs in one of the three: a fourth Worker is a fourth set of bindings, a fourth version chain and a fourth thing to promote and roll back.",
+      `a fifth deployable: apps/${name}/worker is a Worker project named "${name}"`,
+      "ADR-0016 — exactly four deployables: identity, identity-admin, identity-jobs, home-web; a fifth requires an ADR and proof it cannot live in one of the four",
+      "Write the ADR first, and the proof. Until then, the work belongs in one of the four: a fifth Worker is a fifth set of bindings, a fifth version chain and a fifth thing to promote and roll back.",
     );
   }
+
+  // Check that each required deployable exists
   for (const required of DEPLOYABLES) {
-    if (names.includes(required)) continue;
-    report.violation(
-      "deploymentable-count",
-      path.join(REPO_ROOT, "apps", required),
-      null,
-      `deployable "${required}" has no apps/${required}/worker/Cargo.toml`,
-      "§7 — exactly three deployables: identity, identity-admin, identity-jobs",
-      "The bootstrap declares three. If one is genuinely retired, that is an ADR and a deletion, not a quiet absence.",
-    );
+    if (required === "home-web") {
+      // home-web is recognized by its wrangler config and nuxt.config.ts, not by Cargo.toml
+      if (homeWebWrangler && homeWebNuxt) continue;
+      const missing = [
+        ...(homeWebWrangler ? [] : ["wrangler.jsonc"]),
+        ...(homeWebNuxt ? [] : ["nuxt.config.ts"]),
+      ];
+      report.violation(
+        "deploymentable-count",
+        homeWebDir,
+        null,
+        `deployable "home-web" is missing ${missing.join(" and ")} in apps/home-web/`,
+        "ADR-0016 — home-web is a Nuxt/Nitro deployable recognized by its wrangler config and nuxt.config.ts",
+        "Create the missing file, or remove home-web from DEPLOYABLES through a new ADR. The deployable shape is a law, not an inference from a directory name.",
+      );
+    } else {
+      if (rustWorkers.includes(required)) continue;
+      report.violation(
+        "deploymentable-count",
+        path.join(REPO_ROOT, "apps", required),
+        null,
+        `deployable "${required}" has no apps/${required}/worker/Cargo.toml`,
+        "ADR-0016 — exactly four deployables: identity, identity-admin, identity-jobs, home-web",
+        "The bootstrap declares four. If one is genuinely retired, that is an ADR and a deletion, not a quiet absence.",
+      );
+    }
   }
+
+  // Check for unrecognized directories under apps/
   for (const dir of appDirs) {
-    if (workers.some((w) => w.name === dir)) continue;
-    // An `apps/<name>/` that hosts a `web/` is a frontend, and `identity` and
-    // `identity-admin` are exactly that: the pnpm workspace declares both, and
-    // a check that flagged them would flag the frontends the brief mandates.
-    // Anything else under apps/ is a directory this script cannot classify, and
-    // an unclassifiable directory is where a fourth deployable hides.
+    // Known Rust Worker
+    if (rustWorkers.includes(dir)) continue;
+    // home-web (Nuxt deployable, no worker/Cargo.toml)
+    if (dir === "home-web") continue;
+    // Frontend directory (apps/<name>/web)
+    if (webRoots.some((w) => w.endsWith(path.join("apps", dir, "web"))))
+      continue;
+    // An apps/<name>/web/ that is NOT one of the known frontends
     if (isDirectory(path.join(REPO_ROOT, "apps", dir, "web"))) continue;
     report.violation(
       "deploymentable-count",
       path.join(REPO_ROOT, "apps", dir),
       null,
-      `apps/${dir} is neither one of the three deployables nor a frontend, and it has no worker/Cargo.toml`,
-      "§7 and the brief's check 5 — a directory under apps/ is a deployable or a frontend, and this script cannot tell which this one is",
-      "If it is a deployable, create apps/<name>/worker/Cargo.toml and register it in all four places. If it is a frontend, it needs a web/ directory this check can recognise. Either way the name goes in this script, in the same commit. Guessing is how a fourth deployable gets shipped.",
+      `apps/${dir} is neither one of the four deployables nor a recognized frontend`,
+      "ADR-0016 and the brief's check 5 — a directory under apps/ is a deployable or a frontend",
+      "If it is a Rust deployable, create apps/<name>/worker/Cargo.toml and register it. If it is a Nuxt deployable like home-web, create wrangler.jsonc and nuxt.config.ts. If it is a frontend, it needs a web/ directory.",
     );
   }
+
   return {
     skipped: false,
-    evidence: [`deployables found: ${names.join(", ") || "(none)"}`],
+    evidence: [`deployables found: ${allDeployables.join(", ") || "(none)"}`],
   };
 }
 
@@ -2346,18 +2725,19 @@ function checkNoAuthBypass(ctx) {
 
 /** Brief check 10 — §24, no KV and no Durable Objects as authoritative state. */
 function checkNoAuthoritativeKvOrDo(ctx) {
-  const { report, workers } = ctx;
-  if (workers.length === 0) {
+  const { report, workers, homeWeb } = ctx;
+  const deployables = [...workers, ...(homeWeb ? [homeWeb] : [])];
+  if (deployables.length === 0) {
     return {
       skipped: true,
       file: "apps",
       reason:
-        "no apps/*/worker/Cargo.toml exists, so no Worker has bindings to judge",
+        "no deployable exists, so no Cloudflare binding surface can be judged",
     };
   }
   const evidence = [];
   let configsRead = 0;
-  for (const worker of workers) {
+  for (const worker of deployables) {
     const config = ctx.wranglerFor(worker.name);
     if (!config || !config.path) {
       report.skip("no-authoritative-kv-or-do", {
@@ -2586,15 +2966,15 @@ function isProseLine(file, lineText) {
  * A purpose-written reader, not a YAML parser, and here is exactly what it
  * does and does not do.
  *
- * It reads the `projects:` block of a Moon workspace file: two-space-indented
- * `name: path` pairs under `projects:`, values possibly quoted. It reads each
- * project's `moon.yml` for the same two keys — the project `id` and the
- * `tags:` list of `- value` entries.
+ * It reads the `projects:` block of the Moon workspace file: two-space-indented
+ * `name: path` pairs under `projects:`, values possibly quoted. It reads a
+ * project's `moon.yml` only for its top-level `tags:` list of `- value`
+ * entries; its task graph is deliberately not a YAML surface this guard parses.
  *
  * It DOES NOT handle anchors and aliases (`&x`/`*x`), multi-line scalars, flow
  * mappings (`{ a: b }`), nested structures under a project path, or any YAML
  * this repository's Moon files do not use. If it meets a line it does not
- * recognise inside the block it is reading it records the file as
+ * recognise inside the workspace `projects:` block it records the file as
  * `unparsed` with the line number, and the checks that depend on it report a
  * SKIP with that reason. A reader that guessed would turn a YAML feature into
  * a silent pass, which is the one outcome this file refuses.
@@ -2647,11 +3027,30 @@ function parseMoonProjectBlock(text, file) {
   let inTags = false;
   let tagsIndent = 0;
   const unrecognised = [];
+  const recordsProjectMap = /(^|\/)\.moon\/workspace\.yml$/.test(rel(file));
   for (let i = 0; i < lines.length; i += 1) {
     const raw = lines[i];
     if (raw.trim() === "" || raw.trim().startsWith("#")) continue;
     const indent = raw.length - raw.trimStart().length;
     const line = raw.trim();
+
+    if (!recordsProjectMap) {
+      if (/^tags:\s*(#.*)?$/.test(line)) {
+        inTags = true;
+        tagsIndent = indent;
+        continue;
+      }
+      if (inTags) {
+        const item = /^-\s+(\S+)\s*(#.*)?$/.exec(line);
+        if (item && indent > tagsIndent) {
+          tags.push(item[1].replace(/^["']|["']$/g, ""));
+          continue;
+        }
+        inTags = false;
+      }
+      continue;
+    }
+
     if (!inProjects) {
       if (/^projects:\s*(#.*)?$/.test(line)) {
         inProjects = true;
@@ -2659,27 +3058,13 @@ function parseMoonProjectBlock(text, file) {
       }
       continue;
     }
-    if (indent <= projectsIndent && !/^\s/.test(raw)) {
-      // A new top-level key ends the block.
+    if (indent <= projectsIndent) {
+      // A new top-level key ends the project map.
       inProjects = false;
-      inTags = false;
       continue;
-    }
-    if (/^tags:\s*(#.*)?$/.test(line)) {
-      inTags = true;
-      tagsIndent = indent;
-      continue;
-    }
-    if (inTags) {
-      const item = /^-\s+(\S+)\s*(#.*)?$/.exec(line);
-      if (item && indent > tagsIndent) {
-        tags.push(item[1].replace(/^["']|["']$/g, ""));
-        continue;
-      }
-      inTags = false;
     }
     const pair = /^([A-Za-z0-9_@./-]+):\s*(\S.*?)\s*$/.exec(line);
-    if (pair && indent > projectsIndent) {
+    if (pair) {
       const value = pair[2].replace(/\s+#.*$/, "").replace(/^["']|["']$/g, "");
       if (value.startsWith("[") || value.startsWith("{")) {
         unrecognised.push(`line ${i + 1}: flow-style value for "${pair[1]}"`);
@@ -2688,7 +3073,7 @@ function parseMoonProjectBlock(text, file) {
       projects.set(pair[1], value);
       continue;
     }
-    if (!line.startsWith("#")) unrecognised.push(`line ${i + 1}: ${line}`);
+    unrecognised.push(`line ${i + 1}: ${line}`);
   }
   if (unrecognised.length > 0) {
     return {
@@ -2915,14 +3300,33 @@ function buildContext() {
     });
   }
 
+  // home-web is the one non-Rust deployable. Its Nuxt structure is judged by
+  // deploymentable-count; this record makes its registrations and bindings
+  // visible to the same checks as the Rust Workers without pretending it has a
+  // Cargo manifest.
+  const homeWebDir = path.join(appsRoot, "home-web");
+  const homeWeb = isDirectory(homeWebDir)
+    ? {
+        name: "home-web",
+        appName: "home-web",
+        project: "home-web",
+        dir: homeWebDir,
+        relDir: rel(homeWebDir),
+      }
+    : null;
+
   // Wrangler configs, resolved once and shared by every check that needs one.
   const wranglerCache = new Map();
   const wranglerOrphans = [];
-  for (const worker of workers) {
-    const config = findWranglerConfig(worker.appName, worker.dir);
-    wranglerCache.set(worker.name, config);
+  for (const deployable of [...workers, ...(homeWeb ? [homeWeb] : [])]) {
+    const config = findWranglerConfig(deployable.appName, deployable.dir);
+    wranglerCache.set(deployable.name, config);
     if (config.path && config.data && typeof config.data.name === "string") {
-      if (!workers.some((w) => w.name === config.data.name)) {
+      if (
+        ![...workers, ...(homeWeb ? [homeWeb] : [])].some(
+          (known) => known.name === config.data.name,
+        )
+      ) {
         wranglerOrphans.push({
           path: config.path,
           text: config.text ?? "",
@@ -2944,7 +3348,12 @@ function buildContext() {
       if (!parsed.ok) continue;
       const declaredName = parsed.data?.name;
       if (typeof declaredName !== "string") continue;
-      if (workers.some((w) => w.name === declaredName)) continue;
+      if (
+        [...workers, ...(homeWeb ? [homeWeb] : [])].some(
+          (known) => known.name === declaredName,
+        )
+      )
+        continue;
       wranglerOrphans.push({
         path: candidate,
         text: parsed.text,
@@ -2968,6 +3377,7 @@ function buildContext() {
     appDirs,
     webRoots,
     workers,
+    homeWeb,
     wranglerCache,
     wranglerOrphans,
     topDirs,

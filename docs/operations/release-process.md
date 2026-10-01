@@ -87,7 +87,7 @@ sequenceDiagram
   Human->>RP: merge the release PR  (constraint 17)
   RP->>CD: tag, e.g. identity-v0.1.0
 
-  CD->>CD: build + wrangler versions upload (all three)
+  CD->>CD: build + wrangler versions upload (all four)
   CD->>CD: smoke test the uploaded versions (constraint 18)
   Aa->>Aa: 100% automatically (constraint 20)
   Id->>Id: 1% → gate → 10%  (automatic)
@@ -130,10 +130,10 @@ reversible by promoting an older version id without another decision.
 Constraint 15: PR CI runs **affected-first**, using Moon's affected graph — not
 `moon ci` across all 11 projects, every time.
 
-`.moon/workspace.yml` maps 11 projects (six crates, three Workers, two web
-apps), and Moon computes which of them a change affects. A one-line comment in a
-Rust doc comment runs the Rust projects and skips the web apps; a change to
-`pnpm-workspace.yaml` runs everything.
+`.moon/workspace.yml` maps 12 projects (six crates, three Workers, two web
+apps, and the public home-web application), and Moon computes which of them a
+change affects. A one-line comment in a Rust doc comment runs the Rust projects
+and skips the web apps; a change to `pnpm-workspace.yaml` runs everything.
 
 The reason it is not simply "run everything" is that the whole repository is
 small enough to do that, and it is written so that it does not have to stay
@@ -156,12 +156,13 @@ the user-facing artifact — which is why Cocogitto validates them and why the
 scopes in `commitlint.config.mjs` are a real decision rather than a lint
 setting.
 
-**Versioning the three deployables.** The root `Cargo.toml` sets every crate to
+**Versioning the four deployables.** The root `Cargo.toml` sets every crate to
 `version = "0.0.0"` and says in a comment that this exists only to satisfy Cargo's
 manifest and is **not** the deployed version of anything. Release Please owns the
-three production versions; the internal crates are not production release units
-and are never tagged. The comment cites ADR-0008 for that decision — the record
-lives in `../adr/`.
+four production versions (`identity`, `identity-admin`, `identity-jobs`, and
+`home-web`); the internal crates are not production release units and are never
+tagged. The comment cites ADR-0008 for that decision — the record lives in
+`../adr/`.
 
 ## What a tag produces
 
@@ -169,14 +170,15 @@ A tag such as `identity-v0.1.0` produces, entirely automatically:
 
 1. A build of the Worker, through Moon's `build` and `package` tasks, with the
    web app's `dist/` in the right directory (constraint 8: one release unit).
-2. `wrangler versions upload` for all three deployables. **This changes no
+2. `wrangler versions upload` for all four deployables. **This changes no
    traffic.**
 3. A smoke test against each uploaded version. This is what reads
    `Route::is_implemented()` and probes the routes that are supposed to answer,
    so a version that uploads but does not serve is caught here rather than after a
    promotion.
 4. For `identity-admin` and `identity-jobs`: a 100% deployment. Done.
-5. For `identity`: the canary ladder, stopping at 10% and waiting for a human.
+5. For `identity` and `home-web`: the canary ladder, stopping at 10% and waiting
+   for a human (ADR-0016).
 
 Everything in steps 1 through 4 is automatic. Step 5 is automatic to 10% and then
 is not, and the reason is in

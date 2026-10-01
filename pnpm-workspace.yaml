@@ -7,6 +7,7 @@
 packages:
   - apps/identity/web
   - apps/identity-admin/web
+  - apps/home-web
 
 # Explicit allow-list for install scripts (pnpm blocks them by default, and a
 # non-interactive install — CI — FAILS the install outright when a

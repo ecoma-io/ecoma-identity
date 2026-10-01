@@ -1,7 +1,7 @@
 # Architecture overview
 
-What this document is: the system in one page — the three deployables, the
-request paths through them, and which component owns what.
+What this document is: the system in one page — the deployables, the request
+paths through the Identity plane, and which component owns what.
 
 What this document is **not**: the detailed reasoning. The trust lines are in
 [trust-boundaries.md](trust-boundaries.md), the bindings are in
@@ -10,10 +10,10 @@ their own documents, and the decisions have ADRs.
 
 ## Status
 
-Everything in the request-path section below is `DEFERRED` **except** the two
-health probes. All three Workers are real and dispatch. This document
-describes a shape that is decided and, on the deployable side, built; the
-status table says so on every row.
+Everything in the Identity-plane request-path section below is `DEFERRED`
+**except** the two health probes. All three Identity Workers are real and
+dispatch. This document describes a shape that is decided and, on the deployable
+side, built; the status table says so on every row.
 
 | Component                                              | State                                                                                                                                                                                                                                                                                                  |
 | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -27,6 +27,7 @@ status table says so on every row.
 | `identity-jobs` Worker                                 | `IMPLEMENTED` — the `fetch` entrypoint, the two probes and a 404. It serves no protocol route: it is a queue consumer, and a background worker answering an authorization request is the thing the boundary exists to prevent. No queue consumer, no message validation and no idempotency gate exist. |     |
 | `apps/identity/web`                                    | `SCAFFOLDED` — written and building; renders deferred states                                                                                                                                                                                                                                           |
 | `apps/identity-admin/web`                              | `SCAFFOLDED` — written and building; renders deferred states                                                                                                                                                                                                                                           |
+| `apps/home-web`                                        | `SCAFFOLDED` — the public application is written, builds to `.output/`, and passes a local Worker smoke test. It is **not** part of the Identity plane: no Identity state, no binding, no runtime coupling. Not deployed.                                                                              |
 | Identity D1 schema                                     | `DEFERRED` — the forward-only rule is decided; the migrations are being written                                                                                                                                                                                                                        |
 
 ## The system
@@ -43,7 +44,7 @@ Action Agents is decided in those systems, from their own data. A `PlatformRole`
 in this repository says what an _administrator_ may do to an **account**; it is
 never consulted about a merge.
 
-## The three deployables
+## The three Identity deployables
 
 ```mermaid
 flowchart LR
@@ -75,6 +76,41 @@ flowchart LR
 | `identity`       | OIDC routes, self-service routes, `/health`, `/ready`, its web app | Everything    | It _is_ identity               |
 | `identity-admin` | Its own session, its own web app                                   | Nothing       | The `IDENTITY` service binding |
 | `identity-jobs`  | **None** — no public route at all                                  | Nothing       | The `IDENTITY` service binding |
+
+## The fourth deployable, outside the plane
+
+`home-web` is a deployable in this repository and is **not** one of the three
+above. It is the organisation's public-facing web application: Nuxt 4 / Nitro
+compiled to a Cloudflare Worker with a Workers Assets binding. It holds no
+identity state, holds no database, and has no edge into this plane in either
+direction.
+
+```mermaid
+flowchart LR
+  subgraph Public["Public"]
+    V([Any visitor])
+  end
+  HW["home-web<br/>Nuxt/Nitro on Workers + Assets<br/><b>owns no identity state</b><br/><b>ASSETS binding only</b>"]
+  V -->|"GET / — static marketing content"| HW
+```
+
+There is no arrow from `home-web` to `identity`, and none the other way. It is
+not an Identity frontend, not a BFF, and not a paired SPA of any of the three
+Workers — `identity` and `identity-admin` each ship their own frontend as part of
+one release unit (ADR-0015), and `home-web` shares no release unit with either.
+It may link to `https://identity.ecoma.io` for a user to start an authentication
+flow elsewhere; a link is not a binding.
+
+| Deployable | Public surface                         | State it owns | Reaches identity by                        |
+| ---------- | -------------------------------------- | ------------- | ------------------------------------------ |
+| `home-web` | The public marketing site, prerendered | **Nothing**   | **Nothing** — it has no edge to this plane |
+
+The decision is [ADR-0016](../adr/0016-home-web-fourth-deployable.md). Note the
+distinction from `identity` and `identity-admin`: both of those have a web app
+served from their own `ASSETS` binding **alongside** an Identity Worker that owns
+state, whereas `home-web` is a public application that owns none and reaches
+nothing. The two web apps (`apps/identity/web`, `apps/identity-admin/web`) are
+inside the plane; `apps/home-web` is outside it.
 
 ## The request paths
 
@@ -179,6 +215,14 @@ claims and the body keeps them in two different fields. `identity` serves both
 probes today; the other two Workers serve neither yet, because their composition
 roots are placeholders.
 
+These probes are an **Identity-plane** contract, and they are scoped to the three
+Workers above. `home-web` has no `/health` and no `/ready`, and it has no
+readiness state to report: it holds no database, no queue and no session, so
+"may this instance receive traffic" is a question about the Nitro server being
+up, which its landing page answers directly. Its deploy smoke contract is `GET /`
+answering 200 with the rendered landing page plus one emitted `/_nuxt/` client
+asset — see [deployment-model.md](../operations/deployment-model.md).
+
 ## What each component is for
 
 | Component              | One sentence                                                                                                                                           |
@@ -190,6 +234,7 @@ roots are placeholders.
 | `identity-cloudflare`  | What the platform **does** with all of it: D1, Queues, KV, the HTTP transport, the error envelope, the request-id plumbing.                            |
 | `identity-testkit`     | How a test builds a valid object without reaching through three crates' constructors. Never a production dependency.                                   |
 | The three Workers      | Composition roots. Wiring, not policy.                                                                                                                 |
+| `home-web`             | The public site. Not a composition root: it is a Nuxt/Nitro application that wires no Identity code, because it depends on none.                       |
 
 The layering in prose is [crate-dependency-law.md](crate-dependency-law.md).
 

@@ -12,10 +12,39 @@ name: deploy-worker
 # written in:
 #
 #   1. build_and_upload      upload only; never moves traffic
-#   2. smoke                 the version must answer /health and /ready
+#   2. smoke                 the version must answer the contract ITS deployable
+#                            declares: /health and /ready for an Identity Worker,
+#                            the landing page and a generated asset for home-web
 #   3. canary                1% -> 10%, with a health gate between (automatic)
 #   4. promote_to_*          the final percentage — 50% and 100% each behind
 #                            their own `environment: production` approval
+#
+# ---------------------------------------------------------------------------
+# FOUR DEPLOYABLES, THREE SHAPES, ONE PIPELINE
+# ---------------------------------------------------------------------------
+# `home-web` (ADR-0016) is the fourth deployable and the first one that is not
+# an Identity Worker: a Nuxt/Nitro application uploaded to Workers + Assets
+# rather than a Rust Worker compiled to wasm. Three steps in this file therefore
+# branch on the deployable instead of deriving behaviour from the component
+# name, and each branch says which deployable it is for:
+#
+#   the Rust toolchain       Identity Workers only; home-web has no crate
+#   the build step           `identity`/`identity-admin` build a SPA first;
+#                            `identity-jobs` builds the Worker alone;
+#                            `home-web` runs `moon run home-web:package` alone
+#   the smoke test           /health + /ready, or `/` plus a `/_nuxt/` asset
+#
+# The derived convention this file used to apply — "every deployable except
+# identity-jobs has a `@ecoma-io/<component>-web` SPA" — was true only because
+# every deployable happened to be an Identity Worker. Deriving it from the
+# component name meant a fourth deployable inherited a frontend it does not
+# have, and the deploy failed at `pnpm --filter` on a package that was never
+# going to exist. An explicit case fails closed at review time instead.
+#
+# Everything else — the generated config copy, the dry run, the immutable
+# `wrangler versions upload --no-bundle`, the version-id lookup, the promotion
+# jobs and the `always()` cleanup — is SHARED, because those steps concern a
+# Cloudflare Version rather than a language or a framework.
 #
 # ADR-0013 makes that separation a constraint on the SHAPE of this file, not a
 # habit: the upload step and every promotion step are separate steps, the
@@ -69,8 +98,14 @@ on:
       # the deployables are now REGISTERED under these names in
       # `.moon/workspace.yml`. If you ever see a moon project id spelled
       # `identity-worker`, that is the crate name and no command will resolve it.
+      #
+      # `home-web` (ADR-0016) is registered in the same file and matches the
+      # same three rules, and it is NOT an Identity Worker — see the header on
+      # what branches on it. The list is spelled out because GitHub Actions has
+      # no enum input type: a `choice`-shaped description is the only
+      # enumeration available, so it has to be the complete one.
       worker:
-        description: "Repository component name (identity | identity-admin | identity-jobs): the moon project id, the config directory, and the release tag prefix"
+        description: "Repository component name (identity | identity-admin | identity-jobs | home-web): the moon project id, the config directory, and the release tag prefix"
         required: true
         type: string
 
@@ -203,6 +238,37 @@ on:
         default: "{}"
         type: string
 
+      # The public host the `home-web` smoke test probes, for THIS lane —
+      # `HOME_WEB_STAGING_SMOKE_PROBE_BASE_URL` in staging and
+      # `HOME_WEB_PRODUCTION_SMOKE_PROBE_BASE_URL` in production, passed
+      # through from `vars` by the caller rather than read from this file's own
+      # namespace.
+      #
+      # WHY IT IS AN INPUT AND NOT A REPOSITORY VARIABLE READ HERE. The Identity
+      # Workers read `vars.SMOKE_PROBE_BASE_URL` directly, and a single variable
+      # is the right shape for one deployable: there is one Identity host per
+      # lane. There are now TWO deployables with a public host per lane, so
+      # reading one namespace would send home-web's landing-page check to
+      # whatever host Identity is deployed on. That check would then report a
+      # green run for a public site it never touched, which is the specific
+      # falsehood this repository's honesty rule exists to prevent.
+      #
+      # WHY IT IS NOT A DEFAULT. An empty default that falls back to
+      # `SMOKE_PROBE_BASE_URL` is the same bug wearing a disguise. It fails
+      # loudly instead: an Identity caller leaves it empty and is unaffected; a
+      # `home-web` caller that has not configured its own host gets a non-zero
+      # exit and a message naming the variable to set.
+      #
+      # It is not validated as a URL here. What consumes it validates it, and
+      # `workflow_call` has no way to fail at definition time anyway — so the
+      # honest place for that check is the step that would be misled by a
+      # malformed value.
+      home-smoke-base-url:
+        description: "Public base URL of the home-web deployment in this lane, e.g. the value of HOME_WEB_STAGING_SMOKE_PROBE_BASE_URL; required for home-web, ignored for the Identity Workers"
+        required: false
+        default: ""
+        type: string
+
     secrets:
       # The CI deploy token. The ONLY Cloudflare credential this repository
       # holds, it is what `docs/security/secrets-management.md` calls a "CI
@@ -294,11 +360,23 @@ jobs:
       # target. No `rust-toolchain.toml` exists in this repository by org
       # convention: the ambient stable toolchain IS the toolchain, and the MSRV
       # is enforced by `rust-version` in the workspace Cargo.toml.
-      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+      #
+      # NOT INSTALLED FOR `home-web`. ADR-0016 makes home-web a Nuxt/Nitro
+      # application with no crate, and there is no `apps/home-web/worker/` to
+      # compile — so a Rust toolchain here would install ~200MB, warm a cargo
+      # cache that nothing reads, and, worse, imply that home-web is a Rust
+      # deployable in the one place a reader is checking exactly that. The
+      # guard is the component name for the same reason the build step below
+      # is: three shapes, one list of names, checked at review time.
+      - name: Set up the Rust toolchain (Identity Workers only)
+        if: inputs.worker != 'home-web'
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
         with:
           toolchain: stable
           targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - name: Cache the Rust build (Identity Workers only)
+        if: inputs.worker != 'home-web'
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: ". -> target"
 
@@ -327,16 +405,52 @@ jobs:
       # line in ci.yml: the two web apps have no `moon.yml` of their own yet, so
       # `moon run identity-web:build` does not resolve. A deploy that named a
       # task which does not exist would fail at 3am.
-      - name: Build the web app and the Worker (one release unit)
+      #
+      # ---- `home-web` (ADR-0016) ------------------------------------------
+      # The third case, and the reason the first two are not derived from the
+      # component name. home-web is a Nuxt/Nitro application: its release
+      # artefact is the `.output/` tree that `home-web:package` builds and
+      # verifies, and there is no Rust Worker and no separate SPA to build
+      # before it. So the SPA branch is skipped and exactly one moon task runs.
+      #
+      # What home-web must NOT do here is inherit the `@ecoma-io/<component>-
+      # web` convention: `@ecoma-io/home-web-web` is not a package, and a
+      # `pnpm --filter` on a name that resolves to nothing fails the deploy
+      # before a version exists. The `case` also turns an unknown component
+      # into a loud failure rather than a deploy that quietly built nothing and
+      # uploaded whatever the previous step left behind.
+      - name: Build the release unit (one deployable, one artefact)
         env:
-          HAS_WEB_APP: ${{ inputs.worker != 'identity-jobs' && 'true' || 'false' }}
+          # An explicit `case` on a validated list, rather than the boolean
+          # chain this used to derive. GitHub Actions has no `switch`, so the
+          # shell is where the three shapes have to be spelled out — and a
+          # shell `case` with a `*)` arm that exits non-zero is the only version
+          # of this that fails closed on a fifth deployable.
+          #
+          # Each arm echoes what it is about to build, so a run summary says
+          # which shape ran without anybody reading the branch.
+          IS_HOME_WEB: ${{ inputs.worker == 'home-web' && 'true' || 'false' }}
+          HAS_WEB_APP: ${{ inputs.worker != 'identity-jobs' && inputs.worker != 'home-web' && 'true' || 'false' }}
         run: |
-          if [ "$HAS_WEB_APP" = "true" ]; then
-            pnpm --filter "@ecoma-io/$WORKER-web" run build
-          else
-            echo "::notice::$WORKER ships no frontend (ADR-0015) — building the Worker only."
-          fi
-          pnpm exec moon run "$WORKER:package"
+          set -euo pipefail
+          case "$WORKER" in
+            home-web)
+              echo "home-web is a Nuxt/Nitro application (ADR-0016) — building .output/ only, no Rust Worker and no separate SPA."
+              pnpm exec moon run home-web:package
+              ;;
+            identity|identity-admin|identity-jobs)
+              if [ "$HAS_WEB_APP" = "true" ]; then
+                pnpm --filter "@ecoma-io/$WORKER-web" run build
+              else
+                echo "::notice::$WORKER ships no frontend (ADR-0015) — building the Worker only."
+              fi
+              pnpm exec moon run "$WORKER:package"
+              ;;
+            *)
+              echo "::error::unknown deployable '$WORKER'. This workflow deploys identity, identity-admin, identity-jobs and home-web — a fifth needs an ADR and a case in this file, per ADR-0002 as amended by ADR-0016."
+              exit 1
+              ;;
+          esac
 
       # ---- the generated config copy -------------------------------------
       # Never committed, never uploaded as an artefact. It exists only for the
@@ -532,6 +646,14 @@ jobs:
       VERSION_ID: ${{ needs.build_and_upload.outputs.version-id }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # The Identity Workers' live host, and home-web's own. Same two-variable
+      # rule as the smoke job and for the same reason: the health gate observes
+      # a MIX of old and new bytes, so pointing home-web's gate at Identity's
+      # host would measure the wrong deployment's traffic and report the result
+      # as home-web's.
+      SMOKE_HOST: ${{ vars.SMOKE_PROBE_BASE_URL }}
+      HOME_SMOKE_BASE_URL: ${{ inputs.home-smoke-base-url }}
+      IS_HOME_WEB: ${{ inputs.worker == 'home-web' && 'true' || 'false' }}
     steps:
       # Checkout and toolchain for wrangler only. No moon task, no web app, no
       # cargo: this job names an already-uploaded Version, and the guarantee it
@@ -552,11 +674,41 @@ jobs:
       - name: Promote each step of the ladder, with a health gate between
         env:
           LADDER: ${{ inputs.canary }}
-          # Where the probes point. Empty for a lane with no public host
-          # (a version preview URL is used instead — see below).
-          PROBE_BASE_URL: ${{ vars.SMOKE_PROBE_BASE_URL }}
         run: |
           set -euo pipefail
+
+          # Which host this lane's gate observes. Resolved ONCE, before the
+          # ladder starts, and it fails closed: a canary that cannot be gated
+          # must not run at all, because the alternative is a ladder that
+          # promotes percentages with nothing observing them.
+          #
+          # And which ROUTE. home-web has no /health (ADR-0016: it is a public
+          # site, not an Identity Worker), so probing it there would fail a
+          # correct deployment at 1% and abandon a good version. Its gate is
+          # `/`, which is the same liveness question one path deeper: does the
+          # host answer at all while serving this percentage.
+          #
+          # The gate is a LIVENESS gate, not the smoke test. It answers "is the
+          # host responding", not "did we deploy the right bytes" — the smoke
+          # job and the version-id lookup answer that, and ADR-0014 step 1 is
+          # explicit that a failed probe is an answer, not a delay.
+          if [ "$IS_HOME_WEB" = "true" ]; then
+            if [ -z "$HOME_SMOKE_BASE_URL" ]; then
+              echo "::error::no home-web health-gate host is configured for the '$LANE' lane (expected the repository variable passed as home-smoke-base-url). The ladder is not walked: a canary with no gate is not a canary. Set the variable and dispatch again; nothing has been promoted."
+              exit 1
+            fi
+            PROBE_BASE_URL="${HOME_SMOKE_BASE_URL%/}"
+            PROBE_ROUTE="/"
+          else
+            if [ -z "$SMOKE_HOST" ]; then
+              echo "::error::no smoke-probe host is configured for this lane, so the health gate cannot run. A gate that cannot run is not a pass; the ladder stops here rather than promoting blind."
+              exit 1
+            fi
+            PROBE_BASE_URL="${SMOKE_HOST%/}"
+            PROBE_ROUTE="/health"
+          fi
+          echo "Health gate probes ${PROBE_BASE_URL}${PROBE_ROUTE}"
+
           printf '%s' "$LADDER" | python3 -c '
           import json, sys
           for percentage in json.load(sys.stdin):
@@ -584,9 +736,8 @@ jobs:
               # warm in staging and is cold here, a rate limiter that behaves
               # differently at production volume.
               #
-              # It probes `$PROBE_BASE_URL` — the lane's live host, passed in as
-              # a repository variable by the caller — and NOT the version
-              # preview URL, and the distinction is the honest one: at a
+              # It probes `$PROBE_BASE_URL` — the lane's LIVE host — and NOT the
+              # version preview URL, and the distinction is the honest one: at a
               # canary percentage the host is genuinely serving a mix of the
               # new and old version, and that mix is precisely what the gate
               # exists to observe. A probe against a preview URL would measure
@@ -600,22 +751,18 @@ jobs:
               # still routing to the old version and report a false green —
               # which is the exact failure a health gate must not have.
               echo "::group::health gate at ${PERCENTAGE}%"
-              if [ -z "$PROBE_BASE_URL" ]; then
-                echo "::error::no smoke-probe host is configured for this lane, so the health gate cannot run. A gate that cannot run is not a pass; the ladder stops here rather than promoting blind."
-                exit 1
-              fi
               sleep 20
               ATTEMPTS=12
               OK=0
               for attempt in $(seq 1 "$ATTEMPTS"); do
                 if curl --fail --silent --show-error --max-time 10 \
                      -H 'Cache-Control: no-cache' \
-                     "${PROBE_BASE_URL}/health" > /dev/null; then
-                  echo "  /health answered on attempt ${attempt}"
+                     "${PROBE_BASE_URL}${PROBE_ROUTE}" > /dev/null; then
+                  echo "  ${PROBE_ROUTE} answered on attempt ${attempt}"
                   OK=1
                   break
                 fi
-                echo "  /health did not answer on attempt ${attempt}; retrying"
+                echo "  ${PROBE_ROUTE} did not answer on attempt ${attempt}; retrying"
                 sleep 10
               done
               if [ "$OK" -ne 1 ]; then
@@ -645,10 +792,47 @@ jobs:
   # between the upload and every promotion, and a failure here stops the
   # pipeline before anything serves.
   #
-  # It probes the version PREVIEW URL, which Cloudflare derives from the version
-  # id's first eight characters plus the account's preview URL suffix. That is
-  # why the preview alias is set at upload: it gives the smoke test a stable,
-  # named host for a version that has no deployment of its own.
+  # ---------------------------------------------------------------------------
+  # WHAT THIS PROBES, AND WHAT IT DOES NOT
+  # ---------------------------------------------------------------------------
+  # It probes `$SMOKE_HOST`, which is the LANE'S LIVE HOST (`vars.SMOKE_PROBE_
+  # BASE_URL`), NOT the version preview URL. Two consequences, and this file
+  # states both rather than letting a reader assume the stronger one:
+  #
+  #   1. This job is not a preview test. It cannot tell a freshly uploaded,
+  #      unpromoted version from whatever the host was serving a moment ago.
+  #      The upload is verified by `wrangler versions upload` exiting zero and
+  #      by the version-id resolving from its tag — not by this probe.
+  #   2. The canary health gate below is the one that DOES observe new bytes,
+  #      because a canary percentage routes a real share of requests to them.
+  #
+  # That division is deliberate and pre-existing. The comment this replaces
+  # claimed the smoke test probed the preview URL, which the code beneath it
+  # never did; the code is the truthful part and the comment was the defect.
+  # Fixing the comment rather than the code is not a judgement that the live
+  # host is the right probe — it is the smaller change, and the alternative is a
+  # rewrite of Identity Workers' deployment-verification behaviour that belongs
+  # in its own decision. It is reported as a defect rather than absorbed here;
+  # see `docs/operations/deployment-model.md`.
+  #
+  # ---------------------------------------------------------------------------
+  # TWO CONTRACTS, ONE PER DEPLOYABLE SHAPE
+  # ---------------------------------------------------------------------------
+  #   Identity Workers: /health and /ready must both answer 200
+  #   home-web:        / must answer 200 with the landing page, and one
+  #                    emitted `/_nuxt/` client asset must be served
+  #
+  # home-web serves no /health and no /ready — it is a public site, not an
+  # Identity Worker (ADR-0016), and it holds no readiness state to report.
+  # Probing it for those routes would fail a correct deployment for the crime
+  # of not being a different deployable.
+  #
+  # The home-web branch is the REMOTE mirror of
+  # `apps/home-web/tests/worker-smoke.test.mjs`, which asserts the same three
+  # things against a local Worker runtime. A weaker remote check would let a
+  # deployment pass here that the repository's own test rejects locally, and
+  # the two drifting apart is how a green pipeline starts meaning less than its
+  # test suite.
   # ---------------------------------------------------------------------------
   smoke:
     name: Smoke test ${{ inputs.worker }} (${{ inputs.environment }})
@@ -664,7 +848,17 @@ jobs:
       VERSION_ID: ${{ needs.build_and_upload.outputs.version-id }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # The Identity Workers' live host. Read from the repository's own
+      # namespace here rather than passed by the caller, because it predates
+      # the second deployable and changing it would touch all three Identity
+      # callers for no reason.
       SMOKE_HOST: ${{ vars.SMOKE_PROBE_BASE_URL }}
+      # home-web's own host, per lane, passed by the caller. It is NOT a
+      # fallback to `SMOKE_HOST`: an absent value is a non-zero exit in the
+      # step below, because probing the Identity host with a landing-page
+      # assertion would report a green run for a site it never reached.
+      HOME_SMOKE_BASE_URL: ${{ inputs.home-smoke-base-url }}
+      IS_HOME_WEB: ${{ inputs.worker == 'home-web' && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -677,19 +871,150 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: The version must answer /health and /ready
+      - name: The version must answer this deployable's smoke contract
         run: |
           set -euo pipefail
-          if [ -z "$SMOKE_HOST" ]; then
-            # Loudly, and non-zero. A missing probe host is a check that cannot
-            # run, and AGENTS.md is explicit that one exits non-zero rather than
-            # reporting a success it did not earn. The fix is a repository
-            # variable, not an edit to this check.
-            echo "::error::no smoke-probe host is configured for this lane (expected the SMOKE_PROBE_BASE_URL repository variable to be set). This check cannot run, and a check that cannot run is not a pass."
-            exit 1
-          fi
-          echo "Probing $SMOKE_HOST for $WORKER version $VERSION_ID"
 
+          # ---- which host, and why the absence is fatal -------------------
+          # Two variables, two deployables, and no fallback between them. The
+          # Identity Workers read the lane's live host; home-web reads the host
+          # its own caller passed. An empty value in EITHER case exits
+          # non-zero, because a check that cannot run is not a pass (AGENTS.md),
+          # and because an empty home-web value that silently became
+          # `$SMOKE_HOST` would assert a landing page against Identity's host
+          # and report a green run for a public site it never reached.
+          if [ "$IS_HOME_WEB" = "true" ]; then
+            if [ -z "$HOME_SMOKE_BASE_URL" ]; then
+              echo "::error::no home-web smoke host is configured for the '$LANE' lane. Set the repository variable this job's caller passes as home-smoke-base-url (HOME_WEB_STAGING_SMOKE_PROBE_BASE_URL for staging, HOME_WEB_PRODUCTION_SMOKE_PROBE_BASE_URL for production) and dispatch again. This check will NOT fall back to SMOKE_PROBE_BASE_URL: that host belongs to the Identity Workers, and probing it would make this check report on a deployment it did not test."
+              exit 1
+            fi
+            HOST="$HOME_SMOKE_BASE_URL"
+          else
+            if [ -z "$SMOKE_HOST" ]; then
+              # Loudly, and non-zero. A missing probe host is a check that cannot
+              # run, and AGENTS.md is explicit that one exits non-zero rather than
+              # reporting a success it did not earn. The fix is a repository
+              # variable, not an edit to this check.
+              echo "::error::no smoke-probe host is configured for this lane (expected the SMOKE_PROBE_BASE_URL repository variable to be set). This check cannot run, and a check that cannot run is not a pass."
+              exit 1
+            fi
+            HOST="$SMOKE_HOST"
+          fi
+          # A trailing slash would make "${HOST}/health" a double slash, which
+          # some hosts 404 and some redirect. Normalised here rather than
+          # documented as a requirement on the variable's author.
+          HOST="${HOST%/}"
+          echo "Probing $HOST for $WORKER version $VERSION_ID (lane $LANE)"
+
+          # ---- home-web: the landing page and an emitted client asset -----
+          # These three assertions are the remote mirror of
+          # `apps/home-web/tests/worker-smoke.test.mjs`, and they are
+          # deliberately the same three, not a reduced remote edition:
+          #
+          #   1. `/` answers 200
+          #   2. the HTML carries the landing page's stable markers
+          #   3. an emitted `/_nuxt/` asset is served, as nonempty JavaScript
+          #
+          # (2) is what makes this a smoke test rather than a reachability
+          # check: a 200 from an error page, a redirect to a login wall, or an
+          # empty shell all satisfy (1). The markers are the document `<title>`
+          # and the one line of copy that identifies the product; if the landing
+          # page is redesigned and those change, THIS step fails in the same
+          # commit that changes them, which is the intended coupling.
+          #
+          # (3) is the assertion that catches the failure mode nobody tests for:
+          # an `.output/public` that did not make it into the uploaded asset
+          # bundle. The HTML would still render — it is server-rendered — while
+          # every client script 404s, so the site would be navigable and inert.
+          # That is exactly the half-built state that produces no error in any
+          # other check in this workflow.
+          if [ "$IS_HOME_WEB" = "true" ]; then
+            # `|| true`, NOT `|| echo 000`. `curl --write-out '%{http_code}'`
+            # already prints `000` when it cannot connect, so the `|| echo 000`
+            # this replaced appended a SECOND 000 and reported the failure as
+            # `HTTP 000000` — a status no server produced. It failed closed
+            # either way, so this was never a wrong verdict; it was a wrong
+            # diagnostic in the exact line an operator reads during an incident.
+            STATUS="$(curl --silent --show-error --max-time 20 \
+              -o /dev/null --write-out '%{http_code}' \
+              -H 'Cache-Control: no-cache' \
+              "${HOST}/" || true)"
+            echo "  / -> HTTP ${STATUS}"
+            if [ "$STATUS" != "200" ]; then
+              echo "::error::home-web answered / with HTTP ${STATUS}, not 200. The version is uploaded but NOT promoted. Fix the landing page and cut a new release — do not promote this one (ADR-0013: a rebuild is a forward fix, not a rollback)."
+              exit 1
+            fi
+
+            # Two temp files, both removed on every exit path including the
+            # error ones: the HTML is needed twice (markers, then the asset
+            # path) and the headers are read after the body is fetched.
+            LANDING_HTML="$(mktemp)"
+            ASSET_BODY="$(mktemp)"
+            ASSET_HEADERS="$(mktemp)"
+            cleanup() { rm -f "$LANDING_HTML" "$ASSET_BODY" "$ASSET_HEADERS"; }
+            trap cleanup EXIT
+
+            curl --silent --show-error --fail --max-time 20 \
+              -H 'Cache-Control: no-cache' \
+              -o "$LANDING_HTML" "${HOST}/"
+
+            # Asserted BY NAME, so a failure says which marker is missing rather
+            # than only that the body did not match. These are the same two
+            # markers `apps/home-web/tests/worker-smoke.test.mjs` asserts, and
+            # the two must change together.
+            for MARKER in '<title>Ecoma</title>' 'Fair-code labor OS'; do
+              if ! grep -qF -- "$MARKER" "$LANDING_HTML"; then
+                echo "::error::home-web's landing page did not contain the marker ${MARKER}. The page answered 200, so it is being served — but it is not the landing page this repository ships. If the landing page was redesigned, update this check and apps/home-web/tests/worker-smoke.test.mjs in the same commit (docs/operations/deployment-model.md owns the contract)."
+                exit 1
+              fi
+            done
+            echo "  landing page markers present"
+
+            # Extract the FIRST emitted client asset path from the rendered
+            # HTML, exactly as the local test's regex does (`<script src=...>`
+            # only — an asset referenced from a stylesheet or a preload would
+            # answer with a content type this check does not accept, and the
+            # JavaScript assertion below is the point of the whole step).
+            #
+            # `head -n 1` closes the pipe, which under `set -o pipefail` makes
+            # grep exit 141 (SIGPIPE) — so `|| true` is required here rather
+            # than defensive, and the emptiness check below is what actually
+            # decides pass or fail. A `pipefail` mistake in this step would
+            # otherwise abort a run over a successful probe.
+            ASSET_PATH="$(grep -oE '<script[^>]+src="[^"]*/_nuxt/[^"]+"' "$LANDING_HTML" \
+              | head -n 1 | sed -E 's/.*src="([^"]*)".*/\1/' || true)"
+            if [ -z "$ASSET_PATH" ]; then
+              echo "::error::home-web's landing page contained no emitted Nuxt client asset (a <script src=\".../_nuxt/...\"> tag). The HTML rendered, so the server is up, but the client bundle is missing from the asset bundle — which is a deployment that serves an inert page."
+              exit 1
+            fi
+            echo "  emitted client asset: ${ASSET_PATH}"
+
+            ASSET_STATUS="$(curl --silent --show-error --max-time 20 \
+              -o "$ASSET_BODY" --dump-header "$ASSET_HEADERS" \
+              --write-out '%{http_code}' "${HOST}${ASSET_PATH}" || true)"
+            echo "  ${ASSET_PATH} -> HTTP ${ASSET_STATUS}"
+            if [ "$ASSET_STATUS" != "200" ]; then
+              echo "::error::home-web's emitted client asset ${ASSET_PATH} answered HTTP ${ASSET_STATUS}, not 200. The landing page renders but its JavaScript does not load. The version is uploaded but NOT promoted."
+              exit 1
+            fi
+
+            CONTENT_TYPE="$(grep -i '^content-type:' "$ASSET_HEADERS" | tail -n 1 | tr -d '\r')"
+            if ! printf '%s' "$CONTENT_TYPE" | grep -qi 'javascript'; then
+              echo "::error::home-web's emitted client asset ${ASSET_PATH} was served as '${CONTENT_TYPE:-no content type}', not JavaScript. An empty 200 on an asset request is not an asset."
+              exit 1
+            fi
+            ASSET_BYTES="$(wc -c < "$ASSET_BODY" | tr -d ' ')"
+            if [ "$ASSET_BYTES" -eq 0 ]; then
+              echo "::error::home-web's emitted client asset ${ASSET_PATH} was served as an empty 200. The asset exists in the bundle but has no bytes."
+              exit 1
+            fi
+            echo "  content-type: ${CONTENT_TYPE#*: }"
+            echo "  bytes: ${ASSET_BYTES}"
+            echo "home-web served its landing page and a nonempty JavaScript client asset on version $VERSION_ID."
+            exit 0
+          fi
+
+          # ---- Identity Workers: /health and /ready ------------------------
           # What is asserted, and why it is not more: `Route::is_implemented()`
           # in crates/identity-oidc returns true for /health and /ready and
           # false for every protocol route, and the identity Worker dispatches
@@ -709,11 +1034,17 @@ jobs:
           # composition roots are still one-line placeholders and serve no route
           # at all — which is the correct, honest state for deployables that have
           # not been built yet.
+          #
+          # `home-web` never reaches this loop: it has no /health and no /ready,
+          # and it exited above.
           for ROUTE in /health /ready; do
+            # `|| true`, not `|| echo 000`: curl's `--write-out '%{http_code}'`
+            # prints `000` itself on a connection failure, so the fallback
+            # appended a second one. See the note on the home-web branch above.
             STATUS="$(curl --silent --show-error --max-time 15 \
               -o /dev/null --write-out '%{http_code}' \
               -H 'Cache-Control: no-cache' \
-              "${SMOKE_HOST}${ROUTE}" || echo 000)"
+              "${HOST}${ROUTE}" || true)"
             echo "  ${ROUTE} -> HTTP ${STATUS}"
             if [ "$STATUS" != "200" ]; then
               echo "::error::${WORKER} answered ${ROUTE} with HTTP ${STATUS}, not 200. The version is uploaded but NOT promoted; nothing has been sent to it. Fix the Worker and cut a new release — do not promote this one (ADR-0013: a rebuild is a forward fix, not a rollback)."

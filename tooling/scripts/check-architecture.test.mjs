@@ -472,14 +472,14 @@ describe("the canary fixture: a deliberately violating tree", () => {
     );
   });
 
-  it("check 6: there must be exactly three deployables", () => {
+  it("check 6: there must be exactly four deployables", () => {
     const check = findingsFor(fixtureRun.report, "deploymentable-count");
     const hit = findingMatching(
       check,
-      /a fourth deployable: apps\/identity-reporting\/worker/,
-      "check 6 must count the fourth Worker",
+      /a fifth deployable: apps\/identity-reporting\/worker/,
+      "check 6 must count the fifth Worker",
     );
-    assert.match(hit.constraint, /§7/);
+    assert.match(hit.constraint, /ADR-0016/);
   });
 
   it("check 7: another Ecoma repository's source must be refused", () => {

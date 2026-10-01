@@ -49,3 +49,5 @@ projects:
   identity-admin: apps/identity-admin/worker
   identity-admin-web: apps/identity-admin/web
   identity-jobs: apps/identity-jobs/worker
+  # home-web — the public-facing web application (ADR-0016)
+  home-web: apps/home-web

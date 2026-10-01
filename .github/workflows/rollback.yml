@@ -45,8 +45,16 @@ on:
   # would make it automatic by accident of configuration.
   workflow_dispatch:
     inputs:
+      # `home-web` (ADR-0016) rolls back through this file exactly as the three
+      # Identity Workers do. A Cloudflare Version is immutable whatever built
+      # it, so there is nothing about a Nuxt/Nitro version that needs a
+      # different rollback — and if promoting an existing version id is
+      # correct for three deployables, the fourth is not a special case.
+      #
+      # What IS deployable-specific is the post-rollback probe at the end of this
+      # job, and it is the only place the difference shows up.
       worker:
-        description: "Component to roll back (identity | identity-admin | identity-jobs)"
+        description: "Component to roll back (identity | identity-admin | identity-jobs | home-web)"
         required: true
         type: string
 
@@ -211,35 +219,66 @@ jobs:
           pnpm exec wrangler deployments list --name "$WORKER_NAME" \
             || echo "::warning::the promotion reported success but the deployment list could not be read; confirm with 'wrangler deployments list' before closing the incident."
 
-      # `rollback.md` says the identity probe is part of the procedure, and it
-      # is here rather than left to the operator's memory. A failure is a
-      # WARNING and not an error on purpose: the rollback itself succeeded, the
-      # probe may be failing for a reason this workflow cannot see, and turning
-      # a successful rollback into a red run during an incident costs more than
-      # the signal is worth. The warning is loud and the summary says so.
-      - name: Probe the host (identity re-canaries — see note)
+      # `rollback.md` says the probe is part of the procedure, and it is here
+      # rather than left to the operator's memory. A failure is a WARNING and not
+      # an error on purpose: the rollback itself succeeded, the probe may be
+      # failing for a reason this workflow cannot see, and turning a successful
+      # rollback into a red run during an incident costs more than the signal is
+      # worth. The warning is loud and the summary says so.
+      #
+      # The ROUTE and the HOST are both deployable-specific, for the same reason
+      # they are in `deploy-worker.yml`'s smoke job:
+      #
+      #   home-web  /  against its own lane host. It has no /health (ADR-0016),
+      #              and its landing page is the only route a rollback can assert.
+      #   Identity  /health  against vars.SMOKE_PROBE_BASE_URL, unchanged.
+      #
+      # A missing home-web host is a warning here rather than an error, matching
+      # the Identity arm above — during an incident, a warning that names what
+      # to configure is more useful than a red run that blocks nothing. It is
+      # still recorded in the summary as NOT PROBED.
+      - name: Probe the host (see note)
         continue-on-error: true
         env:
           PROBE_BASE_URL: ${{ vars.SMOKE_PROBE_BASE_URL }}
+          HOME_SMOKE_BASE_URL: ${{ vars.HOME_WEB_STAGING_SMOKE_PROBE_BASE_URL && format('{0}', vars.HOME_WEB_STAGING_SMOKE_PROBE_BASE_URL) || vars.HOME_WEB_PRODUCTION_SMOKE_PROBE_BASE_URL }}
+          IS_HOME_WEB: ${{ inputs.worker == 'home-web' && 'true' || 'false' }}
         run: |
           set -euo pipefail
-          if [ -z "$PROBE_BASE_URL" ]; then
-            echo "::warning::no smoke-probe host configured, so the post-rollback probe was skipped. A skipped probe is not a passing probe."
-            exit 0
+          if [ "$IS_HOME_WEB" = "true" ]; then
+            if [ -z "$HOME_SMOKE_BASE_URL" ]; then
+              echo "::warning::no home-web probe host configured for the '$ENVIRONMENT' lane, so the post-rollback probe was skipped. A skipped probe is not a passing probe."
+              {
+                echo "- Probe: **not run** — no home-web probe host is configured for the"
+                echo "  \`$ENVIRONMENT\` lane. The promotion succeeded; the public site was NOT"
+                echo "  verified. Configure HOME_WEB_${ENVIRONMENT^^}_SMOKE_PROBE_BASE_URL and"
+                echo "  probe by hand before closing the incident."
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            PROBE_BASE_URL="$HOME_SMOKE_BASE_URL"
+            PROBE_ROUTE="/"
+          else
+            if [ -z "$PROBE_BASE_URL" ]; then
+              echo "::warning::no smoke-probe host configured, so the post-rollback probe was skipped. A skipped probe is not a passing probe."
+              exit 0
+            fi
+            PROBE_ROUTE="/health"
           fi
+          PROBE_BASE_URL="${PROBE_BASE_URL%/}"
           STATUS="$(curl --silent --show-error --max-time 15 \
             --output /dev/null --write-out '%{http_code}' \
             -H 'Cache-Control: no-cache' \
-            "${PROBE_BASE_URL}/health" || echo 000)"
-          echo "/health answered HTTP ${STATUS} after the rollback."
+            "${PROBE_BASE_URL}${PROBE_ROUTE}" || true)"
+          echo "${PROBE_ROUTE} answered HTTP ${STATUS} after the rollback."
           if [ "$STATUS" = "200" ]; then
             {
-              echo "- Probe: \`/health\` answered **200** after the rollback."
+              echo "- Probe: \`${PROBE_ROUTE}\` on \`${PROBE_BASE_URL}\` answered **200** after the rollback."
             } >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "::warning::/health answered HTTP ${STATUS}, not 200. The promotion reported success, so the Worker is serving — but it is not healthy. Do not close the incident on this."
+            echo "::warning::${PROBE_ROUTE} answered HTTP ${STATUS}, not 200. The promotion reported success, so the Worker is serving — but it is not healthy. Do not close the incident on this."
             {
-              echo "- Probe: \`/health\` answered **${STATUS}**, not 200. The rollback"
-              echo "  itself succeeded; the Worker is serving and is not healthy."
+              echo "- Probe: \`${PROBE_ROUTE}\` on \`${PROBE_BASE_URL}\` answered **${STATUS}**, not 200."
+              echo "  The rollback itself succeeded; the deployment is serving and is not healthy."
             } >> "$GITHUB_STEP_SUMMARY"
           fi

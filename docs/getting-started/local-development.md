@@ -100,7 +100,7 @@ in the tree. That is a known gap, not a mistake you made.
 
 ## The project layout
 
-Eleven projects in `.moon/workspace.yml`, each registered under the name it is
+Twelve projects in `.moon/workspace.yml`, each registered under the name it is
 addressed by:
 
 | moon project           | Path                          |
@@ -116,6 +116,7 @@ addressed by:
 | `identity-admin`       | `apps/identity-admin/worker`  |
 | `identity-admin-web`   | `apps/identity-admin/web`     |
 | `identity-jobs`        | `apps/identity-jobs/worker`   |
+| `home-web`             | `apps/home-web`               |
 
 **A deployable's moon project ID is its deployable name** — `identity`, not
 `identity-worker` — so `moon run identity:dev` resolves, and so a tag, a version
@@ -123,17 +124,28 @@ id, a wrangler worker name and a project id can be compared by eye. The
 `*‑worker` spellings are the _crate_ names (`apps/identity/worker/Cargo.toml`),
 which is a different namespace and says nothing about which commands work.
 
+`home-web` follows the same rule and is registered under its own deployable name.
+It is the one project here that is not Rust: it is a Nuxt 4 / Nitro application
+whose tasks shell out to its package-local `nuxt` binary rather than to `cargo`.
+`apps/home-web/moon.yml` is its own project file, and it is the first project in
+this repository to have one — see the note below.
+
 They used to be the moon ids, with the deployable names declared as aliases in a
 `projects:` block in the root `moon.yml`. Moon 2.5.6 does not have that
 mechanism and silently ignored the block, so none of those commands resolved
 until the ids were renamed.
 
-There is **no per-project `moon.yml` in any project yet.** The root `moon.yml`
-defines the task vocabulary with JavaScript-flavoured defaults; a Rust project
-overrides `format` with `cargo fmt` in its own `moon.yml`, and until that file
-exists, `moon run identity:format` runs `prettier` on a Rust project. Adding a
-project means adding its `moon.yml` in the same commit — the "new module = one
-commit, four files" rule in `AGENTS.md`.
+**Ten projects have no `moon.yml` of their own.** The root `moon.yml` defines the
+task vocabulary with JavaScript-flavoured defaults; a Rust project overrides
+`format` with `cargo fmt` in its own `moon.yml`, and in the absence of that file
+`moon run identity:format` runs `prettier` on a Rust project. Adding a project
+means adding its `moon.yml` in the same commit — the "new module = one commit,
+four files" rule in `AGENTS.md`.
+
+`apps/home-web/moon.yml` is the exception that proves the rule was applied: it
+arrived with its project, as the rule requires. It is why
+`moon run home-web:dev` and `moon run home-web:package` do the Nuxt thing rather
+than the JavaScript-flavoured default.
 
 ## Running a Worker
 
@@ -199,6 +211,54 @@ In development the two run as separate processes: Vite on its own port,
 the Worker. The proxy is a development convenience, not a trust boundary —
 production serves the built assets from the same origin, which is why the session
 cookie is `SameSite=Lax` and CSRF protection is a server responsibility.
+
+## Running `home-web`, which is a third kind of thing
+
+`home-web` is not an Identity web app and is not paired with a Worker, so
+neither of the two forms above applies to it. It is a standalone Nuxt
+application:
+
+```bash
+# The Nuxt dev server, via moon.
+moon run home-web:dev
+
+# Build and verify the release artefact: .output/server/index.mjs plus a
+# nonempty .output/public/.
+moon run home-web:package
+
+# The Worker smoke test: starts `wrangler dev --local` against the built
+# .output/ and asserts the landing page HTML and an emitted /_nuxt/ client asset.
+moon run home-web:test
+
+# Compile the config wrangler would upload, without uploading it.
+moon run home-web:wrangler-validate
+```
+
+**`moon run home-web:dev` works today.** It is the only command in this document
+that does. It starts on `http://localhost:3000` and serves the prerendered
+landing page.
+
+It introduces **no authentication bypass**, and this is worth being explicit
+about precisely because it is the one project here where a reader might expect
+one. Constraint 26 forbids an authentication bypass for development — no flag, no
+env var, no test-only role, no dev mode in the UI (ADR-0009) — and `home-web` has
+no authentication to bypass in the first place. It holds no session, consults no
+Identity service, and has no identity state of any kind. If a page behind a login
+ever exists on it, it will be unreachable in development for exactly the reason
+it is unreachable in production.
+
+There are two more things `home-web` does **not** do that the three Workers do,
+both consequences of having no bindings: it applies no local D1, KV or queue
+state, and it resolves no service binding, because it declares none. Its only
+binding is `ASSETS`, and in `wrangler dev --local` that is served from
+`apps/home-web/.output/public`.
+
+Note the difference in what the dev server proves. `wrangler dev --local` in
+`home-web:test` runs the **Nitro Worker**, not just Vite, so it exercises the
+same entry point (`apps/home-web/.output/server/index.mjs`) that a deployment
+would upload. That is why the deploy workflow's smoke test can assert the same
+two things remotely that this local test asserts. See
+`apps/home-web/README.md`.
 
 ## Secrets in development
 

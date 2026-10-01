@@ -1,4 +1,4 @@
-# STAGING. Every merge to the default branch, for all three deployables.
+# STAGING. Every merge to the default branch, for all four deployables.
 #
 # This is the constraint-16 job: staging deploys AUTOMATICALLY after a merge to
 # `main`, with no approval anywhere in this file. There is no `environment:` key
@@ -16,16 +16,19 @@
 # ---------------------------------------------------------------------------
 # WHAT A GREEN RUN OF THIS WORKFLOW DOES AND DOES NOT MEAN
 # ---------------------------------------------------------------------------
-# It means: each of the three Workers was built from this commit, uploaded as an
-# immutable Version, smoke tested, and promoted to 100% OF STAGING TRAFFIC.
+# It means: each of the four deployables was built from this commit, uploaded as
+# an immutable Version, smoke tested, and promoted to 100% OF STAGING TRAFFIC.
 #
 # It does NOT mean an authentication service works. At platform bootstrap the
-# three Worker composition roots are one-line placeholders (`docs/README.md`),
+# three Identity Worker composition roots are one-line placeholders (`docs/README.md`),
 # every declared protocol route answers 501, and the smoke test is written to
 # expect exactly that — it asserts the version is reachable and answers the way
 # this repository's own route table says it answers, and nothing more. When a
 # Worker gains a real /health and /ready, that check starts asserting their
 # content in the same commit that makes the routes answer.
+#
+# `home-web` is an independent Nuxt/Nitro application; its smoke test probes `/`
+# and verifies the landing page and a generated asset, not `/health` + `/ready`.
 #
 # Concretely: this workflow's smoke tests will FAIL until the Workers are
 # implemented. That is the correct and honest state for a platform that has not
@@ -161,6 +164,33 @@ jobs:
       final-percentage: 100
       requires-approval: false
       injections: "{}"
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.STAGING_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.STAGING_CLOUDFLARE_ACCOUNT_ID }}
+
+  home-web:
+    name: Staging — home-web
+    uses: ./.github/workflows/deploy-worker.yml
+    permissions:
+      contents: read
+    with:
+      worker: home-web
+      worker-name: home-web-staging
+      environment: staging
+      tag: staging-${{ github.sha }}
+      lane: staging
+      # home-web follows the ADR-0016/SC-19 gated ladder in production.
+      # Staging has no canary ladder (same rationale as Identity Workers).
+      canary: "[]"
+      final-percentage: 100
+      requires-approval: false
+      injections: "{}"
+      # The staging public host. SEPARATE from SMOKE_PROBE_BASE_URL, which is
+      # the Identity staging host, because a landing-page assertion made
+      # against Identity's host would pass for a public site it never
+      # requested. An unset variable fails the smoke job loudly rather than
+      # falling back to the Identity host.
+      home-smoke-base-url: ${{ vars.HOME_WEB_STAGING_SMOKE_PROBE_BASE_URL }}
     secrets:
       CLOUDFLARE_API_TOKEN: ${{ secrets.STAGING_CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.STAGING_CLOUDFLARE_ACCOUNT_ID }}

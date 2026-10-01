@@ -120,6 +120,7 @@ scopes = [
   "identity-jobs",
   "identity-web",
   "identity-admin-web",
+  "home-web",
   # repository-level — changes no single project owns
   "arch",
   "ci",

@@ -1,0 +1,9 @@
+{
+  "name": "home-web-staging",
+  "main": ".output/server/index.mjs",
+  "compatibility_date": "2024-09-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "binding": "ASSETS",
+  },
+}

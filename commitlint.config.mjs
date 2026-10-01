@@ -75,6 +75,7 @@ export default {
         "identity-jobs",
         "identity-web",
         "identity-admin-web",
+        "home-web", // the public-facing web application (ADR-0016)
         // ---- repository-level — changes no single project owns ----------
         "arch", // the boundary law itself (pnpm arch, the config, the prose)
         "ci", // .github/workflows and the CI matrix

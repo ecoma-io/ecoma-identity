@@ -370,6 +370,39 @@ export const depConstraints = [
   },
 
   // -------------------------------------------------------------------------
+  // home-web — the public-facing web application (ADR-0016).
+  //
+  // An independent deployable running Nuxt 4 / Nitro on Cloudflare Workers +
+  // Workers Assets. NOT a Rust Worker — Nuxt/Nitro is the runtime.
+  //
+  // MUST NOT depend on any Identity crate: no identity-domain, no
+  // identity-application, no identity-security, no identity-cloudflare. The
+  // public site has no identity state and does not participate in identity
+  // flows. It may link to https://identity.ecoma.io for authentication, but
+  // it does not call Identity from the server side.
+  // -------------------------------------------------------------------------
+  {
+    sourceTag: "home-web",
+    onlyDependOnLibsWithTags: ["home-web"],
+    notDependOnLibsWithTags: [
+      "domain",
+      "application",
+      "oidc",
+      "security",
+      "adapter",
+      "identity",
+      "identity-admin",
+      "identity-jobs",
+      "identity-testkit",
+    ],
+    description:
+      "home-web is the public-facing web application. It holds no Identity state and must not depend on any Identity crate. A public marketing page that reached identity-domain or identity-cloudflare would be a boundary violation that the architecture guard exists to prevent.",
+    remediation:
+      "The public site links to Identity for authentication; it does not import Identity types. If server-side Identity data is genuinely needed, that requires an ADR explaining why and a service binding the architecture gate knows about.",
+    decisionRef: "docs/adr/0016-home-web-fourth-deployable.md",
+  },
+
+  // -------------------------------------------------------------------------
   // THE PLATFORM LAW — the rows that judge something today.
   //
   // `docs/architecture/crate-dependency-law.md`, rule 1: identity-domain
