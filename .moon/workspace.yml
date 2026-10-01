@@ -51,3 +51,5 @@ projects:
   identity-jobs: apps/identity-jobs/worker
   # home-web — the public-facing web application (ADR-0016)
   home-web: apps/home-web
+  # packages/
+  shared-i18n: packages/shared-i18n

@@ -383,7 +383,7 @@ export const depConstraints = [
   // -------------------------------------------------------------------------
   {
     sourceTag: "home-web",
-    onlyDependOnLibsWithTags: ["home-web"],
+    onlyDependOnLibsWithTags: ["home-web", "shared-i18n"],
     notDependOnLibsWithTags: [
       "domain",
       "application",
@@ -400,6 +400,38 @@ export const depConstraints = [
     remediation:
       "The public site links to Identity for authentication; it does not import Identity types. If server-side Identity data is genuinely needed, that requires an ADR explaining why and a service binding the architecture gate knows about.",
     decisionRef: "docs/adr/0016-home-web-fourth-deployable.md",
+  },
+
+  // -------------------------------------------------------------------------
+  // shared-i18n — shared i18n utilities for frontend applications.
+  //
+  // A pure TypeScript library with no platform dependencies. Provides locale
+  // detection, normalization, and cross-domain cookie utilities for all
+  // frontend apps (home-web, identity-web, identity-admin-web).
+  //
+  // MUST NOT depend on any Rust crate or Worker-specific code. It runs in
+  // browser and Node.js contexts equally.
+  // -------------------------------------------------------------------------
+  {
+    sourceTag: "shared-i18n",
+    onlyDependOnLibsWithTags: ["shared-i18n"],
+    notDependOnLibsWithTags: [
+      "domain",
+      "application",
+      "oidc",
+      "security",
+      "adapter",
+      "identity",
+      "identity-admin",
+      "identity-jobs",
+      "identity-testkit",
+      "home-web",
+    ],
+    description:
+      "shared-i18n is a pure TypeScript library for i18n utilities. It has no platform dependencies and must not depend on any Rust crate, Worker, or frontend app. It provides shared types and utilities that all frontend apps consume.",
+    remediation:
+      "If platform-specific i18n logic is needed, it belongs in the consuming app, not in this shared library. shared-i18n stays platform-agnostic.",
+    decisionRef: "packages/shared-i18n/README.md",
   },
 
   // -------------------------------------------------------------------------

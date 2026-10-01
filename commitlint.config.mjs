@@ -55,6 +55,8 @@ export default {
         "identity-web",
         "identity-admin-web",
         "home-web", // the public-facing web application (ADR-0016)
+        // ---- packages/ — shared libraries ---------------------------------
+        "shared-i18n", // shared i18n utilities and types
         // ---- repository-level — changes no single project owns ----------
         "arch", // the boundary law itself (pnpm arch, the config, the prose)
         "ci", // .github/workflows and the CI matrix
