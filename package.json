@@ -25,6 +25,7 @@
     "arch:canary": "node --test \"tooling/scripts/**/*.test.mjs\"",
     "topology:validate": "node tooling/scripts/validate-topology.mjs",
     "infra:render": "node tooling/scripts/render-wrangler-config.mjs --stage offline --write",
+    "infra:reconcile": "node tooling/scripts/reconcile-infra.mjs",
     "contracts": "node tooling/ci/check-contracts.mjs",
     "verify": "pnpm format:check && cargo fmt --all -- --check && pnpm lint && pnpm typecheck && pnpm test && pnpm contracts && pnpm topology:validate && pnpm infra:render && pnpm arch && pnpm arch:canary",
     "wrangler:validate": "pnpm infra:render && pnpm exec moon run :wrangler-validate",

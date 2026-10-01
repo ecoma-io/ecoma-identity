@@ -166,7 +166,6 @@ jobs:
         }
     secrets:
       CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
   # ---------------------------------------------------------------------------
   # `identity-admin` — uploaded, smoke tested, promoted to 100%, no approval at
@@ -204,7 +203,6 @@ jobs:
         }
     secrets:
       CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
   # ---------------------------------------------------------------------------
   # `identity-jobs` — the queue consumer. No public route at all: it consumes a
@@ -240,7 +238,6 @@ jobs:
         }
     secrets:
       CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
   # ---------------------------------------------------------------------------
   # `home-web` — the public web application. ADR-0016 explicitly covers SC-19,
@@ -281,4 +278,3 @@ jobs:
       home-smoke-base-url: ${{ vars.HOME_WEB_PRODUCTION_SMOKE_PROBE_BASE_URL }}
     secrets:
       CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

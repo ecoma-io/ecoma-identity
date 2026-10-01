@@ -274,18 +274,16 @@ on:
         type: string
 
     secrets:
-      # The CI deploy token. The ONLY Cloudflare credential this repository
-      # holds, it is what `docs/security/secrets-management.md` calls a "CI
-      # deploy token" and rates as "deploy arbitrary code to production, which
-      # is arbitrary code execution" if leaked. Note WHICH environments hold
-      # it: a token for staging must not be the token that can write to
-      # production, or "staging is a rehearsal" (ADR-0014 step 6) stops being
-      # true.
+      # THE ONLY Cloudflare credential this repository holds. One account, one
+      # token; environment isolation comes from resource naming, the topology
+      # checker and API-token scope — never from separate tokens or separate
+      # accounts (`infra-topology/topology.json`, `account.$comment`).
+      #
+      # It is what `docs/security/secrets-management.md` rates as "deploy
+      # arbitrary code to production, which is arbitrary code execution" if
+      # leaked.
       CLOUDFLARE_API_TOKEN:
         description: "Cloudflare API token for the lane named in `lane`"
-        required: true
-      CLOUDFLARE_ACCOUNT_ID:
-        description: "Cloudflare account id for the lane named in `lane`"
         required: true
 
     outputs:
@@ -345,11 +343,49 @@ jobs:
       # rather than a `--var` so the token never appears in a command line, in
       # a process listing, or in a log line.
       CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # ---- the Cloudflare account id -------------------------------------
+      # Read from `infra-topology/topology.json`, which pins it, and written to
+      # `$GITHUB_ENV` so every later step in this job has it.
+      #
+      # IT WAS A SECRET, AND IT WAS A SECRET THAT DOES NOT EXIST. This job
+      # used to read `secrets.CLOUDFLARE_ACCOUNT_ID`; that name is defined in
+      # no repository and no organisation, so the variable resolved to the empty
+      # string and wrangler refused to authenticate — reporting
+      #
+      #     In a non-interactive environment, it's necessary to set a
+      #     CLOUDFLARE_API_TOKEN environment variable
+      #
+      # which names the WRONG credential. The token was present and correct the
+      # whole time; the account id was the missing half, and wrangler's message
+      # points at the other one. Twenty staging deploys failed this way.
+      #
+      # `topology.json` says it outright: "The three GitHub Secrets that used
+      # to carry per-lane copies of it are gone; every workflow reads this value
+      # from this file." Nothing did. This step is that reading.
+      #
+      # Why the file and not a variable: `docs/security/secrets-management.md`
+      # lists the account id as "pinned in the topology; read by the tooling,
+      # never by a secret or a variable", so a secret was a second source of
+      # truth that did not exist, and a variable would be one that can drift.
+      # A public identifier that names the account rather than anything inside
+      # it, read from the file that owns it.
+      #
+      # It does not echo the id. It does not need to, and a value an operator
+      # can read from a config file they can already read is a value that
+      # belongs in no log.
+      - name: Read the Cloudflare account id from the topology
+        run: |
+          set -euo pipefail
+          ACCOUNT_ID="$(jq -er '.account.id | select(type == "string" and length > 0)' \
+            infra-topology/topology.json)" \
+            || { echo "::error::infra-topology/topology.json declares no usable account.id. Every wrangler command in this job needs it, and there is nowhere else to read it from."; exit 1; }
+          echo "CLOUDFLARE_ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
+          echo "Cloudflare account id read from infra-topology/topology.json"
 
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -488,13 +524,31 @@ jobs:
           # given — so the renderer already writes them relative to the repo
           # root and the file has to stay where it was put.
           #
-          # `--stage offline`, because at this point the placeholders are still
-          # the source of every real id (see the `injections` input). What this
-          # job validates is therefore the SHAPE: the name, the routes, the
-          # bindings, the placement and the compatibility settings are exactly
-          # what a later deploy uploads, and only the ids are pending.
+          # `--stage resolve`, NOT `--stage offline`, and this is the single most
+          # consequential line in this file.
+          #
+          # `offline` is the SHAPE check: it emits `UNRESOLVED_SENTINEL` for every
+          # id it cannot resolve without credentials, which is what `pnpm arch`
+          # and `moon run :wrangler-validate` consume in CI. Uploading that is
+          # a deploy bound to nothing — wrangler sends
+          # `UNRESOLVED_REQUIRES_CLOUDFLARE_CREDENTIAL` as a D1 `database_id`
+          # and Cloudflare answers "no such database".
+          #
+          # This job UPLOADS, so it needs `resolve`: `reconcile-infra.mjs` asks
+          # Cloudflare for each id by the exact name topology declares, writes an
+          # ephemeral descriptor to the runner's temp directory, and the renderer
+          # reads it. Nothing is committed and nothing is carried across jobs, so
+          # replacing a database is a no-op for this repository — the next run
+          # asks again and gets the new one.
+          #
+          # `--stage offline` is what every staging deploy used, which is why
+          # none of them ever created a version.
+          node tooling/scripts/reconcile-infra.mjs \
+            --environment "$ENVIRONMENT" \
+            --out "$RUNNER_TEMP/descriptor.json"
           node tooling/scripts/render-wrangler-config.mjs \
-            --stage offline \
+            --stage resolve \
+            --descriptor "$RUNNER_TEMP/descriptor.json" \
             --environment "$ENVIRONMENT" \
             --deployable "$DEPLOYABLE" \
             --out-dir ".generated" \
@@ -559,7 +613,7 @@ jobs:
       - name: Upload a version (NO TRAFFIC)
         id: upload
         env:
-          CONFIG_PATH: .generated/cloudflare/${{ inputs.environment }}/${{ inputs.worker }}/wrangler.generated.jsonc
+          CONFIG_PATH: .generated/cloudflare/${{ inputs.environment }}/${{ inputs.worker }}/wrangler.jsonc
         run: |
           set -euo pipefail
           pnpm exec wrangler versions upload \
@@ -587,7 +641,7 @@ jobs:
         run: |
           set -euo pipefail
           JSON="$(pnpm exec wrangler versions list \
-            --config ".generated/cloudflare/$ENVIRONMENT/$WORKER/wrangler.generated.jsonc" \
+            --config ".generated/cloudflare/$ENVIRONMENT/$WORKER/wrangler.jsonc" \
             --json)"
           VERSION_ID="$(printf '%s' "$JSON" | python3 -c '
           import json, sys
@@ -663,7 +717,6 @@ jobs:
       RELEASE_TAG: ${{ inputs.tag }}
       VERSION_ID: ${{ needs.build_and_upload.outputs.version-id }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       # The Identity Workers' live host, and home-web's own. Same two-variable
       # rule as the smoke job and for the same reason: the health gate observes
       # a MIX of old and new bytes, so pointing home-web's gate at Identity's
@@ -681,6 +734,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Read the Cloudflare account id from the topology
+        run: |
+          set -euo pipefail
+          ACCOUNT_ID="$(jq -er '.account.id | select(type == "string" and length > 0)' \
+            infra-topology/topology.json)" \
+            || { echo "::error::infra-topology/topology.json declares no usable account.id. Every wrangler command in this job needs it, and there is nowhere else to read it from."; exit 1; }
+          echo "CLOUDFLARE_ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -865,7 +925,6 @@ jobs:
       ENVIRONMENT: ${{ inputs.environment }}
       VERSION_ID: ${{ needs.build_and_upload.outputs.version-id }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       # The Identity Workers' live host. Read from the repository's own
       # namespace here rather than passed by the caller, because it predates
       # the second deployable and changing it would touch all three Identity
@@ -881,6 +940,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Read the Cloudflare account id from the topology
+        run: |
+          set -euo pipefail
+          ACCOUNT_ID="$(jq -er '.account.id | select(type == "string" and length > 0)' \
+            infra-topology/topology.json)" \
+            || { echo "::error::infra-topology/topology.json declares no usable account.id. Every wrangler command in this job needs it, and there is nowhere else to read it from."; exit 1; }
+          echo "CLOUDFLARE_ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -1116,7 +1182,6 @@ jobs:
       VERSION_ID: ${{ needs.build_and_upload.outputs.version-id }}
       FINAL_PERCENTAGE: ${{ inputs.final-percentage }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       # Checkout and the toolchain are here for wrangler itself, NOT for a build.
       # No `moon run`, no `pnpm build`, no web app — `wrangler versions deploy`
@@ -1127,6 +1192,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Read the Cloudflare account id from the topology
+        run: |
+          set -euo pipefail
+          ACCOUNT_ID="$(jq -er '.account.id | select(type == "string" and length > 0)' \
+            infra-topology/topology.json)" \
+            || { echo "::error::infra-topology/topology.json declares no usable account.id. Every wrangler command in this job needs it, and there is nowhere else to read it from."; exit 1; }
+          echo "CLOUDFLARE_ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -1216,7 +1288,6 @@ jobs:
       VERSION_ID: ${{ needs.build_and_upload.outputs.version-id }}
       POLICY_LIMIT_PERCENTAGE: ${{ inputs.policy-limit-percentage }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       # Checkout and toolchain for wrangler only. No build, no moon task, no web
       # app — a promotion names an already-uploaded Version, and the guarantee
@@ -1226,6 +1297,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Read the Cloudflare account id from the topology
+        run: |
+          set -euo pipefail
+          ACCOUNT_ID="$(jq -er '.account.id | select(type == "string" and length > 0)' \
+            infra-topology/topology.json)" \
+            || { echo "::error::infra-topology/topology.json declares no usable account.id. Every wrangler command in this job needs it, and there is nowhere else to read it from."; exit 1; }
+          echo "CLOUDFLARE_ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -1294,13 +1372,19 @@ jobs:
       VERSION_ID: ${{ needs.build_and_upload.outputs.version-id }}
       FINAL_PERCENTAGE: ${{ inputs.final-percentage }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       # Checkout and toolchain for wrangler only — no build, no moon task, no
       # web app, for the same reason as `promote_to_policy_limit`.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Read the Cloudflare account id from the topology
+        run: |
+          set -euo pipefail
+          ACCOUNT_ID="$(jq -er '.account.id | select(type == "string" and length > 0)' \
+            infra-topology/topology.json)" \
+            || { echo "::error::infra-topology/topology.json declares no usable account.id. Every wrangler command in this job needs it, and there is nowhere else to read it from."; exit 1; }
+          echo "CLOUDFLARE_ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:

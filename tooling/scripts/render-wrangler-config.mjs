@@ -500,7 +500,30 @@ export function buildConfig({
     services.push(...entries);
   }
 
-  if (bindings.email_provider) {
+  // Omitted entirely when the environment declares no provider.
+  //
+  // `environments.development.email` is `{ mode: "none", service: null }` and
+  // says so in its own `$comment`: "`service: null` is an honest 'there is no
+  // email service in this environment' and the renderer omits the binding
+  // entirely." It did not omit it. The binding was emitted anyway with a null
+  // service, and wrangler's own validation rejected the result:
+  //
+  //     - "services[0]" bindings should have a string "service" field but got
+  //       {"binding":"EMAIL_PROVIDER","service":null}
+  //
+  // so `moon run :wrangler-validate` — and with it the whole `ci.yml` — has been
+  // red since this renderer landed, on a config that is only wrong for an
+  // environment where the binding is supposed to be absent.
+  //
+  // The distinction that makes omitting it the honest reading rather than a
+  // suppression: a DEFERRED binding and an ABSENT environment are different
+  // facts. `production` and `staging` declare `provisioned: false` and still
+  // name a provider — that Worker does not exist yet, the deploy fails on it,
+  // and that failure is correct, so those keep the binding and keep failing.
+  // `development` names no provider at all, so there is nothing to fail on and
+  // nothing to bind. Emitting a binding whose value is `null` invents a third
+  // state Cloudflare cannot represent.
+  if (bindings.email_provider && resolved.email.service) {
     services.push({
       binding: bindings.email_provider,
       service: resolved.email.service,

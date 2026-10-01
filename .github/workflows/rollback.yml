@@ -21,8 +21,15 @@
 # a forward fix (Path 3 in `docs/operations/rollback.md`), and it goes through
 # `deploy-production.yml` and the canary ladder like any other release.
 #
-# `permissions: contents: read` and NO checkout step at all: this workflow does
-# not read the repository, which is the mechanical proof that it cannot build.
+# `permissions: contents: read` and NO checkout step at all: this workflow never
+# materialises a source tree, which is the mechanical proof that it cannot build.
+#
+# It does read two files from the repository — `.node-version` and
+# `infra-topology/topology.json` — through the GitHub API rather than through a
+# checkout, because a wrangler command needs a Node version and an account id
+# and there is no third place either may come from. Reading two known paths at a
+# ref is not checking out a tree, and none of the four wrangler invocations below
+# can see a source file.
 #
 # ---------------------------------------------------------------------------
 # WHICH PATH IS WHICH
@@ -138,17 +145,89 @@ jobs:
       PERCENTAGE: ${{ inputs.percentage }}
       REASON: ${{ inputs.reason }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       # NO CHECKOUT. There is no source tree on this runner, which is why no
       # build can happen here even by accident — the strongest form of the
       # ADR-0013 constraint, since a build cannot be a step that has nothing to
       # build.
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      #
+      # IT WAS NOT, HOWEVER, RUNNABLE. `pnpm exec wrangler` resolves the
+      # binary from `node_modules`, which a runner with no checkout does not
+      # have, and `node-version-file: .node-version` is itself a read of the
+      # repository that silently resolved to nothing. Every wrangler step below
+      # died with
+      #
+      #     Command "wrangler" not found
+      #
+      # before reaching Cloudflare. The three steps here fix that without
+      # reintroducing a tree: two files are read through the API, and wrangler
+      # is run from the npm registry at the version `package.json` pins.
+
+      # The Node version and the wrangler version this repository actually uses,
+      # both read as single files at the dispatch ref.
+      #
+      # The ref is `main` and not the running SHA on purpose. The account id and
+      # the Node pin must describe the version of the repository a human is
+      # rolling back TO the state of; pinning the dispatch SHA instead would read
+      # a commit that is mid-incident by definition. `main` is the only ref
+      # guaranteed to exist in a workflow_dispatch context, which supplies no
+      # ref of its own.
+      - name: Read the repository's pinned toolchain from the API (no checkout)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          REF="main"
+          read_one() {
+            gh api "repos/${{ github.repository }}/contents/$1?ref=$REF" --jq '.content' \
+              | base64 --decode
+          }
+          NODE_VERSION="$(read_one .node-version | tr -d '[:space:]')"
+          WRANGLER_VERSION="$(read_one package.json \
+            | jq -er '.devDependencies.wrangler | ltrimstr("^") | select(type == "string" and length > 0)')"
+          WRANGLER_VERSION="${WRANGLER_VERSION%%+*}"
+
+          # Node before anything else: wrangler 4.x declares `node >=22`, and a
+          # runner whose image drifts below that must fail here with the reason,
+          # not three steps later with a syntax error.
+          if [ -z "$NODE_VERSION" ]; then
+            echo "::error::could not read .node-version from $REF. The wrangler commands in this job need a pinned Node and there is no checkout to read it from."
+            exit 1
+          fi
+          echo "NODE_VERSION=$NODE_VERSION" >> "$GITHUB_ENV"
+          echo "WRANGLER_VERSION=$WRANGLER_VERSION" >> "$GITHUB_ENV"
+          {
+            echo "### Toolchain"
+            echo ""
+            echo "- Node \`$NODE_VERSION\`, wrangler \`$WRANGLER_VERSION\` (read from \`$REF\`)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: .node-version
-          cache: pnpm
+          node-version: ${{ env.NODE_VERSION }}
+
+      # The Cloudflare account id. `infra-topology/topology.json` pins it, it is
+      # configuration rather than a secret, and it is read the same way the
+      # deploy workflows read it. It is NOT a secret here: no repository and no
+      # organisation defines one, and a workflow that resolved one to the empty
+      # string is exactly the failure that made 20 staging deploys fail.
+      #
+      # Without it wrangler names the wrong credential when it refuses to
+      # authenticate — "it's necessary to set a CLOUDFLARE_API_TOKEN
+      # environment variable" — when the credential actually missing is the
+      # account id, and the token is present and correct.
+      - name: Read the Cloudflare account id from the topology
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ACCOUNT_ID="$(gh api \
+            "repos/${{ github.repository }}/contents/infra-topology/topology.json?ref=main" \
+            --jq '.content' | base64 --decode \
+            | jq -er '.account.id | select(type == "string" and length > 0)')" \
+            || { echo "::error::infra-topology/topology.json declares no usable account.id. Every wrangler command in this job needs it, and there is nowhere else to read it from."; exit 1; }
+          echo "CLOUDFLARE_ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
+          echo "Cloudflare account id read from infra-topology/topology.json"
 
       # Validate the environment BEFORE anything touches Cloudflare, so a typo
       # in the dispatch form cannot promote the wrong lane's Worker.
@@ -160,6 +239,12 @@ jobs:
             exit 1
           fi
 
+      # Every wrangler command below is `npx "wrangler@$WRANGLER_VERSION"`,
+      # pinned to what `package.json` declares and run from the npm registry.
+      # `pnpm exec wrangler` is the spelling used everywhere else in this
+      # repository and it is wrong here: it resolves the binary out of
+      # `node_modules`, which a runner with no checkout does not have.
+
       # The Worker's live deployments, BEFORE anything is promoted. `rollback.md`
       # asks for verification with `wrangler deployments list` and this is it —
       # printed before the change so that "what was serving before" is in the
@@ -167,7 +252,7 @@ jobs:
       - name: What is live right now
         run: |
           set -euo pipefail
-          pnpm exec wrangler deployments list --name "$WORKER_NAME" \
+          npx --yes "wrangler@$WRANGLER_VERSION" deployments list --name "$WORKER_NAME" \
             || echo "::warning::could not list deployments before promoting."
 
       - name: Promote the named version (the only thing this file does)
@@ -189,7 +274,7 @@ jobs:
               # Path 1, the documented normal path. `wrangler rollback` is
               # itself a promotion of an existing version id — it does not
               # upload, build or repackage.
-              pnpm exec wrangler rollback "$VERSION_ID" \
+          npx --yes "wrangler@$WRANGLER_VERSION" rollback "$VERSION_ID" \
                 --name "$WORKER_NAME" \
                 --message "$REASON (rollback, Path 1)" \
                 --yes
@@ -198,7 +283,7 @@ jobs:
               # Path 2, the partial path: change the Deployment's percentage
               # rather than the version, so the bad version stays uploaded and
               # can be promoted again once it is understood.
-              pnpm exec wrangler versions deploy \
+          npx --yes "wrangler@$WRANGLER_VERSION" versions deploy \
                 --name "$WORKER_NAME" \
                 --version-id "$VERSION_ID" \
                 --percentage "$PERCENTAGE" \
@@ -216,7 +301,7 @@ jobs:
       - name: What is live now
         run: |
           set -euo pipefail
-          pnpm exec wrangler deployments list --name "$WORKER_NAME" \
+          npx --yes "wrangler@$WRANGLER_VERSION" deployments list --name "$WORKER_NAME" \
             || echo "::warning::the promotion reported success but the deployment list could not be read; confirm with 'wrangler deployments list' before closing the incident."
 
       # `rollback.md` says the probe is part of the procedure, and it is here
