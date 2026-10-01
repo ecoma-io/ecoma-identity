@@ -401,10 +401,14 @@ jobs:
       # has no frontend, and asking for one it does not have is a typo, not a
       # no-op.
       #
-      # `pnpm --filter`, not a moon task, and the reason is recorded on the same
-      # line in ci.yml: the two web apps have no `moon.yml` of their own yet, so
-      # `moon run identity-web:build` does not resolve. A deploy that named a
-      # task which does not exist would fail at 3am.
+      # A moon task, because both web apps have their own `moon.yml` now. The
+      # reason it is one rather than `pnpm --filter` is recorded on the same
+      # line in ci.yml, and it applies here with more force: `identity-web:build`
+      # carries `deps: ["^build"]`, which is what compiles
+      # `@ecoma-io/shared-i18n`. Without it a deploy runs on a clean runner
+      # where that package's gitignored `dist/` does not exist, and the build
+      # dies on `Rolldown failed to resolve import "@ecoma-io/shared-i18n"` —
+      # after two approvals, at whatever hour the promotion was run.
       #
       # ---- `home-web` (ADR-0016) ------------------------------------------
       # The third case, and the reason the first two are not derived from the
@@ -440,7 +444,7 @@ jobs:
               ;;
             identity|identity-admin|identity-jobs)
               if [ "$HAS_WEB_APP" = "true" ]; then
-                pnpm --filter "@ecoma-io/$WORKER-web" run build
+                pnpm exec moon run "$WORKER-web:build"
               else
                 echo "::notice::$WORKER ships no frontend (ADR-0015) — building the Worker only."
               fi

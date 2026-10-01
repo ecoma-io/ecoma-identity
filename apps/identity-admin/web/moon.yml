@@ -1,0 +1,85 @@
+# Moon configuration for the operator console.
+#
+# A frontend half, not a deployable: its `dist/` is uploaded by the
+# `identity-admin` Worker's version and is part of the same release unit
+# (ADR-0015). It has no `wrangler.jsonc` of its own and is never deployed
+# alone.
+#
+# This file arrived with the i18n work, because `@ecoma-io/shared-i18n` resolves
+# through its `dist/` and the dependency has to be expressed somewhere the task
+# graph can act on. See `docs/architecture/overview.md` for the deployable map
+# and `packages/shared-i18n/README.md` for the library itself.
+
+tags:
+  - identity-admin-web
+
+tasks:
+  format-check:
+    script: '"$MOON_WORKSPACE_ROOT/node_modules/.bin/prettier" --check --ignore-unknown .'
+    inputs:
+      - "**/*.{js,mjs,cjs,ts,vue,json,jsonc,yml,yaml,md,css,html}"
+    outputs: []
+
+  # This app was outside the workspace lint gate until now — it had no
+  # `moon.yml`, and the pre-commit hook was the only thing running eslint over
+  # it. That is how a floating promise in `main.ts` reached a commit. The gate
+  # exists; it was simply not wired to this project.
+  lint:
+    script: '"$MOON_WORKSPACE_ROOT/node_modules/.bin/eslint" .'
+    inputs:
+      - "**/*.{js,mjs,cjs,ts,vue}"
+    outputs: []
+
+  typecheck:
+    script: 'cd "$MOON_PROJECT_ROOT" && "$MOON_PROJECT_ROOT/node_modules/.bin/vue-tsc" --noEmit'
+    inputs:
+      - "src/**/*.{ts,vue}"
+      - "tests/**/*.{ts,vue}"
+      - "tsconfig.json"
+      - "vite.config.ts"
+    outputs: []
+
+  test:
+    script: 'cd "$MOON_PROJECT_ROOT" && "$MOON_PROJECT_ROOT/node_modules/.bin/vitest" run'
+    inputs:
+      - "src/**/*.{ts,vue}"
+      - "tests/**/*.{ts,vue}"
+    outputs: []
+
+  # `deps: ["shared-i18n:build"]` is load-bearing, not a convenience.
+  #
+  # `@ecoma-io/shared-i18n` declares `main`/`types` pointing at `dist/`, which is
+  # gitignored — so on a clean checkout it has no entry point until something
+  # builds it. Without this line the build fails with
+  #
+  #   Rolldown failed to resolve import "@ecoma-io/shared-i18n"
+  #
+  # which reads as a bundler misconfiguration and is not one: the package is
+  # fine, it simply has not been compiled yet. Naming the dependency in the
+  # task graph fixes it for every workflow, rather than restating the same
+  # build step in each one that happens to need this app.
+  #
+  # Named rather than `^build`: moon 2.5.6 has no `^` shorthand — it rejects the
+  # form outright with `Invalid target ~:^build`. `shared-i18n` is also the only
+  # workspace dependency either web app has, so the wildcard would not buy
+  # anything here today.
+  build:
+    script: 'cd "$MOON_PROJECT_ROOT" && "$MOON_PROJECT_ROOT/node_modules/.bin/vite" build'
+    deps:
+      - "shared-i18n:build"
+    inputs:
+      - "src/**/*.{ts,vue,json,css}"
+      - "tests/**/*.{ts,vue}"
+      - "index.html"
+      - "vite.config.ts"
+      - "tsconfig.json"
+      - "package.json"
+    outputs:
+      - "dist/**/*"
+
+  dev:
+    script: 'cd "$MOON_PROJECT_ROOT" && "$MOON_PROJECT_ROOT/node_modules/.bin/vite"'
+    options:
+      runInCI: false
+    inputs: []
+    outputs: []

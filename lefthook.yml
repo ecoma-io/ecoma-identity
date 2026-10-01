@@ -68,20 +68,14 @@ pre-push:
     test:
       run: set -euo pipefail; pnpm exec moon run :test
 
-    # The two frontends carry their own toolchain and their own tsconfig, and
-    # `tsc` cannot read a `.vue` file — so a frontend whose typecheck never
-    # ran is a frontend that ships its type errors to a browser.
-    web-typecheck:
-      run: set -euo pipefail; pnpm --filter @ecoma-io/identity-web typecheck
-
-    web-test:
-      run: set -euo pipefail; pnpm --filter @ecoma-io/identity-web test
-
-    admin-web-typecheck:
-      run: set -euo pipefail; pnpm --filter @ecoma-io/identity-admin-web typecheck
-
-    admin-web-test:
-      run: set -euo pipefail; pnpm --filter @ecoma-io/identity-admin-web test
+    # ---- the two Vue SPAs --------------------------------------------------
+    # `moon run :typecheck` and `:test` cover both apps now, and they are not
+    # named separately here any more: a job that names a project which gains a
+    # `moon.yml` later becomes a second copy of the same check, and the copy is
+    # the one that stops being updated. They are listed rather than folded in
+    # silently — `tsc` cannot read a `.vue` file, so a frontend whose typecheck
+    # never ran is a frontend that ships its type errors to a browser, and that
+    # is worth a named job.
 
     # ---- the Rust suite: no moon task covers it, so it is named here -----
     # A broken build or a documented API that no longer compiles is otherwise
