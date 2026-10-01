@@ -183,7 +183,7 @@ function validateTopology(topology) {
     staging: {
       identity: "stg-identity.ecoma.io",
       "identity-admin": "stg-admin.ecoma.io",
-      "home-web": "stg-home.ecoma.io",
+      "home-web": "stg.ecoma.io",
       "identity-jobs": null,
     },
     development: {
@@ -195,7 +195,7 @@ function validateTopology(topology) {
     preview: {
       identity: "pr{pr}-identity.ecoma.io",
       "identity-admin": "pr{pr}-admin.ecoma.io",
-      "home-web": "pr{pr}-home.ecoma.io",
+      "home-web": "pr{pr}.ecoma.io",
       "identity-jobs": null,
     },
   };
@@ -426,7 +426,7 @@ function validateTopology(topology) {
     kv: "identity-pr-123-kv",
     queue: "identity-pr-123",
     dlq: "identity-pr-123-dlq",
-    hostname: "pr123-identity.ecoma.io",
+    hostname: "pr123.ecoma.io",
     rate_limit: "identity-pr-123-rate-limit",
     cookie: "ecoma_pr123",
     email_provider: "identity-email-provider-pr-123-stub",

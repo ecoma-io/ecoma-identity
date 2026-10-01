@@ -324,7 +324,7 @@
       "hosts": {
         "identity": "stg-identity.ecoma.io",
         "identity-admin": "stg-admin.ecoma.io",
-        "home-web": "stg-home.ecoma.io",
+        "home-web": "stg.ecoma.io",
         "identity-jobs": null
       },
       "ratelimits": {
@@ -455,7 +455,7 @@
       "hosts": {
         "identity": "pr{pr}-identity.ecoma.io",
         "identity-admin": "pr{pr}-admin.ecoma.io",
-        "home-web": "pr{pr}-home.ecoma.io",
+        "home-web": "pr{pr}.ecoma.io",
         "identity-jobs": null
       },
       "ratelimits": {
@@ -598,7 +598,7 @@
       "kv": "^(identity|jobs)-pr-[0-9]+-kv$",
       "queue": "^identity-pr-[0-9]+$",
       "dlq": "^identity-pr-[0-9]+-dlq$",
-      "hostname": "^pr[0-9]+-(home|identity|admin)\\.ecoma\\.io$",
+      "hostname": "^pr[0-9]+(?:-(identity|admin))?\\.ecoma\\.io$",
       "rate_limit": "^(identity|identity-admin)-pr-[0-9]+-rate-limit$",
       "cookie": "^ecoma_pr[0-9]+$",
       "email_provider": "^identity-email-provider-pr-[0-9]+-stub$"

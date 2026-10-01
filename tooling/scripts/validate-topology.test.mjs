@@ -48,6 +48,29 @@ describe("deployment topology manifest", () => {
     assert.deepEqual(validateTopology(topology), []);
   });
 
+  it("declares the canonical staging and preview home hostnames", () => {
+    const { topology } = readTopology(REPO_ROOT);
+
+    assert.equal(
+      topology.environments.staging.hosts["home-web"],
+      "stg.ecoma.io",
+    );
+    assert.equal(
+      topology.environments.preview.hosts["home-web"],
+      "pr{pr}.ecoma.io",
+    );
+
+    const hostnameGrammar = new RegExp(topology.preview.grammar.hostname);
+    for (const hostname of [
+      "pr123.ecoma.io",
+      "pr123-identity.ecoma.io",
+      "pr123-admin.ecoma.io",
+    ]) {
+      assert.equal(hostnameGrammar.test(hostname), true);
+    }
+    assert.equal(hostnameGrammar.test("pr123-home.ecoma.io"), false);
+  });
+
   it("rejects a preview that has fewer than three public custom domains", () => {
     const root = copyTopology();
     const topology = readCopiedTopology(root);
