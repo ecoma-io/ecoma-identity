@@ -127,9 +127,21 @@ export default tseslint.config(
     },
   },
 
-  // --- The two Vue apps ----------------------------------------------------
+  // --- The two Vue apps and the shared library ---------------------------
+  //
+  // `packages/shared-i18n` is in this block rather than the tooling one for a
+  // concrete reason: it reads `document.cookie` and `navigator.languages`, so it
+  // is browser code, and the type-aware promise rules are worth having on a
+  // module whose whole job is asynchronous cookie reads. It is NOT a `.vue`
+  // app and gets none of the `any` leniency below — the two are separable, and
+  // this library is small enough that strictness costs nothing.
   {
-    files: ["apps/*/web/src/**/*.ts", "apps/*/web/tests/**/*.ts"],
+    files: [
+      "apps/*/web/src/**/*.ts",
+      "apps/*/web/tests/**/*.ts",
+      "packages/*/src/**/*.ts",
+      "packages/*/tests/**/*.ts",
+    ],
     extends: [...tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       ecmaVersion: 2024,
