@@ -335,16 +335,17 @@ jobs:
       # Worker that would serve an API and no UI, and a half of the release unit
       # ADR-0015 says may not exist.
       #
-      # `pnpm --filter`, not a moon task: the two web apps have no `moon.yml` of
-      # their own yet, so `moon run identity-web:build` does not resolve, and a
-      # workflow naming it would fail on a task that does not exist rather than
-      # on a broken Worker. `pnpm-workspace.yaml` lists both packages and each
-      # one's own `build` script is `vite build`. When those projects get their
-      # `moon.yml` — `.moon/workspace.yml` already names `identity-web` and
-      # `identity-admin-web`, and AGENTS.md requires a new module to arrive with
-      # one — this becomes a moon task in the same commit that adds it.
+      # Moon tasks, not `pnpm --filter`. Both apps now have their own `moon.yml`,
+      # so `identity-web:build` resolves — and each task carries
+      # `deps: ["^build"]`, which is what builds `@ecoma-io/shared-i18n` first.
+      # That ordering used to be implicit and it was wrong: `dist/` is
+      # gitignored, so on a clean CI checkout the shared library had no entry
+      # point and both builds failed with `Rolldown failed to resolve import
+      # "@ecoma-io/shared-i18n"`. Naming the dependency in the task graph fixes
+      # it for every workflow, rather than restating the same build step in
+      # each one that happens to need this app.
       - name: Build the web apps (their dist/ is inside the version)
-        run: pnpm --filter @ecoma-io/identity-web --filter @ecoma-io/identity-admin-web run build
+        run: pnpm exec moon run identity-web:build identity-admin-web:build
 
       # Build home-web's Nuxt/Nitro artifact before validating its wrangler config.
       # home-web is not a Rust Worker; it uses `moon run home-web:package` which
