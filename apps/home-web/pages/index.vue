@@ -1,57 +1,74 @@
+<!--
+  The public landing page.
+
+  Every user-visible string comes from the locale files. Nothing here is
+  hardcoded English, because this page is prerendered once per locale and the
+  only way a `/vi/` build can contain Vietnamese is if the copy is in `vi.json`.
+
+  The claims this page makes are deliberately the same claims the repository's
+  `docs/README.md` makes — the platform is at bootstrap — and they are written in
+  the copy rather than asserted by the components, so a translation is a copy
+  change and not a code change.
+-->
+<script setup lang="ts">
+const { t } = useI18n();
+
+// Feature and repository entries are content, not chrome: they belong in the
+// locale files with the rest of the words. They are declared here as the
+// message KEYS so a missing key is visible at a glance in the template, and the
+// strings themselves come from the active locale.
+const featureKeys = [
+  "features.unifiedModel.title",
+  "features.unifiedModel.body",
+  "features.graphLoop.title",
+  "features.graphLoop.body",
+  "features.fairCode.title",
+  "features.fairCode.body",
+] as const;
+
+const repoKeys = [
+  "repos.ecoma",
+  "repos.runtimeTrail",
+  "repos.loom",
+  "repos.archkeep",
+] as const;
+</script>
+
 <template>
   <div class="home">
     <section class="hero">
       <h1 class="title">Ecoma</h1>
-      <p class="tagline">Fair-code labor OS</p>
-      <p class="description">
-        Humans, AI agents and rules/code as one kind of labor resource.
-      </p>
+      <p class="tagline">{{ t("hero.title") }}</p>
+      <p class="description">{{ t("hero.subtitle") }}</p>
       <div class="actions">
         <a href="https://github.com/ecoma-io" class="button primary">
-          View on GitHub
+          {{ t("hero.cta.primary") }}
         </a>
       </div>
     </section>
 
     <section id="features" class="features">
-      <h2>What is Ecoma?</h2>
+      <h2>{{ t("features.heading") }}</h2>
       <p class="status-note">
-        <strong>Status:</strong> Platform bootstrap. The product is under active
-        development.
+        <strong>{{ t("common.statusLabel") }}:</strong>
+        {{ t("common.statusBody") }}
       </p>
       <ul class="feature-list">
-        <li>
-          <strong>Unified labor model.</strong> Humans, AI agents, and automated
-          rules operate within a single coordination layer.
-        </li>
-        <li>
-          <strong>Graph + loop engineering.</strong> Work flows through
-          structured graphs with explicit feedback loops.
-        </li>
-        <li>
-          <strong>Fair-code.</strong> Open source with sustainable licensing for
-          production use.
+        <li v-for="key in featureKeys" :key="key">
+          <strong>{{ t(`${key}.title`) }}.</strong>
+          {{ t(`${key}.body`) }}
         </li>
       </ul>
     </section>
 
     <section class="links">
-      <h2>Repositories</h2>
+      <h2>{{ t("repos.heading") }}</h2>
       <ul class="repo-list">
-        <li>
-          <a href="https://github.com/ecoma-io/ecoma">ecoma</a> — the product
-        </li>
-        <li>
-          <a href="https://github.com/ecoma-io/runtime-trail">runtime-trail</a>
-          — local developer observability
-        </li>
-        <li>
-          <a href="https://github.com/ecoma-io/loom">loom</a> — UI system and
-          composition library
-        </li>
-        <li>
-          <a href="https://github.com/ecoma-io/archkeep">archkeep</a> —
-          architecture governance
+        <li v-for="key in repoKeys" :key="key">
+          <a href="https://github.com/ecoma-io" rel="noopener">
+            {{ t(`${key}.name`) }}
+          </a>
+          — {{ t(`${key}.body`) }}
         </li>
       </ul>
     </section>

@@ -1,0 +1,75 @@
+{
+  "meta": {
+    "title": "Ecoma — Hệ điều hành lao động fair-code",
+    "description": "Con người, tác nhân AI và quy tắc/mã như một loại tài nguyên lao động."
+  },
+  "nav": {
+    "home": "Trang chủ",
+    "features": "Tính năng",
+    "pricing": "Bảng giá",
+    "docs": "Tài liệu",
+    "login": "Đăng nhập",
+    "signup": "Bắt đầu",
+    "github": "GitHub",
+    "language": "Ngôn ngữ"
+  },
+  "hero": {
+    "title": "Hệ điều hành lao động fair-code",
+    "subtitle": "Con người, tác nhân AI và quy tắc/mã như một loại tài nguyên lao động.",
+    "cta": {
+      "primary": "Xem trên GitHub",
+      "secondary": "Xem tài liệu"
+    }
+  },
+  "common": {
+    "statusLabel": "Trạng thái",
+    "statusBody": "Nền tảng đang ở giai đoạn khởi tạo. Sản phẩm đang được phát triển tích cực."
+  },
+  "features": {
+    "heading": "Ecoma là gì?",
+    "unifiedModel": {
+      "title": "Mô hình lao động hợp nhất",
+      "body": "Con người, tác nhân AI và quy tắc tự động vận hành trong cùng một lớp phối hợp."
+    },
+    "graphLoop": {
+      "title": "Kỹ thuật đồ thị + vòng lặp",
+      "body": "Công việc đi qua các đồ thị có cấu trúc với những vòng phản hồi rõ ràng."
+    },
+    "fairCode": {
+      "title": "Fair-code",
+      "body": "Mã nguồn mở với giấy phép bền vững cho sử dụng trong sản xuất."
+    }
+  },
+  "repos": {
+    "heading": "Kho mã nguồn",
+    "ecoma": {
+      "name": "ecoma",
+      "body": "sản phẩm"
+    },
+    "runtimeTrail": {
+      "name": "runtime-trail",
+      "body": "quan sát và điều tra cho nhà phát triển"
+    },
+    "loom": {
+      "name": "loom",
+      "body": "hệ thống giao diện và thư viện tổ hợp UI"
+    },
+    "archkeep": {
+      "name": "archkeep",
+      "body": "quản trị kiến trúc"
+    }
+  },
+  "footer": {
+    "tagline": "Hệ điều hành lao động fair-code.",
+    "product": "Sản phẩm",
+    "company": "Công ty",
+    "resources": "Tài nguyên",
+    "legal": "Pháp lý",
+    "copyright": "© {year} Ecoma."
+  },
+  "locale": {
+    "select": "Ngôn ngữ",
+    "en": "English",
+    "vi": "Tiếng Việt"
+  }
+}
