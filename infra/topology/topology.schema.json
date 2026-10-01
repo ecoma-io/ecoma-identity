@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ecoma.io/schemas/deployment-topology-v1.json",
+  "title": "Ecoma Identity deployment topology",
+  "description": "The declaration from which Cloudflare Worker configurations and preview lifecycle state are derived. Resource identifiers remain deploy-time references, never committed literal values.",
+  "type": "object",
+  "required": [
+    "version",
+    "account",
+    "limits",
+    "naming",
+    "services",
+    "bindings",
+    "cookie_namespaces",
+    "environments",
+    "resource_ids",
+    "preview"
+  ],
+  "properties": {
+    "version": { "const": 1 },
+    "account": {
+      "type": "object",
+      "required": ["id_env_var", "id_source", "zone"],
+      "properties": {
+        "id_env_var": { "const": "CLOUDFLARE_ACCOUNT_ID" },
+        "id_source": { "const": "github-variable" },
+        "zone": { "const": "ecoma.io" }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "required": [
+        "custom_domains_per_zone",
+        "workers_per_account",
+        "custom_domains_reserved_fixed",
+        "custom_domains_per_preview",
+        "workers_per_preview",
+        "max_active_previews",
+        "preview_max_age_hours"
+      ],
+      "properties": {
+        "custom_domains_per_zone": { "const": 100 },
+        "workers_per_account": { "const": 500 },
+        "custom_domains_reserved_fixed": { "const": 6 },
+        "custom_domains_per_preview": { "const": 3 },
+        "workers_per_preview": { "const": 4 },
+        "max_active_previews": { "type": "integer", "minimum": 1 },
+        "preview_max_age_hours": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "services": {
+      "type": "object",
+      "required": ["identity", "identity-admin", "identity-jobs", "home-web"],
+      "additionalProperties": false
+    },
+    "bindings": {
+      "type": "object",
+      "required": ["identity", "identity-admin", "identity-jobs", "home-web"],
+      "additionalProperties": false
+    },
+    "cookie_namespaces": {
+      "type": "object",
+      "required": ["production", "staging", "preview", "development"],
+      "additionalProperties": false
+    },
+    "environments": {
+      "type": "object",
+      "required": ["production", "staging", "preview", "development"],
+      "additionalProperties": false
+    },
+    "resource_ids": {
+      "type": "object",
+      "required": ["overlay_file", "sources"],
+      "properties": {
+        "overlay_file": { "const": "topology.local.json" },
+        "sources": { "type": "object", "minProperties": 1 }
+      }
+    },
+    "preview": {
+      "type": "object",
+      "required": [
+        "grammar",
+        "pr_number",
+        "max_pr_number",
+        "never_delete",
+        "not_deletable",
+        "deletion_order",
+        "evidence"
+      ]
+    }
+  }
+}

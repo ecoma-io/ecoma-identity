@@ -68,6 +68,13 @@ export default {
         "release", // release automation, versions, tags, changelog
         "repo", // the repository itself: root config, toolchain, this file
         "security", // SECURITY.md, secrets handling, threat model, an ADR
+        // `topology` is the deployment model itself: `infra/topology/**` and the
+        // checkers that judge it. It is separate from `infra` because the
+        // distinction is the point: `infra` names the per-environment wrangler
+        // configuration that `topology` generates, and a commit that changes a
+        // binding says `infra` while a commit that changes the rule those
+        // bindings follow says `topology`. The scopes name law, not directories.
+        "topology",
       ],
     ],
   },

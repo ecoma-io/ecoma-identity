@@ -1,0 +1,746 @@
+{
+  "$comment": [
+    "THE DEPLOYMENT TOPOLOGY. This file is the single source of truth for every",
+    "hostname, Worker name, Cloudflare resource name and service-binding edge in",
+    "this repository. Nothing else may restate those facts, and",
+    "`tooling/scripts/check-deployment-topology.mjs` fails when they disagree.",
+    "",
+    "WHY A MANIFEST. Before this file, the topology was assembled from four places",
+    "that could each be edited independently: the wrangler configs, the",
+    "`injections:` blocks in the deploy workflows, the GitHub repository",
+    "variables, and the bodies of the docs. Nothing checked them against each",
+    "other, so a hostname could change in one and not another and the pipeline",
+    "would still be green. One owner is the fix, not more places to keep in step.",
+    "",
+    "WHAT IS *NOT* HERE, AND WHY. Cloudflare resource IDs — a D1 `database_id`, a",
+    "KV namespace `id` — are deliberately absent. They are written as `$TOKEN`",
+    "references resolved at deploy time, because",
+    "`infra/cloudflare/production/identity/wrangler.jsonc` opens with a documented",
+    "argument that publishing the production identity database's id removes one",
+    "guess from an attacker's list, and closes with \"Do not resolve it by",
+    "quietly committing the values here.\" This file does not override that; it",
+    "names where the values come from instead. See `resource_ids` below.",
+    "",
+    "READ THIS BEFORE EDITING. Every field here is load-bearing for a deletion",
+    "safety property. `preview.never_delete` is the set that a cleanup run refuses",
+    "to touch even if a grammar test is wrong; `preview.grammar` is what decides",
+    "whether a discovered resource is a preview resource at all. Both are",
+    "checked, and the deletion code tests them independently of each other."
+  ],
+  "$schema": "./topology.schema.json",
+  "version": 1,
+
+  "account": {
+    "$comment": [
+      "One Cloudflare account. Isolation between environments is achieved by",
+      "resource naming, bindings, the topology checker and API-token scope —",
+      "NOT by separate accounts.",
+      "",
+      "This was decided, not defaulted to. The repository was previously",
+      "configured for three accounts (`STAGING_`, `PRODUCTION_` and an",
+      "`ROLLBACK_` id with no lane mapping at all). Splitting by account makes",
+      "isolation the platform's job and this repository's job smaller, at the",
+      "cost of one invariant nobody can verify from a single account's state.",
+      "One account means `pnpm infra:verify` can see the whole topology and",
+      "prove that no preview resource is bound to a production one — which is",
+      "the property the preview lifecycle actually depends on.",
+      "",
+      "The account id is a repository VARIABLE, not a secret. It is a public",
+      "identifier: `docs/security/secrets-management.md` classifies a Cloudflare",
+      "resource id as \"Configuration, not a secret\", and the account id is one",
+      "level up from that. It used to be three separate secrets."
+    ],
+    "id_env_var": "CLOUDFLARE_ACCOUNT_ID",
+    "id_source": "github-variable",
+    "zone": "ecoma.io"
+  },
+
+  "limits": {
+    "$comment": [
+      "Numbers, not prose, so that raising a ceiling is a diff a reviewer sees.",
+      "",
+      "`custom_domains_per_zone` is the BINDING constraint, not Workers. Cloudflare",
+      "caps Workers Custom Domains at 100 per zone, and the cap is not raised by",
+      "plan. Six are consumed permanently by production and staging, and each",
+      "preview consumes `custom_domains_per_preview` of them — three: `identity`,",
+      "`identity-admin` and `home-web`. Only `identity-jobs` is private and never",
+      "gets a hostname. Twenty active previews therefore use 6 + 60 = 66 of 100,",
+      "leaving headroom for anything else this zone is later asked to host.",
+      "",
+      "`max_active_previews` is what the provisioning guard enforces. The Workers",
+      "cap (500/account) is checked in the same guard but is nowhere near binding:",
+      "20 previews x 4 Workers = 80. It is recorded here so that nobody raises",
+      "`max_active_previews` on the reasoning that \"workers are fine\" — they are",
+      "fine, and the domain cap is what stops them.",
+      "",
+      "D1 is deliberately absent. Cloudflare allows 50,000 databases per account on",
+      "the paid plan, and this repository will never approach it. Encoding a limit",
+      "that cannot bind is how a real limit later goes unnoticed."
+    ],
+    "custom_domains_per_zone": 100,
+    "workers_per_account": 500,
+    "custom_domains_reserved_fixed": 6,
+    "custom_domains_per_preview": 3,
+    "workers_per_preview": 4,
+    "max_active_previews": 20,
+    "preview_max_age_hours": 72
+  },
+
+  "naming": {
+    "$comment": [
+      "Templates, not a vocabulary. Every name in every environment is derived from",
+      "one of these, which is what makes a preview resource predictable from a PR",
+      "number alone — and therefore findable after a crashed run, and recognisable",
+      "as ours during cleanup.",
+      "",
+      "`{pr}` is the pull request number, validated against `^[1-9][0-9]*$` before",
+      "it reaches any of these."
+    ],
+    "worker_fixed": "{deployable}",
+    "worker_staging": "{deployable}-staging",
+    "worker_development": "{deployable}-development",
+    "worker_preview": "{deployable}-pr-{pr}",
+
+    "d1_production": "ecoma-identity-production",
+    "d1_staging": "ecoma-identity-staging",
+    "d1_preview": "ecoma-identity-pr-{pr}",
+
+    "kv_production": "{role}-production-kv",
+    "kv_staging": "{role}-staging-kv",
+    "kv_preview": "{role}-pr-{pr}-kv",
+
+    "queue_production": "identity-production",
+    "queue_staging": "identity-staging",
+    "queue_preview": "identity-pr-{pr}",
+    "dlq_preview": "identity-pr-{pr}-dlq",
+
+    "ratelimit_production": "{role}-production-rate-limit",
+    "ratelimit_staging": "{role}-staging-rate-limit",
+    "ratelimit_preview": "{role}-pr-{pr}-rate-limit",
+
+    "host_production": "prod",
+    "host_staging": "stg",
+    "host_preview": "pr{pr}"
+  },
+
+  "services": {
+    "$comment": [
+      "The four deployables, and which of them are reachable from the internet.",
+      "",
+      "`identity-jobs` is `public: false` in every environment including preview. It",
+      "is a queue consumer: it is reached by queue messages and by no hostname. It",
+      "is also absent from the identity workers' rate-limit set and from the custom",
+      "domain budget, for the same reason.",
+      "",
+      "`migrations` names the D1 database a service owns. Exactly one service has",
+      "one: SC-02 holds the Admin Worker to no identity database and SC-03 holds",
+      "the Jobs Worker to no identity state, so `identity-admin` and `identity-jobs`",
+      "cannot appear here and a check fails if they try."
+    ],
+    "identity": {
+      "public": true,
+      "kind": "worker-and-spa",
+      "migrations": "identity"
+    },
+    "identity-admin": {
+      "public": true,
+      "kind": "worker-and-spa",
+      "migrations": null
+    },
+    "identity-jobs": {
+      "public": false,
+      "kind": "worker",
+      "migrations": null
+    },
+    "home-web": {
+      "public": true,
+      "kind": "worker-and-spa",
+      "migrations": null
+    }
+  },
+
+  "bindings": {
+    "$comment": [
+      "Which binding slot each deployable holds, as a SLOT NAME and not a value.",
+      "The value — which database, which namespace, which Worker — is per",
+      "environment and lives under `environments`.",
+      "",
+      "The service-binding lists are the security-critical part. Every one of them",
+      "points at the SAME environment's `identity` Worker, and a check fails if a",
+      "staging or preview entry names a production Worker. A preview admin Worker",
+      "that could reach production `identity` would be a complete authentication",
+      "bypass with a public URL, so this is checked mechanically rather than by",
+      "reading the generated config."
+    ],
+    "identity": {
+      "d1": "IDENTITY_DB",
+      "kv": "IDENTITY_KV",
+      "queue_producer": "IDENTITY_QUEUE",
+      "ratelimit": "RATE_LIMITER",
+      "services": [],
+      "email_provider": "EMAIL_PROVIDER"
+    },
+    "identity-admin": {
+      "d1": null,
+      "kv": null,
+      "queue_producer": null,
+      "ratelimit": "ADMIN_RATE_LIMITER",
+      "services": ["identity"],
+      "email_provider": null
+    },
+    "identity-jobs": {
+      "d1": null,
+      "kv": "JOBS_KV",
+      "queue_producer": null,
+      "ratelimit": null,
+      "services": ["identity"],
+      "email_provider": "EMAIL_PROVIDER"
+    },
+    "home-web": {
+      "d1": null,
+      "kv": null,
+      "queue_producer": null,
+      "ratelimit": null,
+      "services": [],
+      "email_provider": null
+    }
+  },
+
+  "cookie_namespaces": {
+    "$comment": [
+      "The locale preference cookie is named per environment and per PR.",
+      "",
+      "Why this is in the deployment model at all: the cookie name is a property of",
+      "where a site is deployed, not of the code. Production and staging would",
+      "otherwise share one cookie over `.ecoma.io`, and every open preview would",
+      "share another — a visitor's language preference set on one preview leaking",
+      "into all of them.",
+      "",
+      "This is the authentication cookie's opposite on purpose. The session cookie",
+      "`__Host-ecoma_session`",
+      "(`crates/identity-cloudflare/src/request.rs:60`) is host-only, prefixed `__Host-`",
+      "and HttpOnly, and is NOT named per environment: it cannot be read by",
+      "JavaScript and cannot be set by a sibling host, so there is nothing to",
+      "isolate. Only the non-sensitive preference cookie needs a namespace."
+    ],
+    "production": "ecoma_prod",
+    "staging": "ecoma_stg",
+    "preview": "ecoma_pr{pr}",
+    "development": "ecoma_dev"
+  },
+
+  "environments": {
+    "production": {
+      "lifecycle": "long-lived",
+      "host_prefix": "prod",
+      "cookie_prefix": "ecoma_prod",
+      "issuer_base_url": "https://identity.ecoma.io",
+      "workers_dev": false,
+      "api_origin": "self",
+      "email": {
+        "$comment": [
+          "A real provider. The Worker it binds to is NOT defined by this",
+          "repository — see issue #18. The binding is recorded here so the",
+          "topology is complete, and `provisioned: false` says plainly that the",
+          "target does not exist yet rather than letting a deploy discover it."
+        ],
+        "mode": "real",
+        "service": "$PRODUCTION_EMAIL_PROVIDER",
+        "provisioned": false
+      },
+      "hosts": {
+        "identity": "identity.ecoma.io",
+        "identity-admin": "admin.ecoma.io",
+        "home-web": "ecoma.io",
+        "identity-jobs": null
+      },
+      "ratelimits": {
+        "$comment": [
+          "Namespace ids are integers we choose; Cloudflare creates them implicitly",
+          "on first deploy and provides NO way to create, list or delete one. The",
+          "only rate-limits API in wrangler is the deprecated zone-level one. So",
+          "these are configuration, not provisioned resources, and the janitor",
+          "cannot clean them up — see `preview.not_deletable`.",
+          "",
+          "The rule that IS enforceable, and is checked: no two environments share",
+          "an id. A shared id means shared rate-limit counters, so staging load",
+          "tests would consume the production login budget and lock real users out.",
+          "",
+          "These values are real and correct as written. They are not placeholders,",
+          "and a reader who assumes otherwise will try to \"fix\" them."
+        ],
+        "identity": {
+          "namespace_id": "1001",
+          "simple": { "limit": 60, "period": 60 }
+        },
+        "identity-admin": {
+          "namespace_id": "1002",
+          "simple": { "limit": 600, "period": 60 }
+        }
+      },
+      "resources": {
+        "identity": {
+          "worker": "identity",
+          "d1": {
+            "name": "ecoma-identity-production",
+            "database_id": "$D1_PRODUCTION",
+            "migrations_table": "d1_migrations"
+          },
+          "kv": {
+            "name": "identity-production-kv",
+            "id": "$KV_IDENTITY_PRODUCTION"
+          },
+          "queue": {
+            "name": "identity-production",
+            "dlq": "identity-production-dlq"
+          }
+        },
+        "identity-admin": { "worker": "identity-admin" },
+        "identity-jobs": {
+          "worker": "identity-jobs",
+          "kv": { "name": "jobs-production-kv", "id": "$KV_JOBS_PRODUCTION" }
+        },
+        "home-web": { "worker": "home-web" }
+      }
+    },
+
+    "staging": {
+      "lifecycle": "long-lived",
+      "host_prefix": "stg",
+      "cookie_prefix": "ecoma_stg",
+      "issuer_base_url": "https://stg-identity.ecoma.io",
+      "$comment_issuer_base_url": [
+        "This was `https://identity-staging.ecoma.io` and is corrected here to",
+        "match the canonical staging hostname below. The two disagreed; the",
+        "hostname pattern is the authority. Tracked as issue #13's sibling."
+      ],
+      "workers_dev": false,
+      "api_origin": "self",
+      "email": {
+        "mode": "real",
+        "service": "identity-email-provider-staging",
+        "provisioned": false
+      },
+      "hosts": {
+        "identity": "stg-identity.ecoma.io",
+        "identity-admin": "stg-admin.ecoma.io",
+        "home-web": "stg-home.ecoma.io",
+        "identity-jobs": null
+      },
+      "ratelimits": {
+        "identity": {
+          "namespace_id": "2001",
+          "simple": { "limit": 60, "period": 60 }
+        },
+        "identity-admin": {
+          "namespace_id": "2002",
+          "simple": { "limit": 600, "period": 60 }
+        }
+      },
+      "resources": {
+        "identity": {
+          "worker": "identity-staging",
+          "d1": {
+            "name": "ecoma-identity-staging",
+            "database_id": "$D1_STAGING",
+            "migrations_table": "d1_migrations"
+          },
+          "kv": { "name": "identity-staging-kv", "id": "$KV_IDENTITY_STAGING" },
+          "queue": { "name": "identity-staging", "dlq": "identity-staging-dlq" }
+        },
+        "identity-admin": { "worker": "identity-admin-staging" },
+        "identity-jobs": {
+          "worker": "identity-jobs-staging",
+          "kv": { "name": "jobs-staging-kv", "id": "$KV_JOBS_STAGING" }
+        },
+        "home-web": { "worker": "home-web-staging" }
+      }
+    },
+
+    "development": {
+      "lifecycle": "local",
+      "cookie_prefix": "ecoma_dev",
+      "issuer_base_url": "http://localhost:8787",
+      "workers_dev": true,
+      "api_origin": "self",
+      "$comment": [
+        "Local only. `workers_dev: true` because a developer runs `wrangler dev`",
+        "and needs the workers.dev URL; the other three environments are `false`",
+        "because a second undeclared public entrypoint on `identity` is exactly",
+        "what the domain topology exists to prevent.",
+        "",
+        "The development Workers are named `{deployable}-development` and NOT the",
+        "bare production names the configs currently declare. Under a single",
+        "account those names are the same resource, so `wrangler dev --remote`",
+        "against development would deploy over production `identity`. Tracked as",
+        "issue #12; the checker enforces the separation."
+      ],
+      "hosts": {
+        "identity": null,
+        "identity-admin": null,
+        "home-web": null,
+        "identity-jobs": null
+      },
+      "ratelimits": {
+        "identity": {
+          "namespace_id": "3001",
+          "simple": { "limit": 60, "period": 60 }
+        },
+        "identity-admin": {
+          "namespace_id": "3002",
+          "simple": { "limit": 600, "period": 60 }
+        }
+      },
+      "resources": {
+        "identity": {
+          "worker": "identity-development",
+          "d1": {
+            "name": "ecoma-identity-development",
+            "database_id": "$D1_DEVELOPMENT",
+            "migrations_table": "d1_migrations"
+          },
+          "kv": {
+            "name": "identity-development-kv",
+            "id": "$KV_IDENTITY_DEVELOPMENT"
+          },
+          "queue": {
+            "name": "identity-development",
+            "dlq": "identity-development-dlq"
+          }
+        },
+        "identity-admin": { "worker": "identity-admin-development" },
+        "identity-jobs": {
+          "worker": "identity-jobs-development",
+          "kv": { "name": "jobs-development-kv", "id": "$KV_JOBS_DEVELOPMENT" }
+        },
+        "home-web": { "worker": "home-web-development" }
+      }
+    },
+
+    "preview": {
+      "lifecycle": "ephemeral-per-pr",
+      "host_prefix": "pr{pr}",
+      "cookie_prefix": "ecoma_pr{pr}",
+      "$comment": [
+        "Everything below is a FUNCTION of the PR number. There are no preview",
+        "resource names in this file, only the templates they come from — which is",
+        "why a preview deployment costs zero tracked files and why a rerun after a",
+        "crash can rediscover what it already made.",
+        "",
+        "`never_binds_production` is not decorative. It is checked as a",
+        "first-class property: a preview config naming `ecoma-identity-production`,",
+        "binding to the Worker `identity`, or carrying a `-production` email",
+        "provider fails before anything is created."
+      ],
+      "never_binds_production": true,
+      "issuer_base_url": "https://pr{pr}-identity.ecoma.io",
+      "workers_dev": false,
+      "api_origin": "self",
+      "email": {
+        "$comment": [
+          "A preview-safe stub, never the production or staging provider. A",
+          "preview must not be able to send real email to a real user, and the",
+          "staging provider is production-like enough that this is a real",
+          "distinction rather than a nominal one.",
+          "",
+          "The stub Worker does not exist yet, and creating it is a new",
+          "deployable requiring an ADR under SC-16. Until then a preview deploy",
+          "fails on this binding — which is the correct failure and must not be",
+          "worked around."
+        ],
+        "mode": "stub",
+        "service": "identity-email-provider-preview-stub",
+        "provisioned": false
+      },
+      "hosts": {
+        "identity": "pr{pr}-identity.ecoma.io",
+        "identity-admin": "pr{pr}-admin.ecoma.io",
+        "home-web": "pr{pr}-home.ecoma.io",
+        "identity-jobs": null
+      },
+      "ratelimits": {
+        "$comment": [
+          "A preview rate-limit namespace id is a function of the PR number, and it",
+          "is an integer because Cloudflare requires one.",
+          "",
+          "The fixed ids above are 1001/1002 (production), 2001/2002 (staging) and",
+          "3001/3002 (development). A preview id is `9{pr}0{role}`: the `9` prefix",
+          "cannot collide with any of them, and `pr` is capped at three digits by",
+          "`preview.max_pr_number` so `9` can never overflow into a fifth digit. A",
+          "PR number beyond the cap is refused rather than allowed to produce a",
+          "colliding id.",
+          "",
+          "Colliding ids mean SHARED rate-limit counters, which is the specific bug",
+          "these namespaces exist to prevent: a preview hammering a login route",
+          "would consume the real budget and lock real users out."
+        ],
+        "identity": {
+          "namespace_id_template": "9{pr}01",
+          "simple": { "limit": 60, "period": 60 }
+        },
+        "identity-admin": {
+          "namespace_id_template": "9{pr}02",
+          "simple": { "limit": 600, "period": 60 }
+        }
+      },
+      "resources": {
+        "$comment": [
+          "Templates only. `d1 create` captures a real `database_id` at provision",
+          "time and it is rediscovered from `d1 list --json` on every run — never",
+          "from a previous run's job output, which is how a crashed workflow",
+          "would otherwise leave a second `-a` database behind."
+        ],
+        "identity": {
+          "worker": "identity-pr-{pr}",
+          "d1": {
+            "name": "ecoma-identity-pr-{pr}",
+            "migrations_table": "d1_migrations"
+          },
+          "kv": { "name": "identity-pr-{pr}-kv" },
+          "queue": { "name": "identity-pr-{pr}", "dlq": "identity-pr-{pr}-dlq" }
+        },
+        "identity-admin": { "worker": "identity-admin-pr-{pr}" },
+        "identity-jobs": {
+          "worker": "identity-jobs-pr-{pr}",
+          "kv": { "name": "jobs-pr-{pr}-kv" }
+        },
+        "home-web": { "worker": "home-web-pr-{pr}" }
+      }
+    }
+  },
+
+  "resource_ids": {
+    "$comment": [
+      "How the `$TOKEN` references above become values. The order is fixed and",
+      "has no fallback:",
+      "",
+      "  1. the process environment — this is the CI path, where the deploy",
+      "     workflow injects values it received as repository variables;",
+      "  2. `topology.local.json` — a gitignored overlay for a developer running",
+      "     the same tooling against a real account from a laptop;",
+      "  3. exit 64.",
+      "",
+      "There is no default and no inferred value. A missing id must stop the",
+      "deploy, because a deploy that guesses an id is a deploy that can point at",
+      "the wrong database, and the wrong database here is the production one.",
+      "",
+      "The value is a Cloudflare resource ID. `docs/security/secrets-management.md`",
+      "classifies these as configuration rather than secrets, but",
+      "`infra/cloudflare/production/identity/wrangler.jsonc` records a stricter",
+      "local decision — an id in a published repository names the resource to aim",
+      "at — and the stricter position is the one in force."
+    ],
+    "overlay_file": "topology.local.json",
+    "env_prefix": "",
+    "sources": {
+      "D1_PRODUCTION": {
+        "for": "production.identity.d1",
+        "env_var": "PRODUCTION_IDENTITY_DB_DATABASE_ID"
+      },
+      "KV_IDENTITY_PRODUCTION": {
+        "for": "production.identity.kv",
+        "env_var": "PRODUCTION_IDENTITY_KV_NAMESPACE_ID"
+      },
+      "KV_JOBS_PRODUCTION": {
+        "for": "production.identity-jobs.kv",
+        "env_var": "PRODUCTION_JOBS_KV_NAMESPACE_ID"
+      },
+      "D1_STAGING": {
+        "for": "staging.identity.d1",
+        "env_var": "STAGING_IDENTITY_DB_DATABASE_ID"
+      },
+      "KV_IDENTITY_STAGING": {
+        "for": "staging.identity.kv",
+        "env_var": "STAGING_IDENTITY_KV_NAMESPACE_ID"
+      },
+      "KV_JOBS_STAGING": {
+        "for": "staging.identity-jobs.kv",
+        "env_var": "STAGING_JOBS_KV_NAMESPACE_ID"
+      },
+      "D1_DEVELOPMENT": {
+        "for": "development.identity.d1",
+        "env_var": "DEVELOPMENT_IDENTITY_DB_DATABASE_ID"
+      },
+      "KV_IDENTITY_DEVELOPMENT": {
+        "for": "development.identity.kv",
+        "env_var": "DEVELOPMENT_IDENTITY_KV_NAMESPACE_ID"
+      },
+      "KV_JOBS_DEVELOPMENT": {
+        "for": "development.identity-jobs.kv",
+        "env_var": "DEVELOPMENT_JOBS_KV_NAMESPACE_ID"
+      },
+      "PRODUCTION_EMAIL_PROVIDER": {
+        "for": "production.email.service",
+        "env_var": "PRODUCTION_EMAIL_PROVIDER"
+      }
+    }
+  },
+
+  "preview": {
+    "$comment": [
+      "The rules that govern preview resources. These are the most safety-critical",
+      "values in this file, because they are the only thing standing between a",
+      "cleanup run and production infrastructure."
+    ],
+
+    "grammar": {
+      "$comment": [
+        "What a preview resource's name may look like. A name that does not match",
+        "is not a preview resource and is never deleted, however old it is or",
+        "however the pull request turned out.",
+        "",
+        "These are anchored and use `[0-9]+` rather than `\\d`, and a deletion path",
+        "must compare the WHOLE name with no prefix matching — a `startsWith`",
+        "somewhere in this pipeline would eventually match `identity-production`."
+      ],
+      "worker": "^(identity|identity-admin|identity-jobs|home-web)-pr-[0-9]+$",
+      "d1": "^ecoma-identity-pr-[0-9]+$",
+      "kv": "^(identity|jobs)-pr-[0-9]+-kv$",
+      "queue": "^identity-pr-[0-9]+$",
+      "dlq": "^identity-pr-[0-9]+-dlq$",
+      "hostname": "^pr[0-9]+-(home|identity|admin)\\.ecoma\\.io$",
+      "rate_limit": "^(identity|identity-admin)-pr-[0-9]+-rate-limit$",
+      "cookie": "^ecoma_pr[0-9]+$",
+      "email_provider": "^identity-email-provider-pr-[0-9]+-stub$"
+    },
+
+    "pr_number": "^[1-9][0-9]*$",
+
+    "max_pr_number": {
+      "$comment": [
+        "The PR number is capped at three digits, and the cap is a safety",
+        "mechanism rather than a resource limit. A preview rate-limit namespace id",
+        "is derived as `9{pr}0{role}` so it cannot collide with the fixed",
+        "per-environment ids; a fourth-digit PR would make that id five digits",
+        "long and push it into a range the manifest no longer controls. A",
+        "repository that reaches PR 1000 reallocates the prefix deliberately and",
+        "re-checks the collision, rather than having ids drift into each other",
+        "unnoticed.",
+        "",
+        "Nothing else in the topology depends on the cap: Worker and resource",
+        "names, hostnames and the cleanup grammar are all unbounded and correct at",
+        "any PR number."
+      ],
+      "value": 999,
+      "on_exceed": "refuse"
+    },
+
+    "never_delete": {
+      "$comment": [
+        "Tested as a literal set membership immediately before every delete, in",
+        "ADDITION to the grammar test. The grammar is the thing most likely to be",
+        "wrong in a way that lets something through; this list is the backstop",
+        "that does not depend on the grammar being correct.",
+        "",
+        "Production and staging Workers, and the preview email stub pattern's",
+        "long-lived siblings. Nothing here is ever created by a preview and",
+        "nothing here is ever deleted by one."
+      ],
+      "workers": [
+        "identity",
+        "identity-admin",
+        "identity-jobs",
+        "home-web",
+        "identity-staging",
+        "identity-admin-staging",
+        "identity-jobs-staging",
+        "home-web-staging",
+        "identity-development",
+        "identity-admin-development",
+        "identity-jobs-development",
+        "home-web-development"
+      ],
+      "d1": [
+        "ecoma-identity-production",
+        "ecoma-identity-staging",
+        "ecoma-identity-development"
+      ],
+      "kv": [
+        "identity-production-kv",
+        "jobs-production-kv",
+        "identity-staging-kv",
+        "jobs-staging-kv",
+        "identity-development-kv",
+        "jobs-development-kv"
+      ],
+      "queue": [
+        "identity-production",
+        "identity-production-dlq",
+        "identity-staging",
+        "identity-staging-dlq",
+        "identity-development",
+        "identity-development-dlq"
+      ]
+    },
+
+    "not_deletable": {
+      "$comment": [
+        "Resources that exist, cost nothing when unused, and CANNOT be deleted",
+        "because Cloudflare provides no API for it. Listed explicitly so that a",
+        "reader does not conclude they were forgotten.",
+        "",
+        "A rate-limit namespace is an integer the account remembers. It is",
+        "created implicitly the first time a Worker uses it. There is no wrangler",
+        "command to create, enumerate or delete one — the only `rate_limits`",
+        "endpoint in the API is the deprecated zone-level one. An abandoned",
+        "namespace is an integer that nothing points at, which is not a resource",
+        "leak.",
+        "",
+        "What IS enforced, and is checked: no two environments may share an id,",
+        "because a shared id means shared counters."
+      ],
+      "rate_limit_namespaces": true
+    },
+
+    "deletion_order": {
+      "$comment": [
+        "Reverse topological, and custom domains before Workers.",
+        "",
+        "Domains go first because they are the public entrypoint: a Worker that is",
+        "about to be deleted should stop answering on a public hostname first, so",
+        "there is no window in which a hostname resolves to a half-deleted Worker.",
+        "",
+        "Workers go in reverse dependency order — the consumers before the thing",
+        "they consume — so no deletion orphans a live service binding. Each delete",
+        "is attempted WITHOUT `--force` first, because wrangler's force flag is",
+        "\"delete even if doing so will break other Workers that depend on this",
+        "one\"; letting Cloudflare refuse is how the guard is enforced rather than",
+        "re-implemented. The janitor never passes `--force` at all: a resource it",
+        "cannot delete cleanly is a resource it reports as surviving, which is the",
+        "honest outcome."
+      ],
+      "steps": [
+        "custom_domains",
+        "worker:identity-admin",
+        "worker:identity-jobs",
+        "worker:home-web",
+        "worker:identity",
+        "dlq",
+        "queue",
+        "kv",
+        "d1"
+      ]
+    },
+
+    "evidence": {
+      "$comment": [
+        "What cleanup is allowed to act on. Three states, and the third is the",
+        "point.",
+        "",
+        "`unknown` means \"could not establish that the PR is closed\" — which",
+        "includes GitHub being unreachable. The correct action is to delete",
+        "nothing and say why. A janitor that treats an API failure as \"probably",
+        "closed\" will eventually delete a live preview's infrastructure, and one",
+        "that stays silent is worse than one that fails loudly.",
+        "",
+        "`open` includes REOPENED. A teardown that started when a PR closed and a",
+        "reopen that arrives mid-run must not race: the delete path re-reads the",
+        "state at delete time rather than trusting the state at job start."
+      ],
+      "states": ["closed", "open", "unknown"],
+      "on_unknown": "do-not-delete",
+      "on_open": "do-not-delete",
+      "on_closed": "delete"
+    }
+  }
+}

@@ -79,6 +79,15 @@ secrets.toml
 .wrangler/
 .dev.vars.local
 
+# The deployment topology resolves `$TOKEN` resource-id references from this
+# local overlay after checking the process environment. It is deliberately not
+# tracked: production resource ids are configuration, not bearer credentials,
+# but `infra/cloudflare/production/identity/wrangler.jsonc` records the stricter
+# local rule that publishing one removes a guess from an attacker's target list.
+# `infra/topology/topology.json` owns the resolution order; this rule makes its
+# laptop path safe rather than trusting a developer to remember it.
+infra/topology/topology.local.json
+
 # ---------------------------------------------------------------------------
 # Test and coverage output
 # ---------------------------------------------------------------------------
