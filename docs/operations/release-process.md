@@ -16,7 +16,7 @@ knows which part is a decision and which part is a script.
 | Post-tag build, version upload and smoke test are automatic       | `PLANNED` — constraint 18; the workflow is `DEFERRED`                            |
 | Staging deploys automatically after a merge to the default branch | `PLANNED` — constraint 16; the workflow is `DEFERRED`                            |
 | Production promotion of `identity` needs two human approvals      | `PLANNED` — constraint 19; the workflow is `DEFERRED`                            |
-| Cocogitto validates commit messages at `commit-msg`               | `PLANNED` — `cocogitto.toml` is `DEFERRED`; `package.json` does not reference it |
+| Commitlint validates commit messages at `commit-msg` and in CI    | `IMPLEMENTED` — `commitlint.config.mjs`                                          |
 | A `.release-please-manifest.json`                                 | `DEFERRED` — named in the root `Cargo.toml` comment; the file does not exist yet |
 | Every workflow that does any of the above                         | `DEFERRED` — `.github/workflows/` is empty                                       |
 
@@ -52,15 +52,15 @@ with no release behind it is a problem, because nothing is traceable to a commit
 
 ## Who does what
 
-| Actor                             | Owns                                                                                                                                                                                                              |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Cocogitto** (`commit-msg` hook) | Validating that every commit message matches the conventional format and carries a scope from `commitlint.config.mjs`. It is the release-message authority — Commitlint is not, and the two must not be confused. |
-| **Moon**                          | The task graph. Which projects are affected by a change, and therefore what CI runs (constraint 15, affected-first).                                                                                              |
-| **GitHub Actions**                | Running the tasks, and the workflows themselves.                                                                                                                                                                  |
-| **Release Please**                | The version number, the changelog, the release PR, and the tag. **Nothing else.**                                                                                                                                 |
-| **Wrangler**                      | Uploading versions and creating deployments. It is a mechanism, not a decision-maker.                                                                                                                             |
-| **A human**                       | Merging the release PR. Approving the two identity production gates. Deciding to roll back.                                                                                                                       |
-| **The merge queue**               | Landing every PR. No direct merges, no direct pushes to the default branch.                                                                                                                                       |
+| Actor               | Owns                                                                                                                                                             |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Commitlint**      | Validating that every commit message matches the conventional format and carries a declared scope, at the `commit-msg` hook and re-run in CI for pushed commits. |
+| **Moon**            | The task graph. Which projects are affected by a change, and therefore what CI runs (constraint 15, affected-first).                                             |
+| **GitHub Actions**  | Running the tasks, and the workflows themselves.                                                                                                                 |
+| **Release Please**  | The version number, the changelog, the release PR, and the tag. **Nothing else.**                                                                                |
+| **Wrangler**        | Uploading versions and creating deployments. It is a mechanism, not a decision-maker.                                                                            |
+| **A human**         | Merging the release PR. Approving the two identity production gates. Deciding to roll back.                                                                      |
+| **The merge queue** | Landing every PR. No direct merges, no direct pushes to the default branch.                                                                                      |
 
 ## The sequence
 
@@ -152,7 +152,7 @@ What the release PR contains: the version bump in
 `.release-please-manifest.json` and the relevant `package.json`/`Cargo.toml`
 files, and the changelog generated from the conventional commits since the last
 tag. The changelog is generated from commit messages, so the commit message is
-the user-facing artifact — which is why Cocogitto validates them and why the
+the user-facing artifact — which is why Commitlint validates them and why the
 scopes in `commitlint.config.mjs` are a real decision rather than a lint
 setting.
 

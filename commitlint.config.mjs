@@ -16,27 +16,6 @@
  * `check-architecture.mjs` check, and the scope here); this file is the
  * fourth of the four.
  *
- * ---------------------------------------------------------------------------
- * COMMITLINT IS NOT THE RELEASE-MESSAGE AUTHORITY.
- *
- * Cocogitto (`cocogitto.toml`) is. Release Please is what cuts a release, and
- * the release commit message is what it reads; Cocogitto is what validates that
- * message's conventional shape and its scope, and it is the tier that fails a
- * bad one. Commitlint is a SECOND, INDEPENDENT tier: it re-checks the same
- * message against a superset of the rules, and it is the tier a CI job can run
- * against a pushed commit where no hook was ever installed. The two roles must
- * never be confused, and a fix that tunes one to satisfy the other is the
- * reason the confusion happens. `AGENTS.md` §"Commits, PRs, and security"
- * carries the same statement; the two must keep agreeing.
- * ---------------------------------------------------------------------------
- *
- * The three files that hold commit law — this one, `cocogitto.toml` and
- * `lefthook.yml` — are deliberately redundant with each other. That is not
- * drift: they are three checks a commit must pass, and each fails in a
- * different place (this one is the CI tier, `cocogitto.toml` is the release
- * tier, `lefthook.yml` is what runs locally). They agree on the SCOPE LIST,
- * which is the part that has one meaning and three copies.
- *
  * @type {import("@commitlint/types").UserConfig}
  */
 export default {

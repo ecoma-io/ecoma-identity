@@ -311,5 +311,5 @@ production actually changes.
   the version tag that makes a rollback decidable
 - `docs/operations/rollback.md` — the three paths, and why a forward fix is not a
   rollback
-- `cocogitto.toml` — the commit-message authority that makes the changelog
+- `commitlint.config.mjs` — the commit-message authority that makes the changelog
   trustworthy

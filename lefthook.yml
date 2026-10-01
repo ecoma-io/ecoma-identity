@@ -1,13 +1,12 @@
-# Git hooks — the three moments a commit is judged, and what each is FOR.
+# Git hooks — the two moments a commit is judged, and what each is FOR.
 #
 # This file names JOBS only: which command runs at which hook, and nothing about
 # what the command enforces. Every rule those commands apply lives with the
 # document that owns it — the boundary law in `docs/architecture/` and
-# `module-boundaries.config.mjs`, the scope vocabulary in `commitlint.config.mjs`
-# and `cocogitto.toml`, the release policy in `docs/operations/`. A rule
-# restated here would be the second copy, and the second copy is the one that
-# goes stale: a hook file that repeats the law reads as the law and gets
-# updated last.
+# `module-boundaries.config.mjs`, the scope vocabulary in `commitlint.config.mjs`,
+# the release policy in `docs/operations/`. A rule restated here would be the
+# second copy, and the second copy is the one that goes stale: a hook file that
+# repeats the law reads as the law and gets updated last.
 #
 # `pnpm install` runs `lefthook install`, so these are wired into `.git/hooks`
 # for every clone. A gate that exists only on one machine catches nothing on
@@ -47,26 +46,10 @@ pre-commit:
 # ---------------------------------------------------------------------------
 commit-msg:
   commands:
-    cocogitto:
-      # THE AUTHORITATIVE TIER, and it is authoritative for one thing: whether
-      # this message is allowed to become a release commit. Cocogitto is what
-      # the release process depends on, and `cocogitto.toml` is its config.
-      # `{1}` is the file git has already written the draft message into.
-      #
-      # `--config` is load-bearing rather than redundant: `cog` discovers
-      # `cog.toml` and nothing else, so without the flag this job parses no
-      # config, enforces no scope, and exits 0 on a message it never
-      # examined — a green light on an unchecked gate, which is worse than no
-      # gate because it reads as one. The measured evidence is in the header
-      # of `cocogitto.toml`.
-      run: set -euo pipefail; cog --config cocogitto.toml verify --file {1}
-
     commitlint:
-      # THE SECOND, INDEPENDENT TIER. It exists because the first one cannot
-      # be everywhere: CI re-runs this tier against commits that arrived with
-      # no hook ever installed. Neither tier subsumes the other — a message
-      # one accepts and the other rejects is a bug in one of the two configs,
-      # never a reason to reach for a bypass.
+      # Conventional Commits format plus the scope enum, validated at the
+      # moment the message is still a draft. CI re-runs this against pushed
+      # commits where no hook was ever installed, so the two checks agree.
       run: set -euo pipefail; pnpm exec commitlint --edit {1}
 
 # ---------------------------------------------------------------------------

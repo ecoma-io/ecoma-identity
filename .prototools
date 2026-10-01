@@ -11,5 +11,4 @@
 # *installed* one match.
 moon = "2.5.6"
 proto = "0.62.3"
-cocogitto = "7.0.0"
 pnpm = "12.8.1"

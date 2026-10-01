@@ -57,7 +57,7 @@ other in the same commit rather than leaving both to rot.
 | The executable form of the boundary law                     | `tooling/scripts/check-architecture.mjs`      |
 | The archkeep constraint table                               | `module-boundaries.config.mjs`                |
 | Project map, tags, tasks                                    | `.moon/workspace.yml`, per-project `moon.yml` |
-| The scopes a commit may carry                               | `commitlint.config.mjs`, `cocogitto.toml`     |
+| The scopes a commit may carry                               | `commitlint.config.mjs`                       |
 | The database schema and its forward-only rule               | `database/migrations/`                        |
 | The four API contracts                                      | `contracts/`                                  |
 | Bindings per environment                                    | `infra/cloudflare/`                           |
@@ -190,11 +190,10 @@ description; and **nothing in the diff claims a capability that does not exist**
 ## Commits, PRs, and security
 
 Conventional Commits with the scopes in `commitlint.config.mjs`, validated by
-**Cocogitto** (`cocogitto.toml`) at the `commit-msg` hook — Commitlint is not
-the release-message authority and the two must not be confused. A new module
-brings its scope in the same commit. Hooks run the fast gates per commit and the
-full suite on push. Never bypass them, never push to `main` directly: every PR
-lands through the merge queue, and commits are cryptographically signed.
+**Commitlint** at the `commit-msg` hook and in CI. A new module brings its
+scope in the same commit. Hooks run the fast gates per commit and the full
+suite on push. Never bypass them, never push to `main` directly: every PR lands
+through the merge queue, and commits are cryptographically signed.
 
 Keep PRs small enough to review in one sitting. A PR that changes the
 architecture law links the document diff beside the code diff, and a PR that

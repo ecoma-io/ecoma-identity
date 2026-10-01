@@ -163,10 +163,10 @@ jobs:
       # Every pull-request commit reaches main verbatim — under merge-commit
       # merging as the SAME object, through the merge's second parent — and the
       # local commit-msg hook cannot see history it was not installed for, so
-      # the gate re-runs here. Cocogitto is the release-message authority and
-      # runs at the hook; this is the independent CI tier over the same
-      # conventional format plus the scope enum. Merge commits are skipped by
-      # commitlint's own defaults: nobody authors a merge by hand.
+      # the gate re-runs here. This is the CI tier over the conventional format
+      # plus the scope enum, validating what the hook already checked locally.
+      # Merge commits are skipped by commitlint's own defaults: nobody authors
+      # a merge by hand.
       #
       # Release Please's pull requests are held to this too, which is why
       # release-please-config.json pins `pull-request-title-pattern` to

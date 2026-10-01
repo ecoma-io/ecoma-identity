@@ -1,6 +1,6 @@
 # Moonrepo workspace. Project discovery is an explicit map — nothing is
 # inferred from globs, so a new module must be added here, to
-# `module-boundaries.config.mjs`, and to `cocogitto.toml` in one commit.
+# `module-boundaries.config.mjs`, and to `commitlint.config.mjs` in one commit.
 #
 # `toolchains.yml` pins Node and pnpm for moon tasks and CI; the Rust
 # toolchain is the ambient stable toolchain (no rust-toolchain.toml by org

@@ -78,9 +78,9 @@ decision (`docs/adr/0005-no-business-authorization.md`).
 ## Getting started
 
 ```bash
-# Prerequisites, all pinned in-repo: node 24.20.0, pnpm 12.8.1, moon 2.5.6,
-# cocogitto 7.0.0 (.prototools, .node-version, package.json#packageManager).
-proto install          # moon, proto, cocogitto
+# Prerequisites, all pinned in-repo: node 24.20.0, pnpm 12.8.1, moon 2.5.6
+# (.prototools, .node-version, package.json#packageManager).
+proto install          # moon, proto
 pnpm install
 
 # The three Identity Workers, each in its own terminal.
@@ -175,7 +175,7 @@ rejected for, and the architecture map at the top tells you which document owns
 which fact.
 
 Commits are [Conventional Commits](https://www.conventionalcommits.org/) with
-this repository's scopes, validated by Cocogitto. Every commit is
+this repository's scopes, validated by Commitlint. Every commit is
 cryptographically signed. Every PR lands through the merge queue.
 
 **Security issues do not go through issues or pull requests** — see
