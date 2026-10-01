@@ -1,0 +1,37 @@
+{
+  "meta": {
+    "title": "Ecoma Identity Admin"
+  },
+  "nav": {
+    "dashboard": "Bảng điều khiển",
+    "users": "Người dùng",
+    "applications": "Ứng dụng",
+    "settings": "Cài đặt",
+    "logout": "Đăng xuất"
+  },
+  "auth": {
+    "login": {
+      "title": "Đăng nhập vào Bảng điều khiển",
+      "email": "Địa chỉ email",
+      "password": "Mật khẩu",
+      "submit": "Đăng nhập",
+      "forgot": "Quên mật khẩu?"
+    }
+  },
+  "common": {
+    "save": "Lưu",
+    "cancel": "Hủy",
+    "delete": "Xóa",
+    "edit": "Sửa",
+    "create": "Tạo",
+    "search": "Tìm kiếm",
+    "loading": "Đang tải...",
+    "error": "Đã xảy ra lỗi",
+    "success": "Đã lưu thành công"
+  },
+  "locale": {
+    "select": "Ngôn ngữ",
+    "en": "English",
+    "vi": "Tiếng Việt"
+  }
+}
