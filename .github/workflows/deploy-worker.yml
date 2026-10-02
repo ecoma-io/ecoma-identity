@@ -467,11 +467,17 @@ jobs:
       # A moon task, because both web apps have their own `moon.yml` now. The
       # reason it is one rather than `pnpm --filter` is recorded on the same
       # line in ci.yml, and it applies here with more force: `identity-web:build`
-      # carries `deps: ["^build"]`, which is what compiles
-      # `@ecoma-io/shared-i18n`. Without it a deploy runs on a clean runner
-      # where that package's gitignored `dist/` does not exist, and the build
-      # dies on `Rolldown failed to resolve import "@ecoma-io/shared-i18n"` —
-      # after two approvals, at whatever hour the promotion was run.
+      # carries a `deps:` edge on the shared preferences package, which is what
+      # compiles `@ecoma-io/frontend-preferences`. Without it a deploy runs on a
+      # clean runner where that package's gitignored `dist/` does not exist, and
+      # the build dies on `Rolldown failed to resolve import
+      # "@ecoma-io/frontend-preferences"` — after two approvals, at whatever
+      # hour the promotion was run.
+      #
+      # The edge is named `frontend-preferences:build` rather than spelled
+      # `^build` because moon 2.5.6 does not support the shorthand, and the
+      # earlier `deps: ["^build"]` in this comment was a description of an
+      # intent moon does not implement.
       #
       # ---- `home-web` (ADR-0016) ------------------------------------------
       # The third case, and the reason the first two are not derived from the
