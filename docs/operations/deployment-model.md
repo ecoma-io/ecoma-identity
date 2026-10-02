@@ -337,6 +337,22 @@ and an environment is a thing the runner refuses to pass. The identity and
 `home-web` promotion jobs for 50% and 100% carry `environment: production`; the
 jobs at 1% and 10% do not.
 
+**The environment exists, and what it will do.** `production` is configured with
+a required-reviewer rule and `prevent_self_review`, recorded in
+`[.github/repository-settings.json](../../.github/repository-settings.json)` and
+verified live with `GET /repos/ecoma-io/ecoma-identity/environments`. Before
+this repository had one, every job above ran straight through: GitHub creates an
+undeclared environment implicitly, without protection rules, the first time a
+job names one.
+
+The named reviewer is the account that pushes, and `prevent_self_review` forbids
+it from approving its own deployment. **So both production gates will stop at
+`Waiting for approval` until a second person is added as a collaborator and as an
+environment reviewer.** That is the gate functioning rather than broken — a
+repository of one cannot satisfy a two-eyes rule by itself, and the alternative
+setting would be an approval that approves itself. The job is not stuck; it waits,
+and a reviewer releases it from the run's deployment page.
+
 ## Environments
 
 Three environments, each one a block in `infra-topology/topology.json`:
