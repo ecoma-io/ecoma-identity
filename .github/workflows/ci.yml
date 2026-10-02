@@ -206,6 +206,17 @@ jobs:
         run: pnpm contracts
       - name: The deployment topology is internally coherent
         run: pnpm topology:validate
+      # The frontend-coherence gate, here for the same structural reason as the
+      # three above: it judges files that no moon project owns, so `moon ci`'s
+      # affected graph correctly answers "no tasks affected" for a change that
+      # reintroduces a second owner of a preference value.
+      #
+      # It is cheap — pure Node, three directories — and unconditional, because
+      # a frontend preference value with two owners is a fact about the tree
+      # rather than about whichever pull request introduced it. See
+      # docs/architecture/frontend-preferences.md.
+      - name: Each frontend preference value has exactly one owner
+        run: pnpm frontend:check
 
       # Every pull-request commit reaches main verbatim — under merge-commit
       # merging as the SAME object, through the merge's second parent — and the
