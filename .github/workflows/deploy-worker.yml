@@ -818,6 +818,15 @@ jobs:
       # `worker-build --release` — producing a SECOND set of bytes from the
       # same source, and uploading the one nobody reviewed. The bytes that get
       # promoted must be the bytes that got tested.
+      #
+      # THE BOOTSTRAP BRANCH TAKES NO `--yes`, AND THAT IS NOT AN OMISSION.
+      # `wrangler versions deploy` takes `-y/--yes`; plain `wrangler deploy`
+      # has no such flag and rejects it — `✘ [ERROR] Unknown argument: yes`,
+      # which is how run 37009652081 failed here. The two commands look alike
+      # and their flags are not interchangeable. `deploy` needs no equivalent:
+      # its confirmation prompts are gated on `isNonInteractiveOrCI()`
+      # (`wrangler-dist/cli.js:29531`), which is true under Actions, so it
+      # skips them without being told to.
       - name: Upload a version (NO TRAFFIC), or bootstrap the Worker (first deploy only)
         id: upload
         env:
@@ -848,8 +857,7 @@ jobs:
               --config "$CONFIG_PATH" \
               --no-bundle \
               --tag "$RELEASE_TAG" \
-              --message "$RELEASE_TAG ($GITHUB_SHA) first deploy by .github/workflows/deploy-worker.yml" \
-              --yes
+              --message "$RELEASE_TAG ($GITHUB_SHA) first deploy by .github/workflows/deploy-worker.yml"
             {
               echo "### Bootstrapped the Worker with its first deployment"
               echo ""
