@@ -438,13 +438,15 @@ jobs:
       #
       # Moon tasks, not `pnpm --filter`. Both apps now have their own `moon.yml`,
       # so `identity-web:build` resolves — and each task carries
-      # `deps: ["^build"]`, which is what builds `@ecoma-io/shared-i18n` first.
-      # That ordering used to be implicit and it was wrong: `dist/` is
-      # gitignored, so on a clean CI checkout the shared library had no entry
-      # point and both builds failed with `Rolldown failed to resolve import
-      # "@ecoma-io/shared-i18n"`. Naming the dependency in the task graph fixes
-      # it for every workflow, rather than restating the same build step in
-      # each one that happens to need this app.
+      # `deps: ["frontend-preferences:build"]`, which is what builds
+      # `@ecoma-io/frontend-preferences` first. That ordering used to be implicit
+      # and it was wrong: `dist/` is gitignored, so on a clean CI checkout the
+      # shared library had no entry point and both builds failed with
+      # `Rolldown failed to resolve import "@ecoma-io/frontend-preferences"`.
+      # Naming the dependency in the task graph fixes it for every workflow,
+      # rather than restating the same build step in each one that happens to
+      # need this app. The edge is named rather than spelled `^build` because
+      # moon 2.5.6 does not implement the shorthand.
       - name: Build the web apps (their dist/ is inside the version)
         run: pnpm exec moon run identity-web:build identity-admin-web:build
 
