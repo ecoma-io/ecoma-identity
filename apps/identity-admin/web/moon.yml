@@ -19,7 +19,7 @@
 # applied to one copy and not the other is a bug in exactly one of the two
 # applications, which is what the shared text prevents.
 tags:
-  - identity-web
+  - identity-admin-web
 
 # ---------------------------------------------------------------------------
 # WHY SEVERAL TASKS REPEAT THE SAME THREE LINES
