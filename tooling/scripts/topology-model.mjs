@@ -278,22 +278,31 @@ export function deletionRefusal(topology, kind, name) {
  * produce a binding no Worker declares, and the manifest's own validator rejects
  * the idea: "these are binding NAMES … they are not Cloudflare resource ids".
  *
- * A deployable that binds nothing resolves to an object of nulls rather than
- * being dropped, so a caller asking about a deployable that binds no D1 gets
- * "no" instead of a missing key.
+ * A deployable that binds nothing resolves to an empty object rather than being
+ * dropped, so a caller asking about a deployable that binds no D1 gets "no"
+ * instead of a missing key.
+ *
+ * Every deployable's slots are COPIED from the manifest rather than enumerated
+ * by name. An enumeration is a second view of `topology.bindings` that can
+ * drift from it, and it drifted in the direction hardest to notice: a slot
+ * added to a deployable would be dropped here, so `resolve-infra-name.mjs
+ * --ask bindings.<deployable>.<newslot>` would answer "is not declared" and exit
+ * 0 — a false negative from the one tool whose whole purpose is to be
+ * authoritative about this file.
+ *
+ * Nothing else caught it. `validate-topology.mjs`'s `exactKeys` over
+ * `topology.bindings` checks the deployable keys, not each deployable's slots,
+ * and `render-wrangler-config.mjs` reads `topology.bindings[deployable]`
+ * directly — so it saw the new slot while this function did not.
+ *
+ * Spread, not passed through: `services` is an array and the rest are strings.
+ * The shallow copy keeps a caller from mutating the parsed manifest through
+ * this object, which is shared by every later resolution in the same process.
  */
 function resolveBindings(topology) {
   const slots = {};
   for (const deployable of DEPLOYABLES) {
-    const declared = topology.bindings[deployable] ?? {};
-    slots[deployable] = {
-      d1: declared.d1 ?? null,
-      kv: declared.kv ?? null,
-      queue_producer: declared.queue_producer ?? null,
-      ratelimit: declared.ratelimit ?? null,
-      email_provider: declared.email_provider ?? null,
-      services: [...(declared.services ?? [])],
-    };
+    slots[deployable] = { ...(topology.bindings[deployable] ?? {}) };
   }
   return slots;
 }
