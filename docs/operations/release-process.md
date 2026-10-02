@@ -143,6 +143,34 @@ _over_-running is slow and correct. New modules must be added to
 `.moon/workspace.yml` in the same commit that creates them, which is the
 "new module = one commit, four files" rule in `AGENTS.md`.
 
+### What the affected graph cannot see, and what runs anyway
+
+An affected graph has one honest blind spot, and it is worth naming rather than
+leaving to be discovered: **a directory that no moon project owns is not part of
+any project's affected set.** `contracts/`, `infra-topology/` and
+`tooling/` are such directories — documents and scripts that nothing imports and
+nothing depends on. A change inside them moves no project's paths, so `moon ci`
+correctly reports _"No tasks affected by changed files"_ and the affected graph
+does exactly what it promises. Verified rather than assumed: a probe commit
+touching only `tooling/scripts/` produced that exact message.
+
+So the `checks` job runs three `pnpm verify` gates outside `moon ci`, on the whole
+tree, on every trigger:
+
+| Gate                         | What the affected graph would miss                                                                                                                                                                                         |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cargo fmt --all -- --check` | **Any rustfmt violation at all.** There was no rustfmt gate anywhere in CI before this; only `lefthook.yml`, on staged files, on a contributor's machine — and a `files:` pattern cannot see a reformat spanning two files |
+| `pnpm contracts`             | A contract drifting from the code beside it, including `contracts/oidc/v1/README.md` disagreeing with the Rust route table                                                                                                 |
+| `pnpm topology:validate`     | The deployment topology describing something this repository does not mean                                                                                                                                                 |
+
+They are whole-tree on purpose, for the same reason the `architecture` job is: a
+contract that has drifted is a fact about a pair of files rather than about the
+files that changed, and the pair is exactly what an affected graph is blind to.
+
+This is the general rule, and it is the shape any future gate should take: **a
+check belongs in the affected graph if a moon project owns what it reads, and
+beside it as a whole-tree step if nothing does.**
+
 ## The release PR
 
 Release Please opens it. **A human merges it** (constraint 17). This is the only
