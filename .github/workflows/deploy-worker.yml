@@ -604,6 +604,113 @@ jobs:
             exit 1
           }
 
+      # ---- the migrations --------------------------------------------------
+      # BEFORE the upload, because the version being uploaded must be a version
+      # that works against the schema it will meet in production. Applying
+      # afterwards would mean promoting bytes onto a database that does not yet
+      # have the tables those bytes read.
+      #
+      # WHY THE BINDING AND NOT A NAME. Wrangler's positional argument is matched
+      # against `database_name` or `binding` by strict equality, and a UUID is
+      # REJECTED. The binding is read out of the config just rendered rather than
+      # hardcoded here, so a topology that renames the slot changes this step too,
+      # and a deployable that declares no D1 skips the step entirely rather than
+      # failing on a binding that is not there. `IDENTITY_DB` is what
+      # infra-topology/topology.json says today; nothing in this file repeats it
+      # as a fact.
+      #
+      # WHY `--remote` IS LOAD-BEARING. `wrangler d1 migrations apply` DEFAULTS
+      # TO LOCAL. Without `--remote` it creates a sqlite file under
+      # `.wrangler/state`, applies every migration to it, prints success and
+      # exits 0. A green run having changed nothing is worse than a red one,
+      # because the red one is visible and this one is not. There is also no
+      # `--yes` on this command; it skips its confirmation prompt automatically
+      # when stdin is not a terminal, which is what a workflow step is.
+      #
+      # WHY ONE MIGRATION RUN PER DEPLOY IS SAFE TODAY, AND WHAT WOULD BREAK IT.
+      # `database/identity/migrations/0001_schema_migrations.sql` records that
+      # this repository keeps its own schema-version table ALONGSIDE wrangler's
+      # `d1_migrations` ledger, and topology sets `migrations_table:
+      # "d1_migrations"` so the two do not diverge. That ledger is a table in one
+      # database, so two concurrent applies against the same database race on it.
+      # Only `identity` declares a D1 (ADR-0003), the four staging jobs run in
+      # parallel, and their resource sets are disjoint — `identity` owns the D1
+      # and `jobs` owns its own KV — so no two jobs touch one database. The
+      # assertion below is what keeps that a checked property rather than a
+      # coincidence of this topology: if two jobs ever target the same database,
+      # the run stops here instead of racing wrangler's ledger.
+      - name: Apply D1 migrations
+        id: migrate
+        env:
+          CONFIG_PATH: .generated/cloudflare/${{ inputs.environment }}/${{ inputs.worker }}/wrangler.jsonc
+        run: |
+          set -euo pipefail
+
+          # READ TOPOLOGY, NOT THE GENERATED CONFIG. Both were tried; topology is
+          # the right one for three reasons.
+          #
+          # The generated config is JSONC: it carries `//` boundary comments and
+          # a trailing comma, so neither `jq` nor Python's `json` parses it.
+          # Stripping comments with `sed` is worse than a parse error — every
+          # config contains an issuer URL, so `"https://stg-identity.ecoma.io"`
+          # loses its `//` and the string is cut in half. Parsing it properly
+          # means a JSONC reader in a workflow step, which is a second
+          # implementation of a format `render-wrangler-config.mjs` already owns.
+          #
+          # Topology is plain JSON, it is the file the renderer projects FROM, and
+          # it declares both halves of what this step needs: the binding slot
+          # name (`bindings.<deployable>.d1`) and the resource name
+          # (`environments.<env>.resources.<deployable>.d1.name`). Reading both
+          # from one jq call means they cannot be from different places, and a
+          # deployable that declares no D1 is answered by the same read.
+          read -r D1_BINDING D1_NAME < <(jq -r \
+            --arg env "$ENVIRONMENT" --arg w "$WORKER" '
+              [ (.bindings[$w].d1 // ""),
+                (.environments[$env].resources[$w].d1.name // "") ]
+              | @tsv' infra-topology/topology.json)
+
+          if [ -z "$D1_BINDING" ] || [ -z "$D1_NAME" ]; then
+            echo "::notice::$WORKER declares no d1_databases binding in $ENVIRONMENT. Nothing to migrate."
+            echo "migrated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Applying migrations to the database bound as $D1_BINDING (remote)."
+          echo "  database_name: $D1_NAME"
+
+          # The ledger is per-database and the parallel jobs are per-deployable,
+          # so the invariant to check is that this database is this deployable's
+          # alone. Derived from topology, not asserted in prose.
+          CONCURRENT="$(jq -r --arg env "$ENVIRONMENT" --arg n "$D1_NAME" '
+            [.environments[$env].resources
+             | to_entries[]
+             | select(.value.d1.name == $n)
+             | .key] | join(",")' infra-topology/topology.json)"
+          if [ "$CONCURRENT" != "$WORKER" ]; then
+            echo "::error::the database $D1_NAME is declared by [$CONCURRENT], but this job is deploying $WORKER. Two jobs applying migrations to one database race on wrangler's d1_migrations ledger. Split the resource out or run the deploys serially; do not let them run in parallel."
+            exit 1
+          fi
+
+          bash tooling/scripts/wrangler-step.sh "apply d1 migrations" -- \
+            d1 migrations apply "$D1_BINDING" \
+            --remote \
+            --config "$CONFIG_PATH"
+
+          echo "migrated=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "### D1 migrations applied"
+            echo ""
+            echo "- Worker: \`$WORKER\`"
+            echo "- Environment: \`$ENVIRONMENT\`"
+            echo "- Binding: \`$D1_BINDING\` → \`$D1_NAME\`"
+            echo "- Ledger: \`d1_migrations\` (wrangler's own; this repository's"
+            echo "  \`schema_migrations\` table coexists with it by design — see"
+            echo "  \`database/identity/migrations/0001_schema_migrations.sql\`)"
+            echo ""
+            echo "Forward-only under ADR-0011: a migration may add, never remove"
+            echo "or narrow, and wrangler never down-migrates."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # ---- the upload ------------------------------------------------------
       # THE COMMAND THAT CREATES A VERSION AND SENDS NO TRAFFIC. Not
       # `wrangler deploy`, which creates a Deployment and immediately sends
