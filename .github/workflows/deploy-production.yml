@@ -1,3 +1,5 @@
+name: Deploy Production
+
 # PRODUCTION. On a release tag, for all four deployables.
 #
 # This is the only workflow in this repository that deploys to the production
@@ -60,6 +62,7 @@
 # cannot satisfy a two-eyes rule by itself, and the honest outcome is a queue
 # that waits rather than a promotion that clicks itself through. Add the second
 # reviewer in `.github/repository-settings.json` and this note becomes history.
+
 
 on:
   # Release Please's tag. `identity-v0.1.0` and `identity-admin-v0.1.0` arrive as

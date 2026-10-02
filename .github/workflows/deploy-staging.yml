@@ -1,3 +1,5 @@
+name: Deploy Staging
+
 # STAGING. Every merge to the default branch, for all four deployables.
 #
 # This is the constraint-16 job: staging deploys AUTOMATICALLY after a merge to

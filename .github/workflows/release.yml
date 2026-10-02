@@ -104,13 +104,6 @@ jobs:
         id: release
         with:
           token: ${{ steps.app-token.outputs.token || github.token }}
+          config-file: release.config.json
+          manifest-file: release.manifest.json
 
-      # Said out loud in the run summary, because "the release PR cannot be
-      # merged" is a much cheaper problem to diagnose when the summary already
-      # told the maintainer why. This step cannot fail the run: release-please
-      # having succeeded is the real verdict, and a warning about a missing
-      # optional secret is not a failure of it.
-      - name: Note the token arrangement
-        if: always() && env.RELEASE_APP_ID == ''
-        run: |
-          echo "::warning::No ECOMA_APP_ID secret: the release pull request is maintained with GITHUB_TOKEN, which cannot start new workflow runs. The PR will be opened and updated, but ci-gate and analysis-gate will not run on it unattended and it must be merged with a manual re-run of CI."
