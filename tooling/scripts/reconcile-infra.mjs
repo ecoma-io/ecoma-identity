@@ -49,6 +49,7 @@ import {
   EXIT_OK,
   TopologyError,
   loadTopology,
+  reportFailure,
   resolveEnvironment,
 } from "./topology-model.mjs";
 
@@ -86,17 +87,25 @@ async function fetchAll(token, accountId, kind) {
   const results = [];
   let page = 1;
   for (;;) {
-    const url_ =
-      spec.body === undefined
-        ? `${url}?per_page=100&page=${page}`
-        : `${url}?per_page=100`;
+    // A kind whose pagination rides in a request BODY is a POST. Sending that
+    // body on the default GET is refused outright —
+    //
+    //     Request with GET/HEAD method cannot have body.
+    //
+    // — so the method and the page parameter have to move together with the
+    // body, and this loop keeps them in step.
+    const usesBody = spec.body !== undefined;
+    const url_ = usesBody ? url : `${url}?per_page=100&page=${page}`;
     const init = {
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
     };
-    if (spec.body !== undefined) init.body = JSON.stringify(spec.body);
+    if (usesBody) {
+      init.method = "POST";
+      init.body = JSON.stringify({ ...spec.body, page });
+    }
     const response = await fetch(url_, init);
     if (!response.ok) {
       const detail = await response.text();
@@ -205,8 +214,13 @@ async function reconcile(environment, outPath) {
       "CLOUDFLARE_API_TOKEN is not set. This script reads the token from the environment and never from an argument, so it cannot appear in a process listing.",
     );
   }
-  const topology = loadTopology(REPO_ROOT);
-  const accountId = topology.account.id;
+  const { file: topologyFile, topology } = loadTopology(REPO_ROOT);
+  const accountId = topology.account?.id;
+  if (typeof accountId !== "string" || accountId === "") {
+    throw new TopologyError(
+      `${topologyFile} declares no usable account.id. Every wrangler command needs it, and there is nowhere else to read it from.`,
+    );
+  }
   const resolved = resolveEnvironment(topology, environment);
 
   // One list call per KIND, not per resource: two deployables sharing a queue
@@ -313,10 +327,10 @@ export async function main(argv = process.argv.slice(2)) {
     );
     return EXIT_OK;
   } catch (error) {
-    process.stderr.write(`${error.message}\n`);
+    reportFailure("reconcile-infra", error);
     // A missing resource is a STOP, not a crash: the operator's next action is
     // to provision or to correct the name, and the message says which.
-    return error instanceof TopologyError ? EXIT_CANNOT_RUN : EXIT_CANNOT_RUN;
+    return EXIT_CANNOT_RUN;
   }
 }
 

@@ -274,21 +274,50 @@ jobs:
               # Path 1, the documented normal path. `wrangler rollback` is
               # itself a promotion of an existing version id — it does not
               # upload, build or repackage.
-          npx --yes "wrangler@$WRANGLER_VERSION" rollback "$VERSION_ID" \
+              #
+              # The annotation is the point of this block. Under `set -e` a
+              # wrangler failure ended the step with "Process completed with
+              # exit code 1" and left the run's annotation list EMPTY, so during
+              # an incident the reason was only findable by scrolling. The deploy
+              # workflows use `tooling/scripts/wrangler-step.sh` for every
+              # command; this job cannot, because it has no checkout and so
+              # cannot read a script out of the repository — the same constraint
+              # that stops it building, stated a second time.
+              set +e
+              npx --yes "wrangler@$WRANGLER_VERSION" rollback "$VERSION_ID" \
                 --name "$WORKER_NAME" \
                 --message "$REASON (rollback, Path 1)" \
-                --yes
+                --yes 2>&1 | tee /tmp/wrangler-out
+              STATUS="${PIPESTATUS[0]}"
+              set -e
+              if [ "$STATUS" -ne 0 ]; then
+                echo "::error title=wrangler rollback failed (exit ${STATUS})::$(tail -c 800 /tmp/wrangler-out | tr '\n' ' ' | tr -s ' ')"
+                echo ""
+                echo "No traffic moved. Whatever was live is still live — confirm with"
+                echo "'wrangler deployments list' before retrying."
+                exit "$STATUS"
+              fi
               ;;
             2)
               # Path 2, the partial path: change the Deployment's percentage
               # rather than the version, so the bad version stays uploaded and
               # can be promoted again once it is understood.
-          npx --yes "wrangler@$WRANGLER_VERSION" versions deploy \
+              set +e
+              npx --yes "wrangler@$WRANGLER_VERSION" versions deploy \
                 --name "$WORKER_NAME" \
                 --version-id "$VERSION_ID" \
                 --percentage "$PERCENTAGE" \
                 --message "$REASON (rollback, Path 2 at ${PERCENTAGE}%)" \
-                --yes
+                --yes 2>&1 | tee /tmp/wrangler-out
+              STATUS="${PIPESTATUS[0]}"
+              set -e
+              if [ "$STATUS" -ne 0 ]; then
+                echo "::error title=wrangler versions deploy failed (exit ${STATUS})::$(tail -c 800 /tmp/wrangler-out | tr '\n' ' ' | tr -s ' ')"
+                echo ""
+                echo "No traffic moved. Whatever was live is still live — confirm with"
+                echo "'wrangler deployments list' before retrying."
+                exit "$STATUS"
+              fi
               ;;
             *)
               echo "::error::unknown path '$ROLLBACK_PATH'. Expected 1 (wrangler rollback) or 2 (versions deploy at an explicit percentage)."

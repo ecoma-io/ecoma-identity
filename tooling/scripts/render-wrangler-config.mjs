@@ -69,6 +69,7 @@ import {
   TopologyError,
   loadTopology,
   matchesGrammar,
+  reportFailure,
   resolveEnvironment,
 } from "./topology-model.mjs";
 
@@ -857,7 +858,7 @@ export function main(argv = process.argv.slice(2)) {
     ({ topology } = loadTopology(REPO_ROOT));
     descriptor = resolveDescriptorArgument(options.stage, options.descriptor);
   } catch (error) {
-    process.stderr.write(`✗ render-wrangler-config: ${error.message}\n`);
+    reportFailure("render-wrangler-config", error);
     return EXIT_INVALID;
   }
 

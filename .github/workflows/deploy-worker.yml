@@ -587,7 +587,8 @@ jobs:
           # WITHOUT changing any traffic. If the config is unreadable or
           # inconsistent, this fails here — before a version exists — rather
           # than at a promotion two approvals later.
-          pnpm exec wrangler deploy --dry-run -c "$GENERATED" || {
+          bash tooling/scripts/wrangler-step.sh "dry-run the generated config" -- \
+            deploy --dry-run -c "$GENERATED" || {
             echo "::error::the generated wrangler config did not pass wrangler's own validation."
             exit 1
           }
@@ -616,7 +617,7 @@ jobs:
           CONFIG_PATH: .generated/cloudflare/${{ inputs.environment }}/${{ inputs.worker }}/wrangler.jsonc
         run: |
           set -euo pipefail
-          pnpm exec wrangler versions upload \
+          bash tooling/scripts/wrangler-step.sh "upload a version" -- versions upload \
             --config "$CONFIG_PATH" \
             --no-bundle \
             --tag "$RELEASE_TAG" \
@@ -640,9 +641,9 @@ jobs:
         id: resolve
         run: |
           set -euo pipefail
-          JSON="$(pnpm exec wrangler versions list \
+          JSON="$(bash tooling/scripts/wrangler-step.sh "list versions" -- versions list \
             --config ".generated/cloudflare/$ENVIRONMENT/$WORKER/wrangler.jsonc" \
-            --json)"
+            --json --)"
           VERSION_ID="$(printf '%s' "$JSON" | python3 -c '
           import json, sys
           tag = sys.argv[1]
@@ -799,7 +800,7 @@ jobs:
               # cannot be changed here. Naming a config would also mean carrying
               # a file with real Cloudflare ids across a job boundary for an
               # operation that never reads them.
-              pnpm exec wrangler versions deploy \
+              bash tooling/scripts/wrangler-step.sh "promote a version" -- versions deploy \
                 --name "$WORKER_NAME" \
                 --version-id "$VERSION_ID" \
                 --percentage "$PERCENTAGE" \
@@ -1219,7 +1220,7 @@ jobs:
         id: promote
         run: |
           set -euo pipefail
-          pnpm exec wrangler versions deploy \
+          bash tooling/scripts/wrangler-step.sh "promote a version" -- versions deploy \
             --name "$WORKER_NAME" \
             --version-id "$VERSION_ID" \
             --percentage "$FINAL_PERCENTAGE" \
@@ -1320,7 +1321,7 @@ jobs:
         id: promote
         run: |
           set -euo pipefail
-          pnpm exec wrangler versions deploy \
+          bash tooling/scripts/wrangler-step.sh "promote a version" -- versions deploy \
             --name "$WORKER_NAME" \
             --version-id "$VERSION_ID" \
             --percentage "$POLICY_LIMIT_PERCENTAGE" \
@@ -1397,7 +1398,7 @@ jobs:
         id: promote
         run: |
           set -euo pipefail
-          pnpm exec wrangler versions deploy \
+          bash tooling/scripts/wrangler-step.sh "promote a version" -- versions deploy \
             --name "$WORKER_NAME" \
             --version-id "$VERSION_ID" \
             --percentage "$FINAL_PERCENTAGE" \

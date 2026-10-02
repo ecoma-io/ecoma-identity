@@ -65,6 +65,46 @@ export const EXIT_USAGE = 64;
 export class TopologyError extends Error {}
 
 /**
+ * Print a failure so it can be diagnosed from a run log alone.
+ *
+ * These scripts run inside a GitHub Actions step whose entire output is the
+ * only evidence that survives, and a bare
+ *
+ *     Cannot read properties of undefined (reading 'id')
+ *
+ * says what broke and nothing about where — which cost a debugging session
+ * once already, on a line that had no guard around it. So the stack goes to
+ * stderr, plus a `::error::` annotation so GitHub renders this as a failure
+ * rather than as log noise somebody has to go looking for.
+ *
+ * The message appears twice on purpose: once bare, for a human reading
+ * consecutive lines, and once inside the annotation, because GitHub collapses
+ * and truncates annotation contents in the run summary.
+ *
+ * Nothing here prints a secret. A stack carries file paths, function names and
+ * line numbers; the Cloudflare token is read from the environment and is not
+ * part of any value a stack would render. GitHub masks a registered secret with
+ * `***` in any case, which is what lets a run log be pasted into an issue
+ * without leaking the credential it was debugging.
+ *
+ * @param {string} tool The script name, so a log line says which tool failed
+ *   when several run in one step.
+ * @param {unknown} error Anything thrown. A non-Error is reported as such,
+ *   because "something threw a string" is itself the finding.
+ */
+export function reportFailure(tool, error) {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`${message}\n`);
+  if (error instanceof Error && error.stack) {
+    process.stderr.write(`${error.stack}\n`);
+  } else {
+    process.stderr.write(`${tool}: thrown value was not an Error.\n`);
+  }
+  const single = message.replace(/\s+/g, " ").slice(0, 900);
+  process.stderr.write(`::error::${tool}: ${single}\n`);
+}
+
+/**
  * Read and parse the manifest. Throws `TopologyError` rather than letting a
  * JSON parse error escape with no path attached — a caller that catches this
  * prints the message, and a stack trace from `JSON.parse` prints nothing about
