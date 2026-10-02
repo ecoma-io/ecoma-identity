@@ -411,8 +411,10 @@ reject — or, worse, a configuration where someone relaxes the check.
 
 - Three Workers deployed, each serving the version you uploaded.
 - `identity` at 100% of the new version, past both gates.
-- `/health` and `/ready` answering 200, with `/ready` reporting that
-  authentication is not implemented.
+- `/health` answering 200 on all three Workers, and `/ready` answering the
+  status each one is built to answer — `identity` 200, `identity-admin` and
+  `identity-jobs` 503 — with each body reporting that deployable as not ready
+  and that authentication is not implemented.
 - The seven OIDC routes answering 501, which is correct.
 - The Admin Worker holding no `IDENTITY_DB` — verified by `grep`, not by memory.
 - The pipeline deployed to staging, producing the same artifacts as your manual
