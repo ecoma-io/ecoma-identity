@@ -1,9 +1,10 @@
 # Architecture decision records
 
 Sixteen decisions, numbered 0001–0016. Decision 0016 was accepted on 2026-10-01,
-along with decisions 0001–0015 on 2026-09-30. They record _why this repository is
-shaped the way it is_ — the parts of the shape that were available to choose
-differently, and what the choice costs.
+along with decisions 0001–0015 on 2026-09-30. Decision 0021 was accepted on
+2026-10-02, and reverses the create-or-fail policy the reconciler originally
+carried. They record _why this repository is shaped the way it is_ — the parts of
+the shape that were available to choose differently, and what the choice costs.
 
 They are not the place to look for what a component does. `docs/architecture/`
 states what the system is; `docs/security/` states the non-negotiable rules;
@@ -45,6 +46,7 @@ almost never true — it is a change to a decision, and decisions live here.
 | [0014](0014-canary-promotion-identity.md)          | Canary promotion for Identity; automatic for Admin and Jobs | Accepted | `identity` ladders to 100% behind two human gates; Admin and Jobs hold no state, so a bad one is an outage rather than a compromise. |
 | [0015](0015-frontend-and-bff-one-release-unit.md)  | Frontend and BFF are one release unit                       | Accepted | The SPA is a directory inside the Worker's uploaded artifact, so the coupling is structural rather than conventional.                |
 | [0016](0016-home-web-fourth-deployable.md)         | home-web is a fourth, independent deployable                | Accepted | A public Nuxt/Nitro application on Workers + Assets, independent of Identity, with no Identity state, bindings, or runtime coupling. |
+| [0021](0021-deploy-ensures-its-own-resources.md)   | A deploy ENSURES the resources its topology declares        | Accepted | A name the account does not have is created then rediscovered; no id is ever stored, and reconciling never deletes.                  |
 
 The one-line summaries are summaries. The Context sections are the argument.
 

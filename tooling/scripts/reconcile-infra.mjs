@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * `reconcile-infra.mjs` — discover Cloudflare resource IDs by name, and write
- * the ephemeral descriptor `render-wrangler-config.mjs --stage resolve`
- * consumes.
+ * `reconcile-infra.mjs` — ENSURE the Cloudflare resources the topology names,
+ * and write the ephemeral descriptor `render-wrangler-config.mjs --stage
+ * resolve` consumes.
  *
  * WHY THIS EXISTS. Wrangler needs a D1 `database_id` and a KV namespace `id`,
  * and it will not look either one up: a config must name the ID. Topology names
@@ -20,20 +20,32 @@
  * "a second copy is a second thing to be wrong" — and the reason the twelve
  * tracked configs that used to carry literal IDs are gone.
  *
- * EXACT MATCH, OR FAILURE. Every lookup is by exact name. A resource that
- * cannot be found by exactly the name topology declares is an ERROR and this
- * script exits non-zero; it is never filled in with a guess, a prefix match, or
- * "the only one there is". The renderer refuses a descriptor carrying two
- * candidates for one name for the same reason — a duplicate is exactly the
- * condition a resolver must not guess about.
+ * ENSURE, NOT DISCOVER. A name topology declares that does not exist in the
+ * account is CREATED, here, by this run. This is a reversal of a deliberate
+ * earlier decision and ADR-0021 records why. The short form: this repository's
+ * account starts empty, and a deploy that refuses to run against an empty
+ * account is a deploy that never runs at all — the failure this repository
+ * spent a month having, with 20 red staging runs, because the reconciler
+ * enforced a purity that had no beneficiary. The cost is real and is stated in
+ * the ADR: a typo in a topology name now provisions a resource instead of
+ * failing a run. That is a cost paid on a typo, on a name that is read from one
+ * tracked file, in a review that reads that file. The alternative is paid on
+ * every deploy, forever, by nobody being able to ship.
  *
- * CREATE OR FAIL. A missing resource is NOT created here. Provisioning is a
- * separate, deliberate act — the Cloudflare dashboard or `wrangler d1 create`,
- * `wrangler kv namespace create`, `wrangler queues create` — because a deploy
- * that silently creates the database it is about to write to turns a typo in a
- * name into an empty production database rather than a failed run. This script
- * reports what is missing and stops. There is no `pnpm infra:provision` and
- * this repository does not claim one.
+ * WHAT ENSURING IS NOT. This script never DELETES. A name that resolves to two
+ * resources is an error, not a tie to break — two resources answering to one name
+ * is evidence the account is not the account this topology believes it is, and
+ * picking one is how a deploy writes production traffic into somebody's scratch
+ * database. Nothing here repairs, renames, adopts or deletes anything. Create is
+ * the whole of the write surface.
+ *
+ * WHY THE CREATED ID IS NOT TRUSTED. Cloudflare returns the new resource inline
+ * on every create, and reading that response would be one call cheaper. It is
+ * not read: the create response is what Cloudflare SAYS it made, while a re-list
+ * is what the account CONTAINS. Both are then funnelled through the same
+ * `exactMatch` duplicate check, so a create that somehow produced a second
+ * resource with the same name fails exactly as a pre-existing duplicate does.
+ * One rule for "is this name safe to bind", on both paths.
  *
  * No dependencies. Node ≥ 20. Reads the token from the environment
  * (`CLOUDFLARE_API_TOKEN`) and never from an argument, so it never appears in a
@@ -61,11 +73,17 @@ const REPO_ROOT = path.resolve(SCRIPT_DIR, "..", "..");
 const CLOUDFLARE_API = "https://api.cloudflare.com/client/v4";
 
 /**
- * What a lookup costs and how to find the value in the response.
+ * What a lookup costs, how to create what is absent, and how to find the value
+ * in either response.
  *
  * `path` is the field carrying the resource id inside one result element, and
  * `name` is the field carrying the human name — which is NOT the same field for
- * every kind, and is not `title` for KV.
+ * every kind, and is not `title` for KV. `create.nameField` is the field the
+ * CREATE body must set, which is a third naming again: a KV namespace is
+ * `title` in a listing and `title` in a create, but a queue is `queue_name` in
+ * both and a D1 database is `name` in both. They agree today; the table records
+ * them separately so that a day they diverge is a one-line change rather than a
+ * deployment that provisions nothing under a name that looks right.
  *
  * EVERY lookup here is a GET with pagination in the QUERY STRING. This is not a
  * style preference. `/accounts/{account}/d1/database` serves two methods on one
@@ -85,20 +103,31 @@ const CLOUDFLARE_API = "https://api.cloudflare.com/client/v4";
  * never asked about, and the failure looks like a malformed request rather than
  * a wrong verb. If you are changing this table, the verb is load-bearing.
  *
+ * The three creates are synchronous: each returns HTTP 200 with the new resource
+ * in `result`, carrying the id in the same field a listing element carries it in.
+ * There is no 202 and no `status: provisioning` to poll.
+ *
  * `per_page` is bounded at 10 000 by Cloudflare; 100 is comfortably legal and
  * keeps the pages small enough that a large account does not arrive all at once.
  */
 const LOOKUPS = {
-  d1: { list: "/accounts/{account}/d1/database", path: "uuid", name: "name" },
+  d1: {
+    list: "/accounts/{account}/d1/database",
+    path: "uuid",
+    name: "name",
+    create: { nameField: "name" },
+  },
   kv: {
     list: "/accounts/{account}/storage/kv/namespaces",
     path: "id",
     name: "title",
+    create: { nameField: "title" },
   },
   queue: {
     list: "/accounts/{account}/queues",
     path: "queue_id",
     name: "queue_name",
+    create: { nameField: "queue_name" },
   },
 };
 
@@ -175,6 +204,26 @@ async function fetchAll(token, accountId, kind) {
 }
 
 /**
+ * Every listing element whose NAME is exactly `name`.
+ *
+ * Returns the matches rather than an id, and throws nothing. Absence is the
+ * normal case before an ensure and the error case after it, and the two need
+ * opposite handling — one creates, the other fails — so the decision belongs to
+ * the caller rather than being buried here.
+ *
+ * The NAME lives in a different field per kind — `title` for a KV namespace,
+ * `queue_name` for a queue — so matching on `entry.name` silently finds nothing
+ * for those two and every ensure would provision a second copy of a namespace
+ * that already exists. The fallback exists only so a kind added to LOOKUPS
+ * without a `name` yields an empty match list rather than a TypeError.
+ */
+function findExact(kind, name, results) {
+  const spec = LOOKUPS[kind];
+  const nameField = spec.name ?? "name";
+  return results.filter((entry) => entry?.[nameField] === name);
+}
+
+/**
  * The ONE resource with exactly this name, or a failure naming what was found.
  *
  * The duplicate check is the load-bearing part. Two resources answering to one
@@ -186,25 +235,19 @@ async function fetchAll(token, accountId, kind) {
 function exactMatch(kind, name, results, path_ = null) {
   const spec = LOOKUPS[kind];
   const field = path_ ?? spec.path;
-  // The NAME lives in a different field per kind — `title` for a KV namespace,
-  // `queue_name` for a queue — so matching on `entry.name` silently finds
-  // nothing for those two and every lookup reports a resource as missing. The
-  // fallback exists only so a kind added to LOOKUPS without a `name` fails with
-  // an empty match list rather than a TypeError.
-  const nameField = spec.name ?? "name";
-  const matches = results.filter((entry) => entry?.[nameField] === name);
+  const matches = findExact(kind, name, results);
   if (matches.length === 0) {
     const nearby = results
-      .map((entry) => entry?.[nameField])
+      .map((entry) => entry?.[spec.name ?? "name"])
       .filter((n) => typeof n === "string")
       .sort()
       .slice(0, 8);
     throw new TopologyError(
-      `no ${kind} named ${JSON.stringify(name)} exists in this account. ${
+      `no ${kind} named ${JSON.stringify(name)} exists in this account, and this run did not create it either. ${
         nearby.length > 0
           ? `Names present in this account include: ${nearby.join(", ")}.`
           : "The account returned no named resources of this kind at all."
-      } Provision it in the Cloudflare dashboard and then dispatch again, or correct the name in infra-topology/topology.json — this script does not guess and does not create.`,
+      } A create that reported success and left nothing findable is a Cloudflare-side inconsistency, not something to retry silently: check the Cloudflare dashboard, then correct the name in infra-topology/topology.json if it is wrong.`,
     );
   }
   if (matches.length > 1) {
@@ -221,17 +264,72 @@ function exactMatch(kind, name, results, path_ = null) {
   return id;
 }
 
+/**
+ * Create one resource, and return the listing element Cloudflare now reports for
+ * that name — not the id from the create response.
+ *
+ * The re-list is not redundant with the create. The create response is what
+ * Cloudflare says it made; the re-list is what the account contains, and the
+ * difference between those two is exactly the difference between a deploy that
+ * works and one that binds an id the account never had. It also closes the race
+ * this design cannot otherwise avoid: there is no idempotency key on any of
+ * these endpoints, so two concurrent runs both creating the same name would each
+ * believe they won. Re-listing and refusing a duplicate turns that race into a
+ * failed run with a legible message instead of two databases.
+ */
+async function createResource(token, accountId, kind, name) {
+  const spec = LOOKUPS[kind];
+  const url = `${CLOUDFLARE_API}${spec.list.replace("{account}", accountId)}`;
+  const body = JSON.stringify({ [spec.create.nameField]: name });
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body,
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new TopologyError(
+      `Cloudflare refused to create ${kind} ${JSON.stringify(name)}: HTTP ${response.status} ${response.statusText}. ${detail.slice(0, 400)}`,
+    );
+  }
+  const payload = await response.json();
+  if (payload.success !== true) {
+    throw new TopologyError(
+      `Cloudflare returned success=false while creating ${kind} ${JSON.stringify(name)}: ${JSON.stringify(payload.errors ?? [])}`,
+    );
+  }
+  // Re-list rather than reading `payload.result`. See this function's comment.
+  const after = await fetchAll(token, accountId, kind);
+  const matches = findExact(kind, name, after);
+  if (matches.length === 0) {
+    throw new TopologyError(
+      `Cloudflare reported creating ${kind} ${JSON.stringify(name)} and a fresh listing does not contain it. The create response carried ${JSON.stringify(payload.result ?? null)}. Refusing to bind an id this run cannot see in the account.`,
+    );
+  }
+  return matches[0];
+}
+
 function usage() {
   return [
     "Usage:",
-    "  node tooling/scripts/reconcile-infra.mjs --environment <env> [--out <file>]",
+    "  node tooling/scripts/reconcile-infra.mjs --environment <env> [options]",
     "",
     "  --environment <env>   production | staging | development (the environment",
-    "                        whose resources this run discovers)",
+    "                        whose resources this run ensures)",
+    "  --deployable <name>   restrict to one deployable's resources. A deployable",
+    "                        that declares none is answered without a single API",
+    "                        call. Defaults to every deployable in the environment.",
     "  --out <file>          where to write the descriptor. Defaults to a file in",
     "                        the OS temp directory. NEVER commit it: it carries",
     "                        real Cloudflare resource ids (secrets-management.md).",
     "  --help                this text",
+    "",
+    "ENSURES what the topology declares: a name this account does not have is",
+    "CREATED, then rediscovered by exact name. This script never deletes, never",
+    "adopts a duplicate, and never guesses a name.",
     "",
     "Requires CLOUDFLARE_API_TOKEN in the environment. The account id is read",
     "from infra-topology/topology.json and is not a secret and not a variable.",
@@ -239,13 +337,15 @@ function usage() {
 }
 
 function parseArgs(argv) {
-  const options = { environment: null, out: null };
+  const options = { environment: null, deployable: null, out: null };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--help" || arg === "-h") {
       options.help = true;
     } else if (arg === "--environment") {
       options.environment = argv[++index] ?? null;
+    } else if (arg === "--deployable") {
+      options.deployable = argv[++index] ?? null;
     } else if (arg === "--out") {
       options.out = argv[++index] ?? null;
     } else {
@@ -255,7 +355,7 @@ function parseArgs(argv) {
   return options;
 }
 
-export async function reconcile(environment, outPath) {
+export async function reconcile(environment, outPath, { deployable } = {}) {
   const token = process.env.CLOUDFLARE_API_TOKEN;
   if (!token) {
     throw new TopologyError(
@@ -271,46 +371,115 @@ export async function reconcile(environment, outPath) {
   }
   const resolved = resolveEnvironment(topology, environment);
 
-  // One list call per KIND, not per resource: two deployables sharing a queue
-  // must not cost two paginated round trips, and one account-wide listing is
-  // the only way "the name exists exactly once" is answerable at all.
-  const buckets = {};
-  for (const kind of ["d1", "kv", "queue"]) {
-    buckets[kind] = await fetchAll(token, accountId, kind);
+  const all = resolved.resources;
+  if (deployable !== undefined && deployable !== null) {
+    if (!Object.hasOwn(all, deployable)) {
+      throw new TopologyError(
+        `no deployable named ${JSON.stringify(deployable)} in topology environment ${JSON.stringify(environment)}; expected one of ${Object.keys(all).join(", ")}.`,
+      );
+    }
   }
+  const wanted = Object.entries(all).filter(
+    ([name]) =>
+      deployable === undefined || deployable === null || name === deployable,
+  );
 
-  const resources = { d1: {}, kv: {}, queue: {} };
-  const missing = [];
-
-  for (const [deployable, resource] of Object.entries(resolved.resources)) {
-    if (resource.d1) {
-      const name = resource.d1.name;
-      const id = exactMatch("d1", name, buckets.d1);
-      resources.d1[name] = { id, deployable };
-    }
-    if (resource.kv) {
-      const name = resource.kv.name;
-      resources.kv[name] = {
-        id: exactMatch("kv", name, buckets.kv),
-        deployable,
-      };
-    }
+  // ------------------------------------------------------------------------
+  // WHAT THIS DEPLOYABLE ASKS FOR, before any network call.
+  //
+  // `identity-admin` and `home-web` declare no resources at all, and must not be
+  // charged three paginated listings to discover that. The four staging jobs
+  // run in parallel and each asks for its own deployable, so this filter is the
+  // difference between one D1 listing and three.
+  // ------------------------------------------------------------------------
+  const asked = [];
+  for (const [name, resource] of wanted) {
+    if (resource.d1)
+      asked.push({ kind: "d1", name: resource.d1.name, deployable: name });
+    if (resource.kv)
+      asked.push({ kind: "kv", name: resource.kv.name, deployable: name });
     if (resource.queue) {
       for (const [slot, queueName] of [
         ["queue", resource.queue.name],
         ["dlq", resource.queue.dlq],
       ]) {
-        if (!queueName) continue;
-        const id = exactMatch("queue", queueName, buckets.queue);
-        resources.queue[queueName] = { id, deployable, slot };
+        if (queueName)
+          asked.push({
+            kind: "queue",
+            name: queueName,
+            deployable: name,
+            slot,
+          });
       }
     }
   }
 
-  if (missing.length > 0) {
-    throw new TopologyError(
-      `resources named by topology do not exist in this account:\n  - ${missing.join("\n  - ")}`,
+  if (asked.length === 0) {
+    process.stdout.write(
+      `reconcile ${environment}: ${deployable ?? "every deployable"} declares no D1, KV namespace or queue. Nothing to look up and nothing to create.\n`,
     );
+  }
+
+  // One list call per KIND, not per resource: two deployables sharing a queue
+  // must not cost two paginated round trips, and one account-wide listing is
+  // the only way "the name exists exactly once" is answerable at all.
+  const kinds = [...new Set(asked.map((item) => item.kind))];
+  const buckets = {};
+  for (const kind of kinds) {
+    buckets[kind] = await fetchAll(token, accountId, kind);
+  }
+
+  // ------------------------------------------------------------------------
+  // PHASE 1 — decide the whole write set before writing any of it.
+  //
+  // Creating inside the resolve loop would leave the account half-provisioned
+  // when the fifth create fails: three databases and two queues, none of them
+  // referenced by anything, on an account whose next run would find them all.
+  // Collecting first means a failure before the first create leaves nothing, and
+  // a failure after it leaves a set that is at least complete up to the one that
+  // failed — which the next run reconciles without creating anything.
+  // ------------------------------------------------------------------------
+  const absent = asked.filter(
+    (item) => findExact(item.kind, item.name, buckets[item.kind]).length === 0,
+  );
+
+  if (absent.length > 0) {
+    // A notice, not a warning. This is the designed behaviour of a deploy onto
+    // an account that has never been deployed to, and the run summary should say
+    // so plainly rather than leaving an operator to wonder what changed.
+    process.stdout.write(
+      `ensuring ${absent.length} resource(s) that topology declares and this account does not have:\n` +
+        absent
+          .map(
+            (i) =>
+              `  - ${i.kind} ${JSON.stringify(i.name)} (for ${i.deployable})`,
+          )
+          .join("\n") +
+        `\n\n`,
+    );
+  }
+
+  // ------------------------------------------------------------------------
+  // PHASE 2 — create, one at a time, each re-listed by `createResource`.
+  // ------------------------------------------------------------------------
+  for (const item of absent) {
+    await createResource(token, accountId, item.kind, item.name);
+    // Adopt the freshly listed element so PHASE 3's duplicate check sees the
+    // real state of the account rather than the pre-create listing.
+    buckets[item.kind] = await fetchAll(token, accountId, item.kind);
+  }
+
+  // ------------------------------------------------------------------------
+  // PHASE 3 — resolve every name through the one rule, created or not.
+  // ------------------------------------------------------------------------
+  const resources = { d1: {}, kv: {}, queue: {} };
+  for (const item of asked) {
+    const id = exactMatch(item.kind, item.name, buckets[item.kind]);
+    resources[item.kind][item.name] = {
+      id,
+      deployable: item.deployable,
+      ...(item.slot ? { slot: item.slot } : {}),
+    };
   }
 
   const descriptor = {
@@ -364,20 +533,25 @@ export async function main(argv = process.argv.slice(2)) {
     );
 
   try {
-    const { out, descriptor } = await reconcile(options.environment, outPath);
+    const { out, descriptor } = await reconcile(options.environment, outPath, {
+      deployable: options.deployable,
+    });
     const counts = Object.entries(descriptor.resources)
+      .filter(([, bucket]) => Object.keys(bucket).length > 0)
       .map(([kind, bucket]) => `${Object.keys(bucket).length} ${kind}`)
       .join(", ");
     process.stdout.write(
-      `reconciled ${descriptor.environment} against account ${descriptor.account}: ${counts}\n` +
+      `ensured ${descriptor.environment}` +
+        `${options.deployable ? ` for ${options.deployable}` : ""}` +
+        ` against account ${descriptor.account}${counts ? `: ${counts}` : " (no resources declared)"}\n` +
         `wrote descriptor ${out}\n` +
         `This file carries real Cloudflare resource ids. It belongs in a runner's temp directory, is never committed and is deleted with the job.\n`,
     );
     return EXIT_OK;
   } catch (error) {
     reportFailure("reconcile-infra", error);
-    // A missing resource is a STOP, not a crash: the operator's next action is
-    // to provision or to correct the name, and the message says which.
+    // A STOP, not a crash: the operator's next action is in the message, which
+    // says whether the name is wrong or the account is not the one expected.
     return EXIT_CANNOT_RUN;
   }
 }

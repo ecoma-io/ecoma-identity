@@ -52,13 +52,35 @@ chosen once by a human and then referenced. It is the one identifier-like value
 that must be declared, and the validator requires each environment to have its
 own.
 
+## What a deploy does about the names declared here
+
+Naming a resource here is not a declaration that somebody must go and create it.
+A deploy **ensures** every name in scope: `tooling/scripts/reconcile-infra.mjs`
+looks each one up in the account by exact name, **creates the ones that are
+absent**, and binds the id it then finds by listing again. The id is never taken
+from the create response and never stored — it lives in the runner's temp
+directory and dies with the job. [ADR-0021](../docs/adr/0021-deploy-ensures-its-own-resources.md)
+records that decision and what it costs.
+
+The two things that is not:
+
+- **It never deletes.** Create is the whole write surface. A name that resolves
+  to two resources is an error, never a tie to break.
+- **It never guesses a name.** A resource this file does not declare is never
+  bound, adopted, renamed or cleaned up.
+
+Which means a name added here and a resource left behind by a removed name are
+different problems, and only the first one is solved automatically.
+
 ## Status
 
 | Fact                                                | State                                                                                                     |
 | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | One topology, twelve generated configs              | `IMPLEMENTED` — `pnpm infra:render`, judged by `pnpm arch`                                                |
 | Every generated config parses and passes wrangler   | `IMPLEMENTED` — `moon run :wrangler-validate` runs `wrangler deploy --dry-run` against the generated file |
-| Real Cloudflare resource ids                        | **none exist.** No environment has ever been deployed; no resource in this account has been reconciled    |
+| Resource ids are rediscovered, never stored         | `IMPLEMENTED` — `reconcile-infra.mjs`, 15 tests against a fake built to Cloudflare's published contract   |
+| A deploy ensures the names declared here            | `IMPLEMENTED` — same script; absent names are created, then re-listed by exact name                       |
+| Real Cloudflare resource ids                        | **none exist.** No environment has ever been deployed; the account holds no D1, KV namespace or queue     |
 | Reconciliation by logical name against the live API | `DEFERRED` — `check-deployment-topology.mjs` is named by this manifest's comments and does not exist yet  |
 | Live verification (`pnpm infra:verify`)             | **not run.** Nothing has been deployed, so there is nothing to verify against                             |
 
