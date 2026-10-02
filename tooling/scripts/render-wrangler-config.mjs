@@ -331,21 +331,38 @@ function rustBuildCommand(shape, configDirAbs, root) {
  * a `baseUrl` taken from the loop would be `https://admin.ecoma.io` in a file
  * the public site reads to build its canonicals.
  */
-function buildFrontendConfig({ topology, support, environment, pr }) {
-  const resolved = resolveEnvironment(topology, environment, { pr });
+function resolveCookiePolicy({ topology, environment, resolved }) {
+  // ONE owner for the cookie rule, because the descriptor and the browser
+  // projection both emit it and a browser bundle cannot be corrected by a
+  // server-side deploy. Two copies of this expression drift silently: making
+  // staging serve the apex in the descriptor would leave every shipped bundle
+  // advertising the old domain, and nothing would fail.
+  return {
+    name: resolved.cookie_name,
+    // Null outside production, for the reason the descriptor states: a
+    // cookie scoped to the zone apex is readable by every other preview and
+    // by staging, which is the sharing the per-environment NAME prevents.
+    domain: environment === "production" ? topology.account.zone : null,
+    secure: environment !== "development",
+  };
+}
+
+function buildFrontendConfig({ topology, support, environment, resolved }) {
+  // `resolved` is PASSED IN, not re-resolved here. `buildConfig()` already
+  // resolved this environment for the descriptor beside it; calling
+  // `resolveEnvironment` a second time ran the whole resolution — template
+  // expansion, PR validation, every resource name — once per deployable, four
+  // times per environment, to recompute a value that depends on the
+  // environment alone. It also made the projection's provenance a matter of
+  // trust: two independent resolutions of one environment, with nothing
+  // asserting they agree. Taking the object the descriptor was built from
+  // makes that structural instead.
   const host = resolved.hosts["home-web"];
 
   return {
     environment,
     baseUrl: host === null ? null : `https://${host}`,
-    cookie: {
-      name: resolved.cookie_name,
-      // Null outside production, for the reason the descriptor states: a
-      // cookie scoped to the zone apex is readable by every other preview and
-      // by staging, which is the sharing the per-environment NAME prevents.
-      domain: environment === "production" ? topology.account.zone : null,
-      secure: environment !== "development",
-    },
+    cookie: resolveCookiePolicy({ topology, environment, resolved }),
     supportedLocales: support.supportedLocales,
     defaultLocale: support.defaultLocale,
     defaultColorMode: support.defaultColorMode,
@@ -660,11 +677,7 @@ export function buildConfig({
     host,
     baseUrl: host === null ? null : `https://${host}`,
     issuerBaseUrl: resolved.issuer_base_url,
-    cookie: {
-      name: resolved.cookie_name,
-      domain: environment === "production" ? topology.account.zone : null,
-      secure: environment !== "development",
-    },
+    cookie: resolveCookiePolicy({ topology, environment, resolved }),
   };
   lines.push("");
 
@@ -673,7 +686,7 @@ export function buildConfig({
     // no separate object model, because a config assembled two ways and emitted
     // one way is a config whose object model and its text can disagree.
     descriptor: deploymentDescriptor,
-    frontend: buildFrontendConfig({ topology, support, environment, pr }),
+    frontend: buildFrontendConfig({ topology, support, environment, resolved }),
     lines: [
       `// GENERATED. Do not edit, and do not commit.`,
       `//`,
@@ -850,6 +863,21 @@ function resolveDescriptorArgument(stage, descriptorPath) {
   return parsed;
 }
 
+/**
+ * Whether this run is writing the repository's own generated tree.
+ *
+ * The ONE output that is not under `--out-dir`: the vocabulary copy the
+ * preference package reads. It has to live there, because an application and a
+ * package importing it are two directories that do not share a generated tree
+ * they can both name. So it is written only when the caller meant the
+ * repository, and a `--out-dir` run — a test, a scratch copy, a CI sandbox —
+ * leaves the checkout alone rather than silently rewriting a tracked file it
+ * was not asked to touch.
+ */
+function isDefaultOutDir(outDir) {
+  return path.resolve(outDir) === path.join(REPO_ROOT, GENERATED_ROOT);
+}
+
 function relativeGeneratedPath(outDir, environment, deployable) {
   return path.join(
     GENERATED_ROOT,
@@ -1005,29 +1033,6 @@ export function main(argv = process.argv.slice(2)) {
               `${GENERATED_ROOT}/frontend/${environment}.json`,
               `${GENERATED_ROOT}/frontend/config.json`,
             );
-            // The package's own copy of the vocabulary, so a test or a build
-            // with no generated config present still has ONE owner to read. It
-            // is GENERATED, and `check-frontend-config.mjs` REFUSES a commit
-            // when it has drifted from `infra-topology/frontend-support.json`:
-            // the duplication is produced, never maintained.
-            fs.writeFileSync(
-              path.join(
-                REPO_ROOT,
-                "packages",
-                "frontend-preferences",
-                "frontend-support.json",
-              ),
-              `${JSON.stringify(
-                {
-                  supportedLocales: support.supportedLocales,
-                  defaultLocale: support.defaultLocale,
-                  defaultColorMode: support.defaultColorMode,
-                },
-                null,
-                2,
-              )}\n`,
-              "utf8",
-            );
           }
           continue;
         }
@@ -1057,6 +1062,47 @@ export function main(argv = process.argv.slice(2)) {
     );
     return EXIT_CANNOT_RUN;
   }
+
+  // The package's own copy of the vocabulary, so a test or a build with no
+  // generated config present still has ONE owner to read. It is GENERATED, and
+  // `check-frontend-config.mjs` REFUSES a commit when it has drifted from
+  // `infra-topology/frontend-support.json`: the duplication is produced, never
+  // maintained.
+  //
+  // HOISTED OUT OF BOTH LOOPS, and that is the fix rather than a style
+  // preference. It used to be written from inside the per-deployable body,
+  // which had two consequences, both observed rather than theorised:
+  //
+  //   - It was written on the FIRST deployable and skipped for the other
+  //     three, so a run that failed part-way through the environment loop left
+  //     the committed copy refreshed for some environments and stale for
+  //     others — a file that is neither the old state nor the new one.
+  //   - It wrote to a REPO_ROOT-derived path while every other output honours
+  //     `--out-dir`, so `--out-dir /tmp/scratch` still rewrote a tracked file
+  //     in the repository. Verified: corrupting the tracked copy and rendering
+  //     into a temp directory restored it, which is a renderer that mutates
+  //     the checkout it was told not to touch.
+  //
+  // Written after every environment has rendered and only on success, so the
+  // file is either fully current or untouched. It is derived from `support`
+  // directly rather than rebuilt key by key: `loadFrontendSupport` already
+  // returns a normalized object holding exactly these fields, and rebuilding
+  // it meant a field added to the validated model had to be added in a second
+  // place — where forgetting it ships a silently incomplete copy instead of
+  // failing.
+  if (options.write && isDefaultOutDir(options.outDir)) {
+    fs.writeFileSync(
+      path.join(
+        REPO_ROOT,
+        "packages",
+        "frontend-preferences",
+        "frontend-support.json",
+      ),
+      `${JSON.stringify(support, null, 2)}\n`,
+      "utf8",
+    );
+  }
+
   if (options.write) {
     process.stdout.write(
       `rendered ${written.length} config(s) into ${path.relative(REPO_ROOT, options.outDir)}/\n`,

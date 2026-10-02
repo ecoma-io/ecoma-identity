@@ -25,7 +25,7 @@ import {
   loadTopology,
   TopologyError,
 } from "./topology-model.mjs";
-import { buildConfig } from "./render-wrangler-config.mjs";
+import { buildConfig, main } from "./render-wrangler-config.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..", "..");
@@ -295,5 +295,87 @@ describe("loadFrontendSupport", () => {
       (error) =>
         error instanceof TopologyError && /could not read/.test(error.message),
     );
+  });
+});
+
+describe("writing outside the repository", () => {
+  // The one output that is not under `--out-dir`: the vocabulary copy the
+  // preference package imports. It has to live in the repository, so the guard
+  // is that a run told to write SOMEWHERE ELSE leaves the checkout alone.
+  //
+  // This is a regression test for a real defect, not a hypothetical: the copy
+  // was written from inside the per-deployable body to a REPO_ROOT-derived
+  // path, so `--out-dir /tmp/scratch` still rewrote a tracked file. It reached
+  // review and merge without a gate noticing, which is why it is asserted here
+  // rather than left to the renderer's incidental behaviour.
+  it("does not rewrite the tracked vocabulary copy when --out-dir points elsewhere", () => {
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "ecoma-render-"));
+    temporaryRoots.push(scratch);
+
+    const tracked = path.join(
+      REPO_ROOT,
+      "packages",
+      "frontend-preferences",
+      "frontend-support.json",
+    );
+    const before = fs.readFileSync(tracked, "utf8");
+
+    const code = main([
+      "--stage",
+      "offline",
+      "--environment",
+      "development",
+      "--deployable",
+      "home-web",
+      "--out-dir",
+      scratch,
+      "--write",
+    ]);
+
+    assert.equal(code, 0, "the render itself should still succeed");
+    assert.equal(
+      fs.readFileSync(tracked, "utf8"),
+      before,
+      "a render told to write into a scratch directory must not touch the checkout",
+    );
+    assert.ok(
+      fs.existsSync(path.join(scratch, "cloudflare", "development")),
+      "and it must still have written its own tree where it was told to",
+    );
+  });
+
+  it("does refresh the tracked copy for a default render, so the guard is not a skip", () => {
+    const tracked = path.join(
+      REPO_ROOT,
+      "packages",
+      "frontend-preferences",
+      "frontend-support.json",
+    );
+    const before = fs.readFileSync(tracked, "utf8");
+
+    // Corrupt it, then let a default-out-dir render repair it. If the guard
+    // were simply "never write this file", the next `pnpm verify` would pass
+    // against a stale copy and the package would read a vocabulary no gate
+    // agrees with — which is the failure the generated copy exists to prevent.
+    fs.writeFileSync(tracked, "{ CORRUPTED", "utf8");
+    try {
+      const code = main([
+        "--stage",
+        "offline",
+        "--environment",
+        "development",
+        "--deployable",
+        "home-web",
+        "--write",
+      ]);
+      assert.equal(code, 0);
+      assert.equal(
+        fs.readFileSync(tracked, "utf8"),
+        before,
+        "a default render must restore the copy byte for byte",
+      );
+    } finally {
+      fs.writeFileSync(tracked, before, "utf8");
+    }
   });
 });
