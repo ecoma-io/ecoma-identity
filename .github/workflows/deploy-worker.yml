@@ -411,6 +411,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Full history, for the same reason `ci.yml`'s build job sets it and
+          # states it: moon resolves a merge base against `main` to decide which
+          # tasks are affected, and a shallow checkout has no `main` ref to
+          # resolve — the job dies with `fatal: ambiguous argument 'main'`
+          # before it builds anything, which reads as a checkout problem rather
+          # than the history requirement it is.
+          #
+          # Staging and production did not need this: they run AFTER a merge, so
+          # the checked-out ref already contains `main`'s history. The preview
+          # lane is the first caller to run BEFORE the merge, on a
+          # `refs/pull/N/merge`, and it is the shallow one. This is the cost of
+          # the lane existing, not a property of the checkout.
+          fetch-depth: 0
 
       # ---- the Cloudflare account id -------------------------------------
       # Read from `infra-topology/topology.json`, which pins it, and written to

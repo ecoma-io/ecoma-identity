@@ -149,7 +149,15 @@ jobs:
     outputs:
       enabled: ${{ steps.probe.outputs.enabled }}
     steps:
-      - uses: actions/checkout@v5
+      # Pinned to a full SHA like every other action in this repository, and
+      # for the reason `.github/semgrep` enforces it: a tag is a pointer the
+      # upstream owner can move, and this job decides whether a pull request may
+      # block merges. It reads no secret and pushes nothing, but a workflow that
+      # is trusted with a gate does not get a looser supply-chain rule than one
+      # that is not.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # The probe runs against the repository's OWN Workers — the ones on the
       # default branch, at the hosts they are deployed to — and not against a
@@ -186,8 +194,18 @@ jobs:
           fi
 
       - name: Say, out loud, whether this run gates merges
+        env:
+          # Through `env:`, not `${{ }}` in the script. `.github/semgrep`
+          # (`workflow-expression-interpolated-into-run`) is right that a `run:`
+          # body is a shell string GitHub substitutes into BEFORE the shell sees
+          # it, so a value carrying metacharacters would run as commands. The
+          # value here is `true`/`false` written by the step above and cannot
+          # carry one — but "cannot today" is not a property a gate should rest
+          # on, and the indirection costs one line.
+          ENABLED: ${{ steps.probe.outputs.enabled }}
         run: |
-          if [ "${{ steps.probe.outputs.enabled }}" = "true" ]; then
+          set -euo pipefail
+          if [ "$ENABLED" = "true" ]; then
             echo "Preview is a required check from now on. Mark it required in the branch protection rules for \`main\`; nothing in this workflow can do that for you, and it will not try."
           else
             echo "Preview is advisory. Add \`Deploy Preview\` to main's required checks when the gate above reports a nonzero implemented-route count."
