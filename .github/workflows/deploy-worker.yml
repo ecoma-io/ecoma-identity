@@ -342,7 +342,7 @@ jobs:
       # wrangler reads the token from the environment. Passed through `env`
       # rather than a `--var` so the token never appears in a command line, in
       # a process listing, or in a log line.
-      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -716,7 +716,7 @@ jobs:
       ENVIRONMENT: ${{ inputs.environment }}
       RELEASE_TAG: ${{ inputs.tag }}
       VERSION_ID: ${{ needs.build_and_upload.outputs.version-id }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       # The Identity Workers' live host, and home-web's own. Same two-variable
       # rule as the smoke job and for the same reason: the health gate observes
       # a MIX of old and new bytes, so pointing home-web's gate at Identity's
@@ -924,7 +924,7 @@ jobs:
       LANE: ${{ inputs.lane }}
       ENVIRONMENT: ${{ inputs.environment }}
       VERSION_ID: ${{ needs.build_and_upload.outputs.version-id }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       # The Identity Workers' live host. Read from the repository's own
       # namespace here rather than passed by the caller, because it predates
       # the second deployable and changing it would touch all three Identity
@@ -1181,7 +1181,7 @@ jobs:
       RELEASE_TAG: ${{ inputs.tag }}
       VERSION_ID: ${{ needs.build_and_upload.outputs.version-id }}
       FINAL_PERCENTAGE: ${{ inputs.final-percentage }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       # Checkout and the toolchain are here for wrangler itself, NOT for a build.
       # No `moon run`, no `pnpm build`, no web app — `wrangler versions deploy`
@@ -1287,7 +1287,7 @@ jobs:
       RELEASE_TAG: ${{ inputs.tag }}
       VERSION_ID: ${{ needs.build_and_upload.outputs.version-id }}
       POLICY_LIMIT_PERCENTAGE: ${{ inputs.policy-limit-percentage }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       # Checkout and toolchain for wrangler only. No build, no moon task, no web
       # app — a promotion names an already-uploaded Version, and the guarantee
@@ -1371,7 +1371,7 @@ jobs:
       RELEASE_TAG: ${{ inputs.tag }}
       VERSION_ID: ${{ needs.build_and_upload.outputs.version-id }}
       FINAL_PERCENTAGE: ${{ inputs.final-percentage }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       # Checkout and toolchain for wrangler only — no build, no moon task, no
       # web app, for the same reason as `promote_to_policy_limit`.
