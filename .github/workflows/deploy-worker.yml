@@ -391,6 +391,15 @@ jobs:
       LANE: ${{ inputs.lane }}
       ENVIRONMENT: ${{ inputs.environment }}
       RELEASE_TAG: ${{ inputs.tag }}
+      # The pull request this lane is for, empty for the fixed environments. It
+      # is passed to `resolve-infra-name.mjs` for every name lookup rather than
+      # for `renderTemplate` directly, because every preview resource name is a
+      # function of this number and a lookup that forgets it has no correct
+      # answer — only a `{pr}` template, which is a real-looking name for a real
+      # account. `${PR_NUMBER:+--pr "$PR_NUMBER"}` expands to nothing at all on
+      # staging and production, which is exactly right: those names are fixed and
+      # `resolve-infra-name.mjs` refuses `--pr` for them.
+      PR_NUMBER: ${{ inputs.pr }}
       # wrangler reads the token from the environment. Passed through `env`
       # rather than a `--var` so the token never appears in a command line, in
       # a process listing, or in a log line.
@@ -743,17 +752,41 @@ jobs:
           # means a JSONC reader in a workflow step, which is a second
           # implementation of a format `render-wrangler-config.mjs` already owns.
           #
-          # Topology is plain JSON, it is the file the renderer projects FROM, and
-          # it declares both halves of what this step needs: the binding slot
-          # name (`bindings.<deployable>.d1`) and the resource name
-          # (`environments.<env>.resources.<deployable>.d1.name`). Reading both
-          # from one jq call means they cannot be from different places, and a
-          # deployable that declares no D1 is answered by the same read.
-          read -r D1_BINDING D1_NAME < <(jq -r \
-            --arg env "$ENVIRONMENT" --arg w "$WORKER" '
-              [ (.bindings[$w].d1 // ""),
-                (.environments[$env].resources[$w].d1.name // "") ]
-              | @tsv' infra-topology/topology.json)
+          # THEY COME FROM `resolve-infra-name.mjs` NOW, NOT FROM `jq`, AND THE
+          # REASON IS THE FIRST PREVIEW. `jq` read the manifest RAW, so on a
+          # preview it produced the template `ecoma-identity-pr-{pr}` — while
+          # wrangler had just been handed a config naming `ecoma-identity-pr-33`.
+          # A remote, forward-only migration would have been applied to a
+          # database that does not exist, under a name that has never existed,
+          # in a real account. `{pr}` substitution belongs to exactly one owner
+          # (`renderTemplate`, via `resolveEnvironment`), and asking a shell
+          # question of the manifest is how that rule got skipped. The walk that
+          # checked ownership had the same defect twice over: it crashed with
+          # `Cannot index array with string "d1"` on
+          # `environments.preview.resources`, whose `$comment` is an ARRAY while
+          # the three fixed environments carry no such key — so the bug sat in a
+          # required step of every deploy until the first preview arrived.
+          #
+          # The `if !` IS LOAD-BEARING. This looks up NAMES, and an empty answer
+          # is not an error here: `identity-admin` and `home-web` bind no D1, and
+          # "this deployable has no database" has to arrive as an empty string for
+          # the branch below. So a resolver FAILURE has to be told apart from a
+          # resolver ANSWER, or a mistyped `--pr` would come back as exit 64 and
+          # this step would report "declares no d1_databases binding", skip the
+          # migrations, and exit 0 — a green deploy that migrated nothing.
+          infra_name() {
+            local answer
+            if ! answer="$(node tooling/scripts/resolve-infra-name.mjs \
+              --environment "$ENVIRONMENT" ${PR_NUMBER:+--pr "$PR_NUMBER"} \
+              --ask "$1" 2>&1)"; then
+              echo "::error::could not resolve $1 for $WORKER in $ENVIRONMENT: $answer"
+              return 1
+            fi
+            printf '%s' "$answer"
+          }
+
+          D1_BINDING="$(infra_name bindings."$WORKER".d1)"
+          D1_NAME="$(infra_name resources."$WORKER".d1.name)"
 
           if [ -z "$D1_BINDING" ] || [ -z "$D1_NAME" ]; then
             echo "::notice::$WORKER declares no d1_databases binding in $ENVIRONMENT. Nothing to migrate."
@@ -766,12 +799,24 @@ jobs:
 
           # The ledger is per-database and the parallel jobs are per-deployable,
           # so the invariant to check is that this database is this deployable's
-          # alone. Derived from topology, not asserted in prose.
-          CONCURRENT="$(jq -r --arg env "$ENVIRONMENT" --arg n "$D1_NAME" '
-            [.environments[$env].resources
-             | to_entries[]
-             | select(.value.d1.name == $n)
-             | .key] | join(",")' infra-topology/topology.json)"
+          # alone. Derived from topology, not asserted in prose — and read
+          # through the model rather than a second shell walk, for the reason
+          # above: `$comment` is an array only under `preview`, so a hand-rolled
+          # walk over `resources` is correct on staging and wrong on preview,
+          # which is the opposite of what a migration step should be. The
+          # deployables are read from the model rather than listed here, so a
+          # fifth deployable is covered the day it is declared.
+          CONCURRENT=""
+          for candidate in $(node tooling/scripts/resolve-infra-name.mjs \
+            --environment "$ENVIRONMENT" ${PR_NUMBER:+--pr "$PR_NUMBER"} \
+            --ask deployables 2>/dev/null); do
+            candidate_name="$(infra_name resources."$candidate".d1.name)"
+            if [ "$candidate_name" = "$D1_NAME" ]; then
+              CONCURRENT="$CONCURRENT $candidate"
+            fi
+          done
+          CONCURRENT="${CONCURRENT# }"
+
           if [ "$CONCURRENT" != "$WORKER" ]; then
             echo "::error::the database $D1_NAME is declared by [$CONCURRENT], but this job is deploying $WORKER. Two jobs applying migrations to one database race on wrangler's d1_migrations ledger. Split the resource out or run the deploys serially; do not let them run in parallel."
             exit 1

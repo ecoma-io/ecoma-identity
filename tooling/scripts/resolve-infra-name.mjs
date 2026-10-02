@@ -1,0 +1,216 @@
+#!/usr/bin/env node
+/**
+ * `resolve-infra-name.mjs` — print ONE already-resolved name, as TSV.
+ *
+ * WHY THIS FILE EXISTS. A workflow step used to read the D1 binding and the D1
+ * database name straight out of `infra-topology/topology.json` with `jq`, and
+ * that was wrong twice over, both times only on a preview:
+ *
+ *   1. It read `environments.preview.resources.identity.d1.name`, which is the
+ *      TEMPLATE `ecoma-identity-pr-{pr}`. `wrangler` had just been handed a
+ *      config naming `ecoma-identity-pr-33`, so the step would have applied
+ *      migrations to a database that does not exist, under a name that has
+ *      never existed, in a real account. The migration is remote and
+ *      forward-only: getting the database wrong is not a no-op.
+ *
+ *   2. Its ownership walk (`to_entries[] | select(.value.d1.name == $n)`)
+ *      crashed with `Cannot index array with string "d1"`, because
+ *      `environments.preview.resources` carries a `$comment` that is an ARRAY,
+ *      while the three fixed environments carry no such key. Exit 5. It never
+ *      fired on staging or production, so the bug had been sitting in a
+ *      required step of every deploy, waiting for the first preview.
+ *
+ * `jq` cannot fix (1) — substitution is `renderTemplate`'s job and there is
+ * exactly one owner of it, which is the point of `topology-model.mjs`. And (2)
+ * is not really a `jq` bug: re-deriving the manifest's shape in a shell is how
+ * (1) happened at all. So this asks the model that already knows the answer.
+ *
+ * `{pr}` substitution is NOT optional here. Omitting `--pr` for a preview is a
+ * usage error (64) rather than a template printed back, because
+ * `ecoma-identity-pr-{pr}` is a real-looking name for a real account and the
+ * whole reason this file exists is to stop anyone sending one.
+ *
+ * Usage:
+ *   resolve-infra-name.mjs --environment <env> [--pr <n>] --ask <path> [--field <f>]
+ *
+ * `--ask` is a dotted path into the RESOLVED environment (what `wrangler` will
+ * see), not into the manifest. `--field` picks one leaf out of an object.
+ * Prints `value` or, for `--field omitted`, an empty string, so a shell
+ * `read -r A B` sees a tab-separated line either way.
+ *
+ * No dependencies. Node ≥ 20.
+ */
+
+import process from "node:process";
+import {
+  EXIT_INVALID,
+  EXIT_OK,
+  EXIT_USAGE,
+  loadTopology,
+  resolveEnvironment,
+  validatePrNumber,
+} from "./topology-model.mjs";
+
+const USAGE = `Usage: resolve-infra-name.mjs --environment <env> [--pr <n>] --ask <path> [--field <f>]
+
+  --environment <env>   production | staging | development | preview
+  --pr <n>              required for preview, refused elsewhere
+  --ask <path>          dotted path into the resolved environment, e.g.
+                        resources.identity.d1.name
+  --field <f>           one leaf of the value at --ask, e.g. name
+  --help                this text
+
+Prints one already-rendered value as TSV. Never prints a {pr} template.`;
+
+function parseArgs(argv) {
+  const options = {
+    environment: null,
+    pr: null,
+    ask: null,
+    field: null,
+    help: false,
+  };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    switch (arg) {
+      case "--environment":
+        options.environment = argv[++i] ?? null;
+        break;
+      case "--pr":
+        options.pr = argv[++i] ?? null;
+        break;
+      case "--ask":
+        options.ask = argv[++i] ?? null;
+        break;
+      case "--field":
+        options.field = argv[++i] ?? null;
+        break;
+      case "--help":
+      case "-h":
+        options.help = true;
+        break;
+      default:
+        throw new Error(`unknown argument ${JSON.stringify(arg)}`);
+    }
+  }
+  return options;
+}
+
+function readPath(source, path) {
+  let cursor = source;
+  for (const key of String(path).split(".")) {
+    if (cursor === null || typeof cursor !== "object") return undefined;
+    cursor = cursor[key];
+  }
+  return cursor;
+}
+
+function main(argv) {
+  let options;
+  try {
+    options = parseArgs(argv);
+  } catch (error) {
+    process.stderr.write(`${error.message}\n\n${USAGE}`);
+    return EXIT_USAGE;
+  }
+  if (options.help) {
+    process.stdout.write(`${USAGE}\n`);
+    return EXIT_OK;
+  }
+  if (!options.environment) {
+    process.stderr.write("--environment is required.\n\n" + USAGE);
+    return EXIT_USAGE;
+  }
+  if (!options.ask) {
+    process.stderr.write("--ask is required.\n\n" + USAGE);
+    return EXIT_USAGE;
+  }
+
+  // Validate the PR number BEFORE resolving anything, so a mistyped one is a
+  // usage error with the rule named, not a TopologyError about a missing field.
+  if (options.environment === "preview" && options.pr === null) {
+    process.stderr.write(
+      "--environment preview requires --pr <number>. Every preview resource name is a function of the pull request number; without it the only name available is the template `ecoma-identity-pr-{pr}`, which is exactly what this tool exists not to print.\n",
+    );
+    return EXIT_USAGE;
+  }
+  if (options.environment !== "preview" && options.pr !== null) {
+    process.stderr.write(
+      `--pr is meaningless in environment ${JSON.stringify(options.environment)}: that environment's names are fixed. --pr applies to preview only.\n`,
+    );
+    return EXIT_USAGE;
+  }
+
+  let topology;
+  try {
+    topology = loadTopology().topology;
+    if (options.pr !== null) validatePrNumber(topology, Number(options.pr));
+  } catch (error) {
+    process.stderr.write(`${error.message}\n`);
+    return EXIT_USAGE;
+  }
+
+  let resolved;
+  try {
+    resolved = resolveEnvironment(topology, options.environment, {
+      pr: options.pr === null ? undefined : Number(options.pr),
+    });
+  } catch (error) {
+    // Everything `resolveEnvironment` rejects here was already checked above
+    // (preview needs --pr, --pr is preview-only, the number is in range), so
+    // reaching here means the manifest itself is not the shape the model
+    // expects. Still a usage error rather than a crash: the caller is a shell
+    // step that wants a message and a non-zero exit, not a stack trace.
+    process.stderr.write(`${error.message}\n`);
+    return EXIT_USAGE;
+  }
+
+  const found = readPath(resolved, options.ask);
+  const value =
+    options.field !== null && found && typeof found === "object"
+      ? found[options.field]
+      : found;
+
+  if (value === undefined) {
+    process.stderr.write(
+      `${options.ask}${options.field ? `.${options.field}` : ""} is not declared for ${options.environment}${options.environment === "preview" ? ` (pr ${options.pr})` : ""}. An absent value and an empty one are the same answer here: this deployable declares no such resource in this environment.\n`,
+    );
+    return EXIT_OK;
+  }
+  if (value === null) {
+    process.stdout.write("\n");
+    return EXIT_OK;
+  }
+
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  // The one assertion this tool exists to make structural. If a template ever
+  // reaches this point, something upstream stopped substituting and a real
+  // Cloudflare call would be made against a name that has never existed.
+  if (text.includes("{pr}")) {
+    process.stderr.write(
+      `refusing to print ${JSON.stringify(text)}: an unresolved {pr} template reached the end of resolution. This is a bug in the model, not a value to deploy.\n`,
+    );
+    return EXIT_USAGE;
+  }
+
+  // An array prints one element per line. A caller doing `for x in $(...)` needs
+  // that; a caller reading one name with `$(...)` would otherwise get the whole
+  // JSON array, which is the opposite of what it asked for. An EMPTY array is an
+  // error rather than silence: every path that iterates a list would otherwise
+  // do nothing at all and report success.
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      process.stderr.write(
+        `${options.ask} resolved to an empty list for ${options.environment}. Something that iterates it would silently do nothing, so this is reported rather than printed as nothing.\n`,
+      );
+      return EXIT_INVALID;
+    }
+    process.stdout.write(value.map((entry) => `${entry}\n`).join(""));
+    return EXIT_OK;
+  }
+
+  process.stdout.write(`${text}\n`);
+  return EXIT_OK;
+}
+
+process.exitCode = main(process.argv.slice(2));

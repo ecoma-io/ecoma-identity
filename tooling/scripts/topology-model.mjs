@@ -213,6 +213,37 @@ export function deletionRefusal(topology, kind, name) {
 }
 
 /**
+ * Which `env` SLOT each deployable reads its resource through.
+ *
+ * Binding names are slot names — the strings the Worker reads as `env.IDENTITY_DB`
+ * — and they never vary by environment: a preview reads the same `IDENTITY_DB`
+ * as production, it just points at a different database. That is precisely why
+ * they live outside `environments.<env>` in the manifest, and it is why they are
+ * not passed through `expand` here. Substituting `{pr}` into a slot name would
+ * produce a binding no Worker declares, and the manifest's own validator rejects
+ * the idea: "these are binding NAMES … they are not Cloudflare resource ids".
+ *
+ * A deployable that binds nothing resolves to an object of nulls rather than
+ * being dropped, so a caller asking about a deployable that binds no D1 gets
+ * "no" instead of a missing key.
+ */
+function resolveBindings(topology) {
+  const slots = {};
+  for (const deployable of DEPLOYABLES) {
+    const declared = topology.bindings[deployable] ?? {};
+    slots[deployable] = {
+      d1: declared.d1 ?? null,
+      kv: declared.kv ?? null,
+      queue_producer: declared.queue_producer ?? null,
+      ratelimit: declared.ratelimit ?? null,
+      email_provider: declared.email_provider ?? null,
+      services: [...(declared.services ?? [])],
+    };
+  }
+  return slots;
+}
+
+/**
  * Resolve one environment of the manifest into concrete names.
  *
  * `pr` is required for `preview` and refused elsewhere: rendering a preview
@@ -283,6 +314,12 @@ export function resolveEnvironment(topology, environment, { pr } = {}) {
   return {
     environment,
     pr: number,
+    // The deployables this environment declares, in manifest order. A caller
+    // that must iterate all of them reads them from here rather than keeping
+    // its own list, which is how a fifth deployable would otherwise be deployed
+    // and never migrated.
+    deployables: DEPLOYABLES,
+    bindings: resolveBindings(topology),
     hosts,
     workers_dev: config.workers_dev,
     issuer_base_url: expand(config.issuer_base_url),
