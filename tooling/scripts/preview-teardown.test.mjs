@@ -21,6 +21,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import { tmpdir } from "node:os";
 
 import {
   FIXED_ENVIRONMENTS,
@@ -426,4 +428,274 @@ test("previewResources and the teardown plan agree name for name", () => {
     [...allNames(planTeardown(topology, PR))].sort(),
     [...fromModel].sort(),
   );
+});
+
+/* -------------------------------------------------------------------------- *
+ * `main()` — the exit code and the shape of what it prints
+ *
+ * Everything above tests a rule. These test the part a caller can actually
+ * observe: the exit code, and the difference between "Cloudflare said no" and
+ * "the delete never happened". Mutation testing showed thirteen changes to this
+ * function survived a green suite, because nothing imported it — including a
+ * teardown that deleted nothing reporting success, which is precisely the claim
+ * `AGENTS.md` forbids making about behaviour that does not exist.
+ *
+ * `runDelete` is exercised through a real `spawnSync` against a shell script
+ * rather than a stub, because the distinction under test is a property of
+ * `spawnSync`'s result shape, and a stub would only prove the stub.
+ * -------------------------------------------------------------------------- */
+
+/**
+ * A wrangler that always succeeds. Nothing this repository can delete, is.
+ *
+ * Written into the OS temp directory at run time rather than committed: these
+ * are executables, not fixtures, and a committed shell script that a test
+ * spawns is a file whose contents a future edit can change without any test
+ * noticing. The contents are one line and they are asserted below.
+ */
+const ALWAYS_DELETES = `${tmpdir()}/preview-teardown-always-deletes.sh`;
+const SELF_KILLING = `${tmpdir()}/preview-teardown-self-killing.sh`;
+const REFUSES_EVERYTHING = `${tmpdir()}/preview-teardown-refuses-everything.sh`;
+
+function writeFakeWrangler(path, body) {
+  fs.writeFileSync(path, body, { mode: 0o755 });
+  return path;
+}
+
+writeFakeWrangler(ALWAYS_DELETES, "#!/bin/sh\nexit 0\n");
+writeFakeWrangler(SELF_KILLING, "#!/bin/sh\nkill -TERM $$\n");
+// A refusal Cloudflare actually makes: a nonzero exit carrying its own words,
+// which is the shape `ALREADY_ABSENT` must NOT match.
+writeFakeWrangler(
+  REFUSES_EVERYTHING,
+  '#!/bin/sh\necho "Error: a resource depends on this Worker (code: 10092)" >&2\nexit 1\n',
+);
+
+/** A name guaranteed not to resolve, so `spawnSync` reports ENOENT. */
+const UNRESOLVABLE = `${tmpdir()}/preview-teardown-no-such-wrangler-${process.pid}`;
+
+/**
+ * Capture what a call to `main` wrote and what it returned. `main` writes to
+ * the real stdout, so this collects through a wrapper rather than a fake.
+ */
+async function captureMain(argv, env = {}, root = undefined) {
+  const { main } = await import("./preview-teardown.mjs");
+  const out = [];
+  const err = [];
+  const realOut = process.stdout.write.bind(process.stdout);
+  const realErr = process.stderr.write.bind(process.stderr);
+  process.stdout.write = (chunk) => {
+    out.push(String(chunk));
+    return true;
+  };
+  process.stderr.write = (chunk) => {
+    err.push(String(chunk));
+    return true;
+  };
+  try {
+    const code = await main(argv, { env, root });
+    return { code, stdout: out.join(""), stderr: err.join("") };
+  } finally {
+    process.stdout.write = realOut;
+    process.stderr.write = realErr;
+  }
+}
+
+function withToken(env) {
+  return { CLOUDFLARE_API_TOKEN: "test-token-not-real", ...env };
+}
+
+/**
+ * `main`'s injected environment is a plain object, so a key set to `undefined`
+ * has to be DELETED rather than left present: `env.CLOUDFLARE_API_TOKEN` on an
+ * object whose key exists and is undefined answers undefined, which is what the
+ * absent-token case needs — but a spread of `{ TOKEN: undefined }` onto an env
+ * that already has one overwrites it, which is the point.
+ */
+function withoutToken(env) {
+  const merged = { ...env, CLOUDFLARE_API_TOKEN: undefined };
+  delete merged.CLOUDFLARE_API_TOKEN;
+  return merged;
+}
+
+test("a teardown that deleted nothing cannot report success", async () => {
+  // The custom-domain step has no command in this repository, so it is always
+  // reported `not-implemented`. A run that therefore deleted nothing must not
+  // exit 0 — otherwise a green janitor means only that the script did not crash.
+  const result = await captureMain(
+    [`--pr=${PR}`],
+    withToken({
+      [WRANGLER_INVOCATION_ENV]: ALWAYS_DELETES,
+    }),
+  );
+  assert.equal(result.code, 2, "a run with nothing deleted must not exit 0");
+  assert.match(
+    result.stderr,
+    /no command for them/,
+    "the unimplemented step must be named, not just counted",
+  );
+});
+
+test("a wrangler that cannot be spawned is never called a Cloudflare refusal", async () => {
+  // The defect this test was written for. `spawnSync` returns `status: null`
+  // with an `error` when the binary does not exist, so every outcome collapsed
+  // into "survived" with an empty detail, printed under a heading that says
+  // Cloudflare declined nine deletes. Cloudflare had declined nothing: it was
+  // never asked.
+  const result = await captureMain(
+    [`--pr=${PR}`],
+    withToken({
+      [WRANGLER_INVOCATION_ENV]: UNRESOLVABLE,
+    }),
+  );
+  const says = result.stderr;
+  assert.doesNotMatch(
+    says,
+    /refused by Cloudflare/,
+    "a delete that never ran is not a refusal, and must not be reported as one",
+  );
+  assert.match(says, /NEVER RAN/, "the outcome must be named for what it is");
+  assert.doesNotMatch(
+    says,
+    /ENOENT[^\n]*\(ENOENT\)/,
+    "the errno must appear once, not twice in the same sentence",
+  );
+});
+
+test("every refused name is listed, not only the first", async () => {
+  // A mutation that reported one survivor hid eight of nine, which is the
+  // number the reader would have to check. A wrangler that refuses EVERY delete
+  // puts all of them in one section, and every plan name must appear in it.
+  const result = await captureMain(
+    [`--pr=${PR}`],
+    withToken({
+      [WRANGLER_INVOCATION_ENV]: REFUSES_EVERYTHING,
+    }),
+  );
+  const workerNames = allNames(planTeardown(topology, PR)).filter((n) =>
+    n.startsWith("identity-pr-"),
+  );
+  assert.ok(
+    workerNames.length > 1,
+    "the plan must refuse more than one name for this to mean anything",
+  );
+  assert.match(result.stderr, /refused by Cloudflare/);
+  for (const name of workerNames) {
+    assert.ok(
+      result.stderr.includes(name),
+      `${name} was refused but is not in the summary; a summary that names only the first hides the rest`,
+    );
+  }
+});
+
+test("a killed wrangler is reported as never having run", async () => {
+  // `timeout-minutes` on the janitor is a real way to reach this: a killed
+  // process returns `status: null, signal: SIGTERM`, indistinguishable from a
+  // binary that does not exist if only the status is read.
+  const result = await captureMain(
+    [`--pr=${PR}`],
+    withToken({
+      [WRANGLER_INVOCATION_ENV]: SELF_KILLING,
+    }),
+  );
+  assert.match(result.stderr, /NEVER RAN/);
+  assert.match(
+    result.stderr,
+    /SIGTERM/,
+    "the signal must be named, not guessed at",
+  );
+});
+
+test("--json emits a document and nothing else, on a real run", async () => {
+  // The progress table and the document both went to stdout, so `JSON.parse`
+  // failed at position 4 — inside the first table row. `--dry-run --json` was
+  // clean only because the dry path returns before any delete.
+  const result = await captureMain(
+    [`--pr=${PR}`, "--json"],
+    withToken({
+      [WRANGLER_INVOCATION_ENV]: UNRESOLVABLE,
+    }),
+  );
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(String(parsed.pr), String(PR));
+  assert.ok(
+    parsed.results.length > 0,
+    "a JSON consumer must receive the results, not an empty document",
+  );
+});
+
+test("--dry-run --json stays a document too", async () => {
+  const result = await captureMain(
+    [`--pr=${PR}`, "--dry-run", "--json"],
+    withToken(),
+  );
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(String(parsed.pr), String(PR));
+});
+
+test("a real delete without a token refuses before running anything", async () => {
+  // A dry run needs no token; a real delete must never proceed unauthenticated.
+  const result = await captureMain(
+    [`--pr=${PR}`],
+    withoutToken({
+      [WRANGLER_INVOCATION_ENV]: ALWAYS_DELETES,
+    }),
+  );
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /CLOUDFLARE_API_TOKEN is not set/);
+});
+
+test("a refused name stops the run before anything is deleted", async () => {
+  // `refusals` reports; `main` is what refuses. The manifest's rule is that a
+  // guard refusal is fatal to the RUN rather than to the one name, and the two
+  // live in different functions — so the test drives the real `main` against a
+  // topology poisoned with a name the plan genuinely holds, and checks that no
+  // delete was attempted at all.
+  //
+  // `main` loads the topology from disk, so the poison is injected by writing a
+  // temporary repository root and pointing `--root` at it. If `main` cannot be
+  // pointed elsewhere, this test would silently only assert the happy path,
+  // which is worse than not having it.
+  const root = fs.mkdtempSync(`${tmpdir()}/preview-teardown-root-`);
+  fs.mkdirSync(`${root}/infra-topology`, { recursive: true });
+  const poisoned = structuredClone(topology);
+  poisoned.preview.never_delete = {
+    ...poisoned.preview.never_delete,
+    worker: ["identity-pr-33"],
+  };
+  fs.writeFileSync(
+    `${root}/infra-topology/topology.json`,
+    JSON.stringify(poisoned),
+  );
+
+  const result = await captureMain(
+    [`--pr=${PR}`],
+    withToken({ [WRANGLER_INVOCATION_ENV]: ALWAYS_DELETES }),
+    root,
+  );
+  assert.doesNotMatch(
+    result.stdout,
+    /\bdeleted\b/,
+    "nothing may be deleted once the plan carries a refused name",
+  );
+  assert.match(result.stderr, /never_delete/);
+});
+
+test("a plan that deletes everything this repository can delete still reports what it cannot", async () => {
+  // With a wrangler that always succeeds, every implemented step is genuinely
+  // deleted and only the custom-domain step is not. Exit 2 is correct here and
+  // is what the AGENTS.md rule requires: a step this repository has no command
+  // for must not be reported as done.
+  const result = await captureMain(
+    [`--pr=${PR}`],
+    withToken({
+      [WRANGLER_INVOCATION_ENV]: ALWAYS_DELETES,
+    }),
+  );
+  assert.doesNotMatch(
+    result.stderr,
+    /NEVER RAN/,
+    "a wrangler that always succeeds must not be reported as never having run",
+  );
+  assert.match(result.stderr, /no command for them/);
 });

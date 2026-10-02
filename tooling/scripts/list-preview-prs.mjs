@@ -185,18 +185,81 @@ export function previewPullRequests(topology, names) {
   };
 }
 
+/**
+ * Errors the listing itself carried, so a failed scan is not read as a clean
+ * account.
+ *
+ * Two shapes, and only two, because a permissive detector would fire on a
+ * wrangler build that merely includes the word "error" somewhere in a resource's
+ * metadata:
+ *
+ *   - Cloudflare's own envelope: `success: false` alongside an `errors` array.
+ *   - a per-result error, which is what an entry that exists but could not be
+ *     read looks like — a preview in the account this sweep cannot see.
+ *
+ * An empty array is the answer for a well-formed listing, including an empty
+ * one. `[]` really does mean "no deployments", and that is the only shape where
+ * reporting nothing is correct.
+ */
+export function scanProblems(input) {
+  const problems = [];
+  if (input === null || typeof input !== "object") return problems;
+
+  if (input.success === false) {
+    const errors = Array.isArray(input.errors) ? input.errors : [];
+    for (const entry of errors) {
+      const code = entry?.code;
+      const message = entry?.message;
+      problems.push(
+        `Cloudflare error ${code ?? "?"}${message ? `: ${message}` : ""}`,
+      );
+    }
+    // `success: false` with nothing to say is still a failed scan.
+    if (problems.length === 0) problems.push("listing reported success: false");
+  }
+
+  const visit = (value) => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    if (value.error) {
+      const message =
+        typeof value.error === "string"
+          ? value.error
+          : JSON.stringify(value.error);
+      problems.push(`entry error: ${message}`);
+    }
+    for (const nested of Object.values(value)) visit(nested);
+  };
+  visit(input);
+
+  return problems;
+}
+
 export function parseArgs(argv) {
   const options = { json: false };
   for (const arg of argv) {
     if (arg === "--json") options.json = true;
-    else if (arg === "--root=") options.root = arg.slice("--root=".length);
+    // `startsWith`, not `===`. The bare `--root=` case is what `===` matched, so
+    // `--root=/tmp` — the only spelling anyone would type, and the one the usage
+    // text shows — was rejected as an unknown argument.
+    else if (arg.startsWith("--root="))
+      options.root = arg.slice("--root=".length);
     else if (arg === "--help") options.help = true;
     else options.error = `unknown argument: ${arg}`;
   }
   return options;
 }
 
-function main(argv) {
+/**
+ * @param {string[]} argv
+ * @param {{readStdin?: () => string}} [io] Injectable stdin, so a test can
+ *   drive the real reading path without a descriptor. Defaults to fd 0, which
+ *   is how the janitor calls it: a wrangler listing piped in.
+ */
+function main(argv, { readStdin = () => fs.readFileSync(0, "utf8") } = {}) {
   const options = parseArgs(argv);
   if (options.help) {
     process.stdout.write(USAGE);
@@ -207,7 +270,7 @@ function main(argv) {
     return 1;
   }
 
-  const raw = fs.readFileSync(0, "utf8");
+  const raw = readStdin();
   let parsed;
   try {
     parsed = JSON.parse(raw);
@@ -221,6 +284,27 @@ function main(argv) {
   const names = collectNames(parsed);
   const report = previewPullRequests(topology, names);
 
+  // A partial result is not a clean account. `janitor.yml` already refuses a
+  // listing whose wrangler exited non-zero, but wrangler can exit 0 carrying an
+  // error envelope — a Cloudflare `{"success":false,"errors":[...]}` body, which
+  // is what an expired token produces. `collectNames` walks every string in it,
+  // the grammar rejects all of them, and the report comes back as
+  // `{"pullRequests":[],"refused":[],"scanned":2}` — byte-identical in meaning
+  // to a genuinely empty account. The nightly sweep would then report the
+  // account clean, which is the one conclusion a cleanup tool must not reach by
+  // accident.
+  const problems = scanProblems(parsed);
+  if (problems.length > 0 && options.json) {
+    process.stderr.write(
+      `The account listing carried ${problems.length} error entr${
+        problems.length === 1 ? "y" : "ies"
+      }: ${problems.join("; ")}\n` +
+        "The report below is what could be read from a listing that did not " +
+        "succeed. An empty pullRequests list here means the scan was incomplete, " +
+        "not that the account is clean.\n",
+    );
+  }
+
   if (options.json) {
     process.stdout.write(
       `${JSON.stringify(
@@ -228,6 +312,11 @@ function main(argv) {
           pullRequests: report.pullRequests,
           refused: report.refused,
           scanned: names.length,
+          // `complete: false` is the machine-readable form of the warning above.
+          // A consumer that wants a total must check it; one that does not still
+          // gets the same document it did before.
+          complete: problems.length === 0,
+          ...(problems.length > 0 ? { problems } : {}),
         },
         null,
         2,
@@ -238,7 +327,7 @@ function main(argv) {
       process.stdout.write(`${entry.pr}\n`);
     }
   }
-  return 0;
+  return problems.length > 0 ? 1 : 0;
 }
 
 const invokedDirectly =

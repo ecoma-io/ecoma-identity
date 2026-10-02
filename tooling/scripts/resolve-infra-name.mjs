@@ -244,9 +244,19 @@ function main(argv) {
   }
 
   const found = readPath(resolved, options.ask);
+  // `Object.hasOwn`, for the same reason `readPath` uses it and for the same
+  // consequence if it does not. Without it `--field __proto__` returns
+  // `Object.prototype` itself, which `renderValue` serialises to `{}` and prints
+  // with exit 0 — a value the caller cannot tell apart from a declared one. And
+  // `--field constructor` returns an inherited function, which exits 1 carrying
+  // prose, which `deploy-worker.yml`'s `2>&1` capture turns into the value it
+  // hands to wrangler. The path walk guarded itself and this second lookup did
+  // not; both are the same walk.
   const value =
     options.field !== null && found && typeof found === "object"
-      ? found[options.field]
+      ? Object.hasOwn(found, options.field)
+        ? found[options.field]
+        : undefined
       : found;
 
   if (value === undefined) {

@@ -266,12 +266,61 @@ export function wranglerInvocation(env) {
 }
 
 /**
+ * Why a delete did not delete, when the delete never ran.
+ *
+ * `spawnSync` distinguishes three shapes of "did not finish" and every one of
+ * them used to arrive as `survived` with an EMPTY detail, which the summary
+ * then printed under the heading "refused by Cloudflare". So a teardown whose
+ * wrangler was missing, unresolvable, or killed at the job's `timeout-minutes`
+ * reported that Cloudflare had declined nine deletes. Cloudflare had declined
+ * nothing, because Cloudflare was never asked.
+ *
+ * Each of these names itself rather than deferring to a message that does not
+ * exist, because the whole point is that there is no output to quote.
+ */
+function unrunnableDetail(run) {
+  if (run.error) {
+    // Node already puts the code at the end of the message
+    // (`spawnSync wrangler ENOENT`), so a second copy in parentheses is the same
+    // word twice. Checked with `.includes` rather than assumed: an error without
+    // a `code` has a message that does NOT contain one, and printing
+    // `undefined` would be worse than the repetition.
+    const cause = run.error.message.includes(run.error.code ?? " ")
+      ? run.error.message
+      : `${run.error.message} (${run.error.code ?? "no code"})`;
+    return (
+      `${cause}. ` +
+      "The delete was never attempted: no Cloudflare API call was made, so this " +
+      "is not a resource Cloudflare declined."
+    );
+  }
+  if (run.signal) {
+    return (
+      `Killed by ${run.signal} before it finished. ` +
+      "The delete was never attempted, or was interrupted mid-flight; a killed " +
+      "wrangler has no verdict to report. Check the job's timeout-minutes and " +
+      "whether the run exceeded them."
+    );
+  }
+  return (
+    `Exited with status ${run.status} and printed nothing. ` +
+    "There is no output to quote because there was none; the delete cannot be " +
+    "distinguished from one that never started."
+  );
+}
+
+/**
  * Run one delete, returning what happened rather than throwing.
  *
  * NEVER rethrows a delete failure. A janitor that stops at the first refusal
  * leaves every later resource in place while reporting failure, which is the
  * opposite of what a cleanup run is for: the rest are still deletable, and the
  * caller's summary has to be able to say exactly which ones survived.
+ *
+ * `spawnSync` failure is separated from a nonzero exit because they are not the
+ * same event. A nonzero exit means wrangler ran and Cloudflare declined; `null`
+ * status with an `error` or a `signal` means the process never produced a
+ * verdict, and there is nothing to quote from it.
  */
 export function runDelete(argv, { env, cwd }) {
   const [command, ...prefix] = wranglerInvocation(env);
@@ -280,8 +329,11 @@ export function runDelete(argv, { env, cwd }) {
     env,
     encoding: "utf8",
   });
-  const output = `${run.stdout ?? ""}${run.stderr ?? ""}`;
   if (run.status === 0) return { outcome: "deleted", argv };
+  if (run.status === null) {
+    return { outcome: "unrunnable", argv, detail: unrunnableDetail(run) };
+  }
+  const output = `${run.stdout ?? ""}${run.stderr ?? ""}`;
   if (ALREADY_ABSENT.some((pattern) => pattern.test(output))) {
     return { outcome: "already-absent", argv };
   }
@@ -324,7 +376,16 @@ export function parseArgs(argv) {
   return options;
 }
 
-function main(argv) {
+/**
+ * @param {string[]} argv
+ * @param {{env?: Record<string, string | undefined>, root?: string}} [io]
+ *   Injectable environment, so a caller — and every test here — can supply a
+ *   token and a wrangler invocation without writing a real one to its own
+ *   environment. `root` names the repository the manifest is read from; it
+ *   defaults to this script's own repository and exists so a test can drive the
+ *   real gates against a manifest it controls.
+ */
+function main(argv, { env = process.env, root = undefined } = {}) {
   const options = parseArgs(argv);
   if (options.help) {
     process.stdout.write(USAGE);
@@ -339,7 +400,7 @@ function main(argv) {
     return EXIT_INVALID;
   }
 
-  const token = process.env.CLOUDFLARE_API_TOKEN;
+  const token = env.CLOUDFLARE_API_TOKEN;
   if (!token && !options.dryRun) {
     process.stderr.write(
       "CLOUDFLARE_API_TOKEN is not set. This script reads the token from the " +
@@ -355,7 +416,7 @@ function main(argv) {
   // of the two it was.
   if (!options.dryRun) {
     try {
-      wranglerInvocation(process.env);
+      wranglerInvocation(env);
     } catch (error) {
       reportFailure("preview-teardown", error);
       return EXIT_CANNOT_RUN;
@@ -365,7 +426,7 @@ function main(argv) {
   let topology;
   let plan;
   try {
-    ({ topology } = loadTopology());
+    ({ topology } = loadTopology(root));
     plan = planTeardown(topology, options.pr);
   } catch (error) {
     reportFailure("preview-teardown", error);
@@ -416,9 +477,18 @@ function main(argv) {
     return EXIT_OK;
   }
 
-  const env = { ...process.env, CLOUDFLARE_API_TOKEN: token };
+  const runEnv = { ...env, CLOUDFLARE_API_TOKEN: token };
   const cwd = process.cwd();
   const results = [];
+
+  // Under `--json` the progress table below is withheld rather than written and
+  // then followed by a document. Both went to stdout, so `JSON.parse` of a real
+  // teardown failed at position 4 — after the first table row, not inside the
+  // document. `--dry-run --json` was clean only because the dry path returns
+  // before any delete happens, so nothing had been written yet.
+  const progress = (line) => {
+    if (!options.json) process.stdout.write(line);
+  };
 
   for (const entry of plan) {
     if (entry.spec.wrangler === null) {
@@ -433,20 +503,26 @@ function main(argv) {
         outcome: "not-implemented",
         detail: entry.spec.note,
       });
+      progress(
+        `${String(entry.order).padStart(2)}  ${entry.step.padEnd(24)} not-implemented  ${entry.names.join(", ")}\n`,
+      );
       continue;
     }
 
     for (const name of entry.names) {
-      const outcome = runDelete(argvFor(entry.spec, name), { env, cwd });
+      const outcome = runDelete(argvFor(entry.spec, name), {
+        env: runEnv,
+        cwd,
+      });
       results.push({ order: entry.order, step: entry.step, name, ...outcome });
-      const label = outcome.outcome === "deleted" ? "deleted" : outcome.outcome;
-      process.stdout.write(
-        `${String(entry.order).padStart(2)}  ${entry.step.padEnd(24)} ${label.padEnd(15)} ${outcome.argv.join(" ")}\n`,
+      progress(
+        `${String(entry.order).padStart(2)}  ${entry.step.padEnd(24)} ${outcome.outcome.padEnd(15)} ${outcome.argv.join(" ")}\n`,
       );
     }
   }
 
   const surviving = results.filter((r) => r.outcome === "survived");
+  const unrunnable = results.filter((r) => r.outcome === "unrunnable");
   const unimplemented = results.filter((r) => r.outcome === "not-implemented");
 
   if (options.json) {
@@ -467,6 +543,22 @@ function main(argv) {
     );
   }
 
+  if (unrunnable.length > 0) {
+    process.stderr.write(
+      `\n${unrunnable.length} delete(s) NEVER RAN. These are NOT resources ` +
+        "Cloudflare declined — no delete was attempted:\n" +
+        unrunnable
+          .map(
+            (s) =>
+              `  ${s.step}: ${s.name ?? (s.names ?? []).join(", ")}\n${indent(s.detail ?? "")}`,
+          )
+          .join("\n") +
+        "\nThis is the outcome when the tool is missing, unresolvable, or the run " +
+        "was killed. Fix the invocation and re-run; retrying the delete as if " +
+        "Cloudflare had refused it changes nothing.\n",
+    );
+  }
+
   if (surviving.length > 0) {
     process.stderr.write(
       `\n${surviving.length} delete(s) were refused by Cloudflare and the resources ` +
@@ -483,7 +575,9 @@ function main(argv) {
     );
   }
 
-  return surviving.length > 0 || unimplemented.length > 0
+  return surviving.length > 0 ||
+    unimplemented.length > 0 ||
+    unrunnable.length > 0
     ? EXIT_CANNOT_RUN
     : EXIT_OK;
 }

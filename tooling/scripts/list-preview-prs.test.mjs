@@ -27,6 +27,7 @@ import {
   collectNames,
   previewPullRequests,
   prFromName,
+  scanProblems,
 } from "./list-preview-prs.mjs";
 
 const { topology } = loadTopology();
@@ -175,4 +176,69 @@ test("two pull requests never merge into one entry", () => {
     "ecoma-identity-pr-34",
     "identity-pr-34",
   ]);
+});
+
+/* -------------------------------------------------------------------------- *
+ * `scanProblems` — a failed scan must not read as a clean account
+ *
+ * `janitor.yml` already refused a listing whose wrangler exited non-zero. What
+ * it could not see is a wrangler that exited 0 carrying Cloudflare's error
+ * envelope, which is what an expired token produces. `collectNames` walks every
+ * string in that body, the grammar rejects all of them, and the report came out
+ * as `{"pullRequests":[],"refused":[],"scanned":2}` — indistinguishable, in
+ * every field a caller reads, from an account with no deployments at all.
+ *
+ * The nightly sweep counts from `.pullRequests.length`, so that is a nightly run
+ * reporting the account clean after failing to look.
+ * -------------------------------------------------------------------------- */
+
+test("Cloudflare's error envelope is a failed scan, not an empty account", () => {
+  const problems = scanProblems({
+    success: false,
+    errors: [{ code: 10000, message: "Authentication error" }],
+  });
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /10000/);
+  assert.match(problems[0], /Authentication error/);
+});
+
+test("success:false with nothing to explain it is still a failed scan", () => {
+  // The envelope arrived but the reasons did not. Reporting nothing here would
+  // be exactly the silent-empty-account the check exists to prevent.
+  const problems = scanProblems({ success: false, errors: [] });
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /success: false/);
+});
+
+test("an entry that exists but could not be read is a failed scan", () => {
+  // A preview in the account this sweep cannot see. Counting only the envelope
+  // would miss it: wrangler reports these per result, with success: true.
+  const problems = scanProblems({
+    result: [
+      { name: "identity-pr-33" },
+      { name: "identity-admin-pr-34", error: "could not read bindings" },
+    ],
+    success: true,
+    errors: [],
+  });
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /could not read bindings/);
+});
+
+test("a well-formed listing, including an empty one, is not a failed scan", () => {
+  // The case that must NOT fire. `[]` really does mean no deployments, and a
+  // detector loose enough to flag it would make the sweep unrunnable.
+  assert.deepEqual(
+    scanProblems({ result: [], success: true, errors: [], messages: [] }),
+    [],
+  );
+  assert.deepEqual(
+    scanProblems({ result: [{ name: "identity-pr-33" }], success: true }),
+    [],
+  );
+});
+
+test("a per-line listing, which is the other accepted shape, is not scanned for errors", () => {
+  // The fallback path reads plain text, and `String` has no `success` to read.
+  assert.deepEqual(scanProblems("identity-pr-33\nidentity-pr-34\n"), []);
 });

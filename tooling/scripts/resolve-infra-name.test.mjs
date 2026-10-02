@@ -404,6 +404,74 @@ test("a path into Object.prototype is absent, not a crash", () => {
   assert.equal(nested.stdout.trim(), "");
 });
 
+test("--field into Object.prototype is absent, not an inherited value", () => {
+  // The SECOND property lookup, and it had no `hasOwn` guard while the path walk
+  // did. Two failures, both on the value channel:
+  //
+  //   `--field __proto__`   answered `{}` with exit 0 — `Object.prototype`
+  //                         serialised to JSON. A caller cannot tell that from a
+  //                         declared value, and it is exactly the answer a
+  //                         deploy step would hand to wrangler.
+  //   `--field constructor` answered a FUNCTION, which exits 1 carrying prose —
+  //                         and `deploy-worker.yml` captures `2>&1` on purpose,
+  //                         so that prose becomes the captured value.
+  //
+  // Both are the same defect as the walk above, at the hop after it.
+  for (const field of [
+    "__proto__",
+    "constructor",
+    "toString",
+    "valueOf",
+    "hasOwnProperty",
+    "isPrototypeOf",
+    "__defineGetter__",
+  ]) {
+    const result = run([
+      "--environment",
+      "staging",
+      "--ask",
+      "resources.identity.d1",
+      "--field",
+      field,
+    ]);
+    assert.equal(result.code, 0, `--field ${field} must be absent, not fatal`);
+    assert.equal(
+      result.stdout.trim(),
+      "",
+      `--field ${field} answered a value from Object.prototype`,
+    );
+    assert.equal(
+      result.stderr,
+      "",
+      `--field ${field} printed prose on a successful absence`,
+    );
+  }
+
+  // A field the manifest really does declare must still answer, or the guard
+  // would be indistinguishable from a `--field` that silently stopped working.
+  const declared = run([
+    "--environment",
+    "staging",
+    "--ask",
+    "resources.identity",
+    "--field",
+    "d1",
+  ]);
+  assert.equal(declared.code, 0);
+  assert.equal(JSON.parse(declared.stdout).name, "ecoma-identity-staging");
+
+  // And an index, which is an own property of an array rather than a name.
+  const indexed = run([
+    "--environment",
+    "staging",
+    "--ask",
+    "deployables",
+    "--field",
+    "0",
+  ]);
+  assert.equal(indexed.stdout.trim(), "identity");
+});
+
 test("an unknown environment and an unknown argument are usage errors", () => {
   assert.equal(
     run(["--environment", "nowhere", "--ask", "deployables"]).code,

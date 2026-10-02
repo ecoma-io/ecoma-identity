@@ -464,12 +464,18 @@ jobs:
           head -c 200 "$RUNNER_TEMP/deployments.json"
           echo
 
+          # A listing that carried errors is a FAILED scan, not an empty
+          # account, and it must not reach the report as `count=0` — that is the
+          # one conclusion a cleanup tool must not reach by accident. The
+          # script exits 1 when the listing carried problems and says so on
+          # stderr; `set -e` turns that into a failed step before any output is
+          # appended, so nothing downstream sees the count.
           prs="$(node tooling/scripts/list-preview-prs.mjs --json < "$RUNNER_TEMP/deployments.json")"
           echo "$prs" | tee "$RUNNER_TEMP/prs.json"
           # Counted from the JSON, not by grepping for `"pr"`: a name in the
           # `refused` array can also contain that substring, and a count that
           # includes refused names reports previews the sweep will not act on.
-          echo "count=$(printf '%s' "$prs" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).pullRequests.length))')" >> "$GITHUB_OUTPUT"
+          echo "count=$(printf '%s' "$prs" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);if(!j.complete)throw new Error("incomplete scan");console.log(j.pullRequests.length)})')" >> "$GITHUB_OUTPUT"
 
       - name: Report what the sweep found, and delete nothing itself
         # Deliberately not a delete. Deciding that an orphan is safe to delete
