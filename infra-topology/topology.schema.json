@@ -200,8 +200,18 @@
           }
         },
         "never_delete": {
-          "description": "Tested as literal set membership before every delete, in addition to the grammar. The backstop that does not depend on the grammar being correct.",
-          "required": ["workers", "d1", "kv", "queue"]
+          "description": "Tested as literal set membership before every delete, in addition to the grammar. The backstop that does not depend on the grammar being correct. Every key here is a `preview.grammar` key, because a kind with a rule and no list has a backstop that is silently dead: `isNeverDeleted` answers \"not on the list\" for a kind it has no list for, which is indistinguishable from a genuine negative and which is how every production Worker was once unprotected while this manifest validated.",
+          "required": [
+            "worker",
+            "d1",
+            "kv",
+            "queue",
+            "dlq",
+            "hostname",
+            "rate_limit",
+            "cookie",
+            "email_provider"
+          ]
         },
         "not_deletable": {
           "required": ["rate_limit_namespaces"]

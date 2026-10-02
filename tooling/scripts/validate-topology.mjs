@@ -31,6 +31,7 @@ import {
   DEPLOYABLES,
   ENVIRONMENTS,
   FIXED_ENVIRONMENTS,
+  RESOURCE_KINDS,
   loadTopology,
   matchesGrammar,
 } from "./topology-model.mjs";
@@ -503,6 +504,50 @@ function validateTopology(topology) {
   walk(topology);
 
   const grammar = topology.preview?.grammar;
+
+  // Every kind the grammar guards must have a `never_delete` list under the
+  // SAME key.
+  //
+  // `isNeverDeleted` answers `false` for a kind it has no list for, which reads
+  // as "nothing is protected here" rather than as a fault. That is the one
+  // answer a delete path must never give by accident, so the absence of a list
+  // has to be impossible to express rather than merely unlikely: it was live on
+  // `main` for the key `workers` against a caller asking for `worker`, and
+  // every production Worker was unprotected while the validator reported the
+  // topology valid.
+  for (const kind of RESOURCE_KINDS) {
+    const list = topology.preview?.never_delete?.[kind];
+    expect(
+      Array.isArray(list) && list.length > 0,
+      `preview.never_delete.${kind}`,
+      "must list at least one name; a kind the grammar guards with no never_delete entry has a backstop that is silently dead",
+    );
+    if (Array.isArray(list)) {
+      for (const name of list) {
+        expect(
+          typeof name === "string" && name.length > 0,
+          `preview.never_delete.${kind}`,
+          "must list whole names, not patterns; this list is literal set membership and does not interpret a name",
+        );
+        expect(
+          !matchesGrammar(topology, kind, name),
+          `preview.never_delete.${kind}`,
+          `lists ${JSON.stringify(name)}, which matches preview.grammar.${kind}; a name the grammar already refuses does not need a backstop entry, and listing it means one of the two rules is wrong`,
+        );
+      }
+    }
+  }
+
+  // The reverse direction, because a kind with a list and no grammar is a
+  // caller who believes it may delete something nothing can recognise.
+  for (const kind of Object.keys(topology.preview?.never_delete ?? {})) {
+    if (kind === "$comment") continue;
+    expect(
+      RESOURCE_KINDS.includes(kind),
+      `preview.never_delete.${kind}`,
+      "guards a kind `preview.grammar` does not declare; nothing can recognise a name of a kind with no rule",
+    );
+  }
 
   const canonicalPreviewNames = {
     worker: "identity-pr-123",

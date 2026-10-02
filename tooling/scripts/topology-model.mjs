@@ -43,7 +43,16 @@ export const ENVIRONMENTS = ["production", "staging", "development", "preview"];
 /** Environments whose infrastructure is provisioned and long-lived. */
 export const FIXED_ENVIRONMENTS = ["production", "staging", "development"];
 
-/** The resource kinds a preview can own, matching `preview.grammar`' keys. */
+/**
+ * The resource kinds `preview.grammar` declares a rule for, and therefore every
+ * kind `preview.never_delete` must carry a list for.
+ *
+ * This list and the manifest are held in agreement by `validate-topology.mjs`,
+ * which fails when a kind has grammar but no `never_delete` entry. That gap is
+ * exactly how the Worker backstop sat dead on `main` without anything noticing:
+ * the manifest spelled the key `workers`, the caller asked for `worker`, and a
+ * missing list read as "nothing is protected" rather than as a fault.
+ */
 export const RESOURCE_KINDS = [
   "worker",
   "d1",
@@ -55,6 +64,45 @@ export const RESOURCE_KINDS = [
   "cookie",
   "email_provider",
 ];
+
+/**
+ * What a delete step is called in `deletion_order`, and what it is called in the
+ * guards. Empty for almost every step.
+ *
+ * `preview.deletion_order.steps` names its first step `custom_domains` because
+ * what it deletes is a Cloudflare Custom Domain attached to a Worker — not a
+ * DNS hostname as such. `preview.grammar` and `preview.never_delete` call the
+ * same resource `hostname`, because that is the shape a guard is handed: a
+ * string like `pr33-home.ecoma.io`.
+ *
+ * Two spellings for one resource is the condition that produced the first three
+ * bugs in this path, so the reconciliation lives in ONE table here instead of
+ * being rediscovered — and misspelled — by each caller.
+ */
+export const KIND_ALIASES = {
+  custom_domains: "hostname",
+};
+
+/**
+ * The `preview.grammar` / `preview.never_delete` key a delete step is tested
+ * against, or a thrown `TopologyError` for a kind neither list knows.
+ *
+ * Throwing rather than passing an unknown kind straight through is deliberate,
+ * and it is the second half of the same fix. `matchesGrammar` already threw;
+ * `isNeverDeleted` did not — an absent list read as "nothing is protected
+ * here", so a caller deleting on that basis would get no refusal at all.
+ */
+export function guardKind(kind) {
+  const alias = KIND_ALIASES[kind];
+  if (alias) return alias;
+  if (!RESOURCE_KINDS.includes(kind)) {
+    throw new TopologyError(
+      `unknown resource kind ${JSON.stringify(kind)}; expected one of ` +
+        `${RESOURCE_KINDS.join(", ")}, or an alias (${Object.keys(KIND_ALIASES).join(", ")}).`,
+    );
+  }
+  return kind;
+}
 
 export const EXIT_OK = 0;
 export const EXIT_INVALID = 1;
@@ -187,9 +235,15 @@ export function matchesGrammar(topology, kind, name) {
  * The backstop. Tested before every delete IN ADDITION to the grammar, because
  * the grammar is the thing most likely to be wrong in a way that lets something
  * through — and this list does not depend on it being right.
+ *
+ * `kind` goes through `guardKind`, so the `custom_domains` step is tested
+ * against the `hostname` list rather than against a key that does not exist.
+ * A missing key previously returned `false` — "not on the list" — which is the
+ * one answer this function must never give by accident, and it was giving it
+ * for every Worker in the account.
  */
 export function isNeverDeleted(topology, kind, name) {
-  const list = topology.preview.never_delete[kind];
+  const list = topology.preview.never_delete[guardKind(kind)];
   if (!Array.isArray(list)) return false;
   return list.includes(String(name));
 }
@@ -203,11 +257,12 @@ export function isNeverDeleted(topology, kind, name) {
  * collapsing them to a boolean loses the second one entirely.
  */
 export function deletionRefusal(topology, kind, name) {
-  if (isNeverDeleted(topology, kind, name)) {
-    return `is a literal member of preview.never_delete.${kind}`;
+  const guarded = guardKind(kind);
+  if (isNeverDeleted(topology, guarded, name)) {
+    return `is a literal member of preview.never_delete.${guarded}`;
   }
-  if (!matchesGrammar(topology, kind, name)) {
-    return `does not match preview.grammar.${kind} (${topology.preview.grammar[kind]})`;
+  if (!matchesGrammar(topology, guarded, name)) {
+    return `does not match preview.grammar.${guarded} (${topology.preview.grammar[guarded]})`;
   }
   return null;
 }
@@ -347,25 +402,96 @@ export function previewResources(topology, pr) {
 
   const workers = DEPLOYABLES.map((deployable) => ({
     kind: "worker",
+    step: `worker:${deployable}`,
     deployable,
     name: resolved.resources[deployable].worker,
   }));
 
-  return [
-    { kind: "custom_domains", names: hosts },
+  // `kind` is the guard's key throughout, never the step's spelling. The one
+  // place the two differ is `custom_domains`, whose step says what Cloudflare
+  // calls the attachment while its names are hostnames — so a caller passes the
+  // name straight to `deletionRefusal` and must not have to know the step's
+  // vocabulary differs from the guard's.
+  const entries = [
+    { kind: "hostname", step: "custom_domains", names: hosts },
     ...workers,
-    { kind: "dlq", name: resolved.resources.identity.queue.dlq },
-    { kind: "queue", name: resolved.resources.identity.queue.name },
+    {
+      kind: "dlq",
+      step: "dlq",
+      name: resolved.resources.identity.queue.dlq,
+    },
+    {
+      kind: "queue",
+      step: "queue",
+      name: resolved.resources.identity.queue.name,
+    },
     {
       kind: "kv",
+      step: "kv",
       names: [
         resolved.resources.identity.kv.name,
         resolved.resources["identity-jobs"].kv.name,
       ],
     },
-    { kind: "d1", name: resolved.resources.identity.d1.name },
-  ].map((entry) => ({
-    ...entry,
-    order: topology.preview.deletion_order.steps,
-  }));
+    {
+      kind: "d1",
+      step: "d1",
+      name: resolved.resources.identity.d1.name,
+    },
+  ];
+
+  // Sorted BY THE MANIFEST, and `order` is each entry's POSITION in
+  // `preview.deletion_order.steps` rather than the array itself.
+  //
+  // Both were wrong. The unsorted list ran `identity` before
+  // `identity-admin`, and the manifest asks for the opposite with a stated
+  // reason: "Workers go in reverse dependency order — the consumers before the
+  // thing they consume — so no deletion orphans a live service binding."
+  // `identity-admin` and `identity-jobs` bind `IDENTITY`; deleting `identity`
+  // first leaves them holding a binding to a Worker that no longer exists.
+  //
+  // `order` being the whole nine-element array meant no caller could index by
+  // it. Nothing consumed this function before now — it is the janitor's only
+  // source of what to delete and in what order — so the mistake would have been
+  // invisible right up to the first teardown, where it deletes a Worker with
+  // live dependents.
+  //
+  // The sort is stable and keyed on `step`. A step the manifest lists but this
+  // function cannot produce now THROWS, above, rather than being absorbed — and
+  // `validate-topology.mjs` independently pins `steps` to the sequence this
+  // function produces, so a new step has to be added in both places to be
+  // accepted anywhere. The remaining `rank` fallback is defensive only: a delete
+  // path that trusts an ordering default is exactly the thing that should not,
+  // but with both directions checked by name there is nothing left for it to
+  // paper over.
+  const steps = topology.preview.deletion_order.steps;
+
+  // A step the manifest lists and this function does not produce is a resource
+  // a preview owns that NOTHING will ever delete, and the run that skipped it
+  // would report a complete teardown. That is the worse failure, so it throws
+  // here — at plan time, before the first delete — rather than sorting quietly
+  // to an end and being ignored.
+  //
+  // The reverse, an entry the manifest does not list, is already fatal in
+  // `validate-topology.mjs`, which pins `steps` to the sequence this function
+  // produces. Both directions are therefore checked, from opposite ends, by two
+  // different tools that have to agree.
+  const produced = new Set(entries.map((entry) => entry.step));
+  const unproducible = steps.filter((step) => !produced.has(step));
+  if (unproducible.length > 0) {
+    throw new TopologyError(
+      `preview.deletion_order.steps lists ${unproducible.map((s) => JSON.stringify(s)).join(", ")}, ` +
+        "which previewResources cannot produce; a step nothing can produce is a " +
+        "resource a preview owns that no teardown will ever delete.",
+    );
+  }
+
+  const rank = (step) => {
+    const index = steps.indexOf(step);
+    return index === -1 ? steps.length : index;
+  };
+
+  return entries
+    .map((entry) => ({ ...entry, order: rank(entry.step) }))
+    .sort((a, b) => a.order - b.order);
 }
