@@ -412,7 +412,14 @@ jobs:
       # Its gate is the D1 migration step inside `deploy-worker.yml`, which runs
       # against the database this deploy just ensured. Passing a host here to
       # satisfy the input would buy a passing probe of a host that is not there.
-      smoke-host: ""
+      #
+      # `smoke-host-is-absent-by-design` rather than an empty `smoke-host`,
+      # because an empty one cannot say this: that input's default is the empty
+      # string, so "no host on purpose" and "the caller forgot" are the same
+      # value at the boundary, and the health gate resolved it by falling back
+      # to `vars.SMOKE_PROBE_BASE_URL` — which would have probed the FIXED
+      # Identity host and reported that result as `identity-jobs`'s own.
+      smoke-host-is-absent-by-design: true
     secrets:
       CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
 
@@ -441,7 +448,11 @@ jobs:
       # home-web's gate is its own landing page. It has no Worker-side route
       # table to report from, and it is a real site today — it is not what the
       # gate above is waiting for.
-      smoke-host: ""
+      #
+      # Stated explicitly rather than as an empty `smoke-host`, which cannot
+      # distinguish "no Identity host here" from "the caller forgot" and would
+      # resolve the difference by borrowing Identity's host.
+      smoke-host-is-absent-by-design: true
     secrets:
       CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
 

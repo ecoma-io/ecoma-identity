@@ -313,6 +313,24 @@ on:
         required: false
         default: ""
         type: string
+      # WHY THIS EXISTS RATHER THAN INFERRED FROM `smoke-host`. `smoke-host` has a
+      # `default: ""`, so "the caller did not pass a host" and "the caller passed
+      # an empty one" are the SAME value by the time any expression sees them —
+      # `inputs.smoke-host != ''` is false for both. And those two mean opposite
+      # things: the first falls back to `vars.SMOKE_PROBE_BASE_URL`, the second
+      # refuses. `deploy-preview.yml` needs the second for `identity-jobs`, which
+      # is `public: false` with no route on the zone.
+      #
+      # So the distinction is stated by the caller instead of guessed by the
+      # callee. Without it, an empty `smoke-host` was silently replaced by the
+      # repository variable and the `-z "$SMOKE_HOST"` guard below could never
+      # fire — a preview `identity-jobs` would have probed the FIXED Identity
+      # host and reported that result as its own.
+      smoke-host-is-absent-by-design:
+        description: "This deployable has no public host and must not be probed. Fails the health gate loudly rather than probing some other deployable's host. Use when the worker is internal or has no route on the zone."
+        required: false
+        default: "false"
+        type: boolean
 
     secrets:
       # THE ONLY Cloudflare credential this repository holds. One account, one
@@ -774,6 +792,13 @@ jobs:
           # resolver ANSWER, or a mistyped `--pr` would come back as exit 64 and
           # this step would report "declares no d1_databases binding", skip the
           # migrations, and exit 0 — a green deploy that migrated nothing.
+          #
+          # `2>&1` is what makes the distinction possible, and it is also what
+          # makes a merge of stdout and stderr into ONE value dangerous: without
+          # `--explain` the tool's absence message is off stderr, so this
+          # captures the VALUE alone and the two cannot be confused. `--explain`
+          # is deliberately NOT passed here for that reason — a caller that wants
+          # the explanation asks for it into a channel it reads separately.
           infra_name() {
             local answer
             if ! answer="$(node tooling/scripts/resolve-infra-name.mjs \
@@ -1105,7 +1130,25 @@ jobs:
       # caller that forgets a new input should get today's behaviour rather than
       # a broken gate. Preview cannot use the variable — its host is a function
       # of the PR number — so it passes the input.
-      SMOKE_HOST: ${{ inputs.smoke-host != '' && inputs.smoke-host || vars.SMOKE_PROBE_BASE_URL }}
+      #
+      # `SMOKE_HOST_PASSED` exists because NO GitHub expression can distinguish
+      # `SMOKE_HOST_ABSENT_BY_DESIGN` is the caller stating "this deployable has
+      # no public host and must not be probed". It is a separate input because
+      # `smoke-host` cannot say it: that input has a `default: ""`, so omitted
+      # and empty are the same value by the time any expression sees them, and
+      # they mean OPPOSITE things. Omitted falls back to the repository variable;
+      # empty-on-purpose must refuse.
+      #
+      # The shape this replaces made the `-z "$SMOKE_HOST"` guard further down
+      # unreachable for a caller that passed an empty host on purpose: the empty
+      # string was replaced by `vars.SMOKE_PROBE_BASE_URL` before the shell ever
+      # saw it, so a preview `identity-jobs` — `public: false`, no route on the
+      # zone — would have probed the FIXED Identity host and reported that
+      # result as its own. That is the mistake the two-variable rule above
+      # exists to prevent, reached from the other direction: a correct host,
+      # measured for the wrong deployment.
+      SMOKE_HOST: ${{ inputs.smoke-host || vars.SMOKE_PROBE_BASE_URL }}
+      SMOKE_HOST_ABSENT_BY_DESIGN: ${{ inputs.smoke-host-is-absent-by-design }}
       HOME_SMOKE_BASE_URL: ${{ inputs.home-smoke-base-url }}
       IS_HOME_WEB: ${{ inputs.worker == 'home-web' && 'true' || 'false' }}
     steps:
@@ -1232,6 +1275,10 @@ jobs:
             PROBE_BASE_URL="${HOME_SMOKE_BASE_URL%/}"
             PROBE_ROUTE="/"
           else
+            if [ "$SMOKE_HOST_ABSENT_BY_DESIGN" = "true" ]; then
+              echo "::error::$WORKER declares no public host, so there is nothing to probe and nothing may be probed in its place. The ladder stops here rather than measuring some other deployable's host and reporting it as $WORKER's."
+              exit 1
+            fi
             if [ -z "$SMOKE_HOST" ]; then
               echo "::error::no smoke-probe host is configured for this lane, so the health gate cannot run. A gate that cannot run is not a pass; the ladder stops here rather than promoting blind."
               exit 1
@@ -1394,7 +1441,8 @@ jobs:
       # it, and the only lane that does is preview — whose host is
       # `pr{N}-identity.ecoma.io`, a function of the pull request number that
       # no repository variable can hold.
-      SMOKE_HOST: ${{ inputs.smoke-host != '' && inputs.smoke-host || vars.SMOKE_PROBE_BASE_URL }}
+      SMOKE_HOST: ${{ inputs.smoke-host || vars.SMOKE_PROBE_BASE_URL }}
+      SMOKE_HOST_ABSENT_BY_DESIGN: ${{ inputs.smoke-host-is-absent-by-design }}
       # home-web's own host, per lane, passed by the caller. It is NOT a
       # fallback to `SMOKE_HOST`: an absent value is a non-zero exit in the
       # step below, because probing the Identity host with a landing-page
@@ -1429,6 +1477,16 @@ jobs:
             fi
             HOST="$HOME_SMOKE_BASE_URL"
           else
+            if [ "$SMOKE_HOST_ABSENT_BY_DESIGN" = "true" ]; then
+              # Said by the caller, because `smoke-host: ""` cannot say it — that
+              # input's default is the empty string, so omitted and empty are the
+              # same value here and they mean opposite things. Without this
+              # distinction the empty string was replaced by
+              # `vars.SMOKE_PROBE_BASE_URL` before the shell saw it and this
+              # check probed Identity's host for a Worker that has none.
+              echo "::error::$WORKER declares no public host, so this check cannot run and will not probe another deployable's host in its place."
+              exit 1
+            fi
             if [ -z "$SMOKE_HOST" ]; then
               # Loudly, and non-zero. A missing probe host is a check that cannot
               # run, and AGENTS.md is explicit that one exits non-zero rather than
