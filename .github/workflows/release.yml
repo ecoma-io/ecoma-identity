@@ -106,4 +106,3 @@ jobs:
           token: ${{ steps.app-token.outputs.token || github.token }}
           config-file: release.config.json
           manifest-file: release.manifest.json
-

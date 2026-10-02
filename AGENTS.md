@@ -39,6 +39,7 @@ other in the same commit rather than leaving both to rot.
 | What lands in which phase, and each phase's exit condition  | `docs/roadmap/phases.md`                      |
 | Component map, the three deployables, the request paths     | `docs/architecture/overview.md`               |
 | Where the trust lines are and what crosses them             | `docs/architecture/trust-boundaries.md`       |
+| The frontends' preference model and its single owners       | `docs/architecture/frontend-preferences.md`   |
 | The Rust dependency law in prose                            | `docs/architecture/crate-dependency-law.md`   |
 | The bindings each Worker may and may not hold               | `docs/architecture/worker-architecture.md`    |
 | Why the Admin Worker holds no database                      | `docs/architecture/admin-isolation.md`        |

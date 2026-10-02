@@ -1,14 +1,14 @@
 {
-  "name": "@ecoma-io/shared-i18n",
+  "name": "@ecoma-io/frontend-preferences",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Shared i18n utilities and types for Ecoma frontend applications.",
+  "description": "Shared preference mechanics — locale, colour mode, time zone, cookie policy — for Ecoma frontend applications.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/ecoma-io/ecoma-identity",
-    "directory": "packages/shared-i18n"
+    "directory": "packages/frontend-preferences"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

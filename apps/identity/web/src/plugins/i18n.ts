@@ -21,10 +21,10 @@
  * ## Where the locale comes from
  *
  * {@link initializeI18n} resolves it in one place, and that place is shared
- * across all three frontends through `@ecoma-io/shared-i18n`: the cross-domain
- * cookie first, then the browser's languages, then English. The cookie is what
- * makes a language chosen in the admin console also be the language the
- * end-user app opens in.
+ * across all three frontends through `@ecoma-io/frontend-preferences`: the
+ * cross-domain cookie first, then the browser's languages, then the platform
+ * default. The cookie is what makes a language chosen in the admin console also
+ * be the language the end-user app opens in.
  *
  * ## The 501 contract, restated for translation
  *
@@ -37,12 +37,13 @@
  */
 import { createI18n } from "vue-i18n";
 import type { DefineLocaleMessage } from "vue-i18n";
-import type { SupportedLocale } from "@ecoma-io/shared-i18n";
+import type { SupportedLocale } from "@ecoma-io/frontend-preferences";
 import {
   DEFAULT_LOCALE,
+  FRONTEND_CONFIG,
   getEffectiveLocale,
   setLocaleCookie,
-} from "@ecoma-io/shared-i18n";
+} from "@ecoma-io/frontend-preferences";
 
 /**
  * The in-flight or resolved message bundle per locale.
@@ -80,14 +81,27 @@ function loadLocaleMessages(
 }
 
 /**
- * Whether this is a production build.
+ * Whether this build is for PRODUCTION — as opposed to a production MODE build.
  *
- * Used for the cookie's `Secure` attribute and `domain`, and to turn off
- * vue-i18n's missing-key warnings in production where nobody would read them.
- * The detection functions in `shared-i18n` do not take this: reading
- * `document.cookie` needs no domain, and only the write does.
+ * `import.meta.env.PROD`, which this replaced, asked Vite whether the bundle was
+ * minified. That is not the same question, and on this platform the difference
+ * is not academic: **the same artefact is uploaded to staging and to
+ * production**, so `PROD` is true in both. It answered "is this a build" when
+ * what the cookie needs is "which environment is this build FOR", and it
+ * answered it wrongly in the one direction that leaks — a staging bundle
+ * marking its cookie `Secure` and `Domain=ecoma.io` is a preview writing into
+ * the zone's cookie namespace, which is exactly what the per-environment name
+ * exists to prevent.
+ *
+ * So the question is now asked of the projection, whose `environment` field
+ * names the deployment rather than describing the bundler's settings.
+ *
+ * It is also what turns off vue-i18n's missing-key warnings, which nobody would
+ * read on production. That is a convenience rather than a law, and it is now
+ * keyed off the same answer as the cookie, so there is one environment in this
+ * module rather than two that could disagree.
  */
-const isProduction = import.meta.env.PROD;
+const isProduction = FRONTEND_CONFIG.environment === "production";
 
 /**
  * The Vue I18n instance.
@@ -133,15 +147,24 @@ export async function setI18nLocale(locale: SupportedLocale): Promise<void> {
   // while the page is in Vietnamese mislabels the page to both.
   document.documentElement.lang = locale;
 
-  setLocaleCookie(locale, isProduction);
+  // The POLICY, not a boolean. The cookie's name, `Domain` and `Secure` all
+  // arrive together from the projection, so no call site can pair production's
+  // name with a host-only domain — which is what passing `isProduction` allowed:
+  // a boolean says "which environment" and the receiving function then guessed
+  // the rest. See `packages/frontend-preferences/src/cookie.ts`, which documents
+  // the two call sites that disagreed and the two differently-scoped cookies
+  // that produced.
+  setLocaleCookie(locale, FRONTEND_CONFIG.cookie);
 }
 
 /**
  * Resolve the starting locale and load its messages.
  *
- * The resolution order lives in `shared-i18n` rather than here, so the three
- * frontends cannot drift into three different answers to "what language is
- * this": cookie, then browser, then English.
+ * The resolution order lives in `@ecoma-io/frontend-preferences` rather than
+ * here, so the three frontends cannot drift into three different answers to
+ * "what language is this": cookie, then browser, then the platform default —
+ * and the default is itself read from the topology rather than spelled out at
+ * each of the three call sites.
  *
  * @returns The locale the app is now in.
  */

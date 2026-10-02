@@ -349,6 +349,28 @@ jobs:
       WORKER: ${{ inputs.worker }}
       LANE: ${{ inputs.lane }}
       ENVIRONMENT: ${{ inputs.environment }}
+
+      # Which frontend projection the browser bundles built below are assembled
+      # against. Without this every deploy built the `development` projection,
+      # because that is what the moon tasks default to when the variable is
+      # unset — measured, not assumed: a staging build with it unset shipped
+      # cookie `ecoma_dev_locale`, `secure: false` and `baseUrl: null`.
+      # `baseUrl: null` is the sharper edge: home-web then has no site URL to
+      # emit, so a staging deploy publishes no canonical and no hreflang
+      # alternates at all rather than the wrong ones.
+      #
+      # The per-environment cookie namespace exists to stop exactly this, so a
+      # deploy that ignores it publishes a preference no other environment
+      # shares, and a visitor who set one on staging carries nothing to
+      # production.
+      #
+      # `inputs.environment` is required and is one of `production`, `staging`
+      # or `development` — the fixed environments (`FIXED_ENVIRONMENTS` in
+      # `tooling/scripts/topology-model.mjs`). `preview` is never deployed
+      # through this workflow, which is why the value is forwarded rather than
+      # derived here. It is NOT a deployment credential: a topology environment
+      # name, carrying no token, id or secret.
+      FRONTEND_ENVIRONMENT: ${{ inputs.environment }}
       RELEASE_TAG: ${{ inputs.tag }}
       # wrangler reads the token from the environment. Passed through `env`
       # rather than a `--var` so the token never appears in a command line, in
@@ -431,11 +453,19 @@ jobs:
       # deployable in the one place a reader is checking exactly that. The
       # guard is the component name for the same reason the build step below
       # is: three shapes, one list of names, checked at review time.
+      - name: Read the declared Rust channel (Identity Workers only)
+        if: inputs.worker != 'home-web'
+        id: rust-toolchain
+        run: echo "channel=$(tooling/scripts/read-rust-toolchain.sh)" >> "$GITHUB_OUTPUT"
       - name: Set up the Rust toolchain (Identity Workers only)
         if: inputs.worker != 'home-web'
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
         with:
-          toolchain: stable
+          # Derived from `.moon/toolchains.yml`, the single owner of the
+          # channel, by `tooling/scripts/read-rust-toolchain.sh` — the same
+          # script the three call sites in `ci.yml` use, and for the same
+          # reason recorded there.
+          toolchain: ${{ steps.rust-toolchain.outputs.channel }}
           targets: wasm32-unknown-unknown
       - name: Cache the Rust build (Identity Workers only)
         if: inputs.worker != 'home-web'
@@ -467,11 +497,17 @@ jobs:
       # A moon task, because both web apps have their own `moon.yml` now. The
       # reason it is one rather than `pnpm --filter` is recorded on the same
       # line in ci.yml, and it applies here with more force: `identity-web:build`
-      # carries `deps: ["^build"]`, which is what compiles
-      # `@ecoma-io/shared-i18n`. Without it a deploy runs on a clean runner
-      # where that package's gitignored `dist/` does not exist, and the build
-      # dies on `Rolldown failed to resolve import "@ecoma-io/shared-i18n"` —
-      # after two approvals, at whatever hour the promotion was run.
+      # carries a `deps:` edge on the shared preferences package, which is what
+      # compiles `@ecoma-io/frontend-preferences`. Without it a deploy runs on a
+      # clean runner where that package's gitignored `dist/` does not exist, and
+      # the build dies on `Rolldown failed to resolve import
+      # "@ecoma-io/frontend-preferences"` — after two approvals, at whatever
+      # hour the promotion was run.
+      #
+      # The edge is named `frontend-preferences:build` rather than spelled
+      # `^build` because moon 2.5.6 does not support the shorthand, and the
+      # earlier `deps: ["^build"]` in this comment was a description of an
+      # intent moon does not implement.
       #
       # ---- `home-web` (ADR-0016) ------------------------------------------
       # The third case, and the reason the first two are not derived from the

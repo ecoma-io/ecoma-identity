@@ -1,0 +1,29 @@
+{
+  "$comment": [
+    "The frontends' vocabulary, in the same place as their cookie namespace.",
+    "",
+    "Why this file exists rather than a constant in the shared package: the",
+    "cookie NAME is already in `topology.json` under `cookie_namespaces`, and a",
+    "locale list that lived in TypeScript while the cookie that names it lived",
+    "here would be the same fact split across two owners — which is precisely",
+    "the defect issue #17 reports. The values here are inputs to",
+    "`tooling/scripts/render-wrangler-config.mjs`, which projects them into",
+    "`.generated/frontend/<environment>.json` for the three frontends and",
+    "copies them into",
+    "`packages/frontend-preferences/frontend-support.json`.",
+    "",
+    "The copy is GENERATED and is compared against this file on every render. If",
+    "the two disagree the render fails: the duplication is produced, never",
+    "maintained, so it cannot drift. Editing this file therefore means running",
+    "`pnpm infra:render`, and nothing else.",
+    "",
+    "Adding a locale means adding it HERE FIRST and then a catalog in each",
+    "application that claims to support it. The reverse order ships a locale",
+    "that renders missing keys, which is the failure `zh` would produce today:",
+    "`~/ecoma-io/ecoma/languages.config.json` declares a third language that no",
+    "catalog in this repository implements."
+  ],
+  "supportedLocales": ["en", "vi"],
+  "defaultLocale": "en",
+  "defaultColorMode": "system"
+}

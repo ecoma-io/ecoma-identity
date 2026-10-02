@@ -383,7 +383,7 @@ export const depConstraints = [
   // -------------------------------------------------------------------------
   {
     sourceTag: "home-web",
-    onlyDependOnLibsWithTags: ["home-web", "shared-i18n"],
+    onlyDependOnLibsWithTags: ["home-web", "frontend-preferences"],
     notDependOnLibsWithTags: [
       "domain",
       "application",
@@ -403,18 +403,25 @@ export const depConstraints = [
   },
 
   // -------------------------------------------------------------------------
-  // shared-i18n — shared i18n utilities for frontend applications.
+  // frontend-preferences — preference mechanics for the three frontends.
   //
   // A pure TypeScript library with no platform dependencies. Provides locale
-  // detection, normalization, and cross-domain cookie utilities for all
-  // frontend apps (home-web, identity-web, identity-admin-web).
+  // detection and normalisation, the colour-mode attribute, display time-zone
+  // detection, the cookie policy, and the resolution order, for home-web,
+  // identity-web and identity-admin-web.
   //
   // MUST NOT depend on any Rust crate or Worker-specific code. It runs in
-  // browser and Node.js contexts equally.
+  // browser and Node.js contexts equally, which the home page's prerender needs.
+  //
+  // It reads its VALUES from the projection at .generated/frontend/config.json
+  // rather than declaring them, which is the mechanical form of "a shared
+  // frontend package owns preference mechanics, not business or user data": a
+  // constant here would be a second owner of a fact infra-topology states, and
+  // the third frontends would each have to notice the divergence.
   // -------------------------------------------------------------------------
   {
-    sourceTag: "shared-i18n",
-    onlyDependOnLibsWithTags: ["shared-i18n"],
+    sourceTag: "frontend-preferences",
+    onlyDependOnLibsWithTags: ["frontend-preferences"],
     notDependOnLibsWithTags: [
       "domain",
       "application",
@@ -426,12 +433,49 @@ export const depConstraints = [
       "identity-jobs",
       "identity-testkit",
       "home-web",
+      "identity-web",
+      "identity-admin-web",
     ],
     description:
-      "shared-i18n is a pure TypeScript library for i18n utilities. It has no platform dependencies and must not depend on any Rust crate, Worker, or frontend app. It provides shared types and utilities that all frontend apps consume.",
+      "frontend-preferences is a pure TypeScript library for preference mechanics. It has no platform dependencies and must not depend on any Rust crate, Worker, or frontend app. It provides the detection, validation, cookie policy and resolution order that all frontend apps consume, and owns no catalog and no business or user data.",
     remediation:
-      "If platform-specific i18n logic is needed, it belongs in the consuming app, not in this shared library. shared-i18n stays platform-agnostic.",
-    decisionRef: "packages/shared-i18n/README.md",
+      "Platform-specific preference logic belongs in the consuming app, not in this shared library, which stays platform-agnostic. A translation catalog belongs to the application that renders it. An account's own preferences are backend data and belong to the system that owns the account; src/preferences.ts declares RemotePreferenceAdapter as DEFERRED rather than reaching for one.",
+    decisionRef: "packages/frontend-preferences/README.md",
+  },
+
+  // -------------------------------------------------------------------------
+  // identity-web and identity-admin-web — the two operator and end-user SPAs.
+  //
+  // These two rows did not exist until the preference package was renamed, and
+  // their absence was a gap rather than a permission: `AGENTS.md` says a module
+  // the boundary table does not judge is a module with no law, so both apps
+  // were unconstrained in the one direction that matters for them. They are
+  // near-identical clones, so the rows are near-identical — written twice
+  // rather than as a set, because this table's vocabulary is one `sourceTag`
+  // per row and archkeep reads no grouping.
+  //
+  // The direction is one-way. A frontend application may reach for the shared
+  // preference mechanics; the package may never reach back for an application,
+  // because a library that imported an app would have to be re-instantiated per
+  // app and would stop being the single answer the three apps share.
+  // -------------------------------------------------------------------------
+  {
+    sourceTag: "identity-web",
+    onlyDependOnLibsWithTags: ["identity-web", "frontend-preferences"],
+    description:
+      "identity-web is the end-user web application. It may use the shared preference mechanics and nothing else internal. It reaches the backend over HTTP as a client, not as a Worker with bindings, and it may not import an Identity crate: the crate is the server's, and a browser bundle that evaluated identity rules would be evaluating identity rules with no session to check.",
+    remediation:
+      "A type the SPA needs from the backend belongs in contracts/** as a schema the Worker serialises, not as a Rust type the SPA imports. See trust-boundaries.md.",
+    decisionRef: "docs/architecture/trust-boundaries.md",
+  },
+  {
+    sourceTag: "identity-admin-web",
+    onlyDependOnLibsWithTags: ["identity-admin-web", "frontend-preferences"],
+    description:
+      "identity-admin-web is the operator console. It may use the shared preference mechanics and nothing else internal. It is a client of identity-admin exactly as identity-web is a client of identity: holding administrative UI does not make it the administrative authority, and an import from identity-domain would put that authority in the browser.",
+    remediation:
+      "An operator capability the console needs is enforced by the Workers it calls, and surfaced through contracts/**. The console's job is to ask and render, not to decide. See trust-boundaries.md.",
+    decisionRef: "docs/architecture/trust-boundaries.md",
   },
 
   // -------------------------------------------------------------------------

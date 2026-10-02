@@ -11,3 +11,54 @@ pnpm:
 
 javascript:
   packageManager: pnpm
+
+# The Rust toolchain, declared so that moon and CI state the same thing.
+#
+# `stable` is a rustup CHANNEL, not a point release, and that is the whole
+# point of this entry. Pinning a version like `1.98.1` would make one line mean
+# two different things at once — "this is what we develop against" AND "this is
+# what we never upgrade from" — and the two are not the same claim. CI resolves
+# `dtolnay/rust-toolchain@stable` afresh on every run, so a point pin would
+# NARROW CI (hold it behind a release it no longer wants) rather than widen
+# local toward CI. `stable` is the one setting under which local and CI are the
+# same statement.
+#
+# This does NOT make local and CI bit-identical, and no comment here may claim
+# it does. `stable` is a moving target: a contributor's rustc can be an older
+# patch release than a runner's on the same channel — a contributor on clippy
+# 1.98 while CI runs 1.99 — so a lint that exists only on the newer patch
+# release passes locally and fails in CI (`clippy::assert_is_empty`, at seven
+# sites under `crates/**`, is the live example). A channel synchronises the
+# DECLARATION. Closing the residual drift means the ambient toolchain is updated
+# locally (`rustup update stable`), not a bigger number in this file.
+#
+# `syncToolchainConfig: false` — leave `rust-toolchain.toml` absent. This
+# repository's convention, recorded in AGENTS.md ("no `rust-toolchain.toml` —
+# the ambient stable toolchain is the toolchain") and in
+# `docs/getting-started/local-development.md` ("There is deliberately **no**
+# `rust-toolchain.toml` — the ambient stable toolchain is the toolchain, by org
+# convention"), makes the AMBIENT toolchain the toolchain. A tracked
+# `rust-toolchain.toml` would be a second owner of that fact which also silently
+# overrides whatever a contributor has installed, so the two would disagree
+# while both believed they were right.
+#
+# `addMsrvConstraint: false` — `Cargo.toml` already carries `rust-version =
+# "1.85"`, and that field is the MSRV: the floor the code promises to build on,
+# which nothing runs. Letting moon rewrite it from a `stable` channel would
+# replace an MSRV declaration with whatever stable currently is. The two fields
+# mean different things and conflating them is a defect, not a default.
+#
+# `components` is deliberately absent, mirroring CI: no `dtolnay/rust-toolchain`
+# step in this repository requests one. clippy and rustfmt are available in CI
+# because the action installs the channel's DEFAULT profile, not because a
+# component was named; naming them here would assert an explicit intent CI does
+# not itself express.
+#
+# `targets` mirrors the three CI sites that name it. The repo builds Workers, so
+# `wasm32-unknown-unknown` is an input to a real deliverable, not a guess.
+rust:
+  version: "stable"
+  syncToolchainConfig: false
+  addMsrvConstraint: false
+  targets:
+    - wasm32-unknown-unknown

@@ -32,14 +32,14 @@ document says which.
 Pinned by the repository, not by your shell. `.prototools` declares the versions
 the org uses, and two of them are enforced by the build.
 
-| Tool       | Version           | Pinned where                                                                                                                                          |
-| ---------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Node       | 24.20.0           | `.node-version`; `.moon/toolchains.yml` verifies it before running a TS task                                                                          |
-| pnpm       | 12.8.1            | `package.json#packageManager`; `.moon/toolchains.yml`                                                                                                 |
-| Rust       | stable, MSRV 1.85 | `Cargo.toml`'s `rust-version`. There is deliberately **no** `rust-toolchain.toml` — the ambient stable toolchain is the toolchain, by org convention. |
-| `wrangler` | 4.144.0           | `package.json` devDependencies                                                                                                                        |
-| `moon`     | 2.5.6             | `.prototools`; the `@moonrepo/cli` devDependency                                                                                                      |
-| `proto`    | 0.62.3            | `.prototools`                                                                                                                                         |
+| Tool       | Version           | Pinned where                                                                                                                                                                                                  |
+| ---------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Node       | 24.20.0           | `.node-version`; `.moon/toolchains.yml` verifies it before running a TS task                                                                                                                                  |
+| pnpm       | 12.8.1            | `package.json#packageManager`; `.moon/toolchains.yml`                                                                                                                                                         |
+| Rust       | stable, MSRV 1.85 | `.moon/toolchains.yml` (`rust.version`); `Cargo.toml`'s `rust-version` holds the MSRV. There is deliberately **no** `rust-toolchain.toml` — the ambient stable toolchain is the toolchain, by org convention. |
+| `wrangler` | 4.144.0           | `package.json` devDependencies                                                                                                                                                                                |
+| `moon`     | 2.5.6             | `.prototools`; the `@moonrepo/cli` devDependency                                                                                                                                                              |
+| `proto`    | 0.62.3            | `.prototools`                                                                                                                                                                                                 |
 
 `proto` installs the three tools it manages. If you use it:
 

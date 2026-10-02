@@ -20,8 +20,12 @@
  *       :value="currentLocale"
  *       @change="changeLocale(($event.target as HTMLSelectElement).value as SupportedLocale)"
  *     >
- *       <option v-for="l in supportedLocales" :key="l.code" :value="l.code">
- *         {{ l.name }}
+ *       <option
+ *         v-for="entry in supportedLocales"
+ *         :key="entry.code"
+ *         :value="entry.code"
+ *       >
+ *         {{ entry.name }}
  *       </option>
  *     </select>
  *   </label>
@@ -30,8 +34,8 @@
  */
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
-import type { SupportedLocale } from "@ecoma-io/shared-i18n";
-import { SUPPORTED_LOCALES } from "@ecoma-io/shared-i18n";
+import type { SupportedLocale } from "@ecoma-io/frontend-preferences";
+import { SUPPORTED_LOCALES } from "@ecoma-io/frontend-preferences";
 import { setI18nLocale } from "../plugins/i18n";
 
 /**
@@ -46,7 +50,7 @@ export function useLocale() {
   const { locale, t } = useI18n();
 
   const currentLocale = computed<SupportedLocale>({
-    get: () => locale.value as SupportedLocale,
+    get: () => locale.value,
     set: (next: SupportedLocale) => {
       // Fire-and-forget: the assignment is synchronous by contract so a
       // `v-model` works, and the async part is loading a chunk that this app

@@ -22,7 +22,6 @@
     "test": "node --test tests/worker-smoke.test.mjs"
   },
   "dependencies": {
-    "@ecoma-io/shared-i18n": "workspace:*",
     "@nuxtjs/i18n": "^10.6.0",
     "nuxt": "^4.5.2",
     "vue": "^3.5.43",

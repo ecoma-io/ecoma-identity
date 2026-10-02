@@ -52,4 +52,11 @@ projects:
   # home-web — the public-facing web application (ADR-0016)
   home-web: apps/home-web
   # packages/
-  shared-i18n: packages/shared-i18n
+  #
+  # Renamed from `shared-i18n` when the package's scope widened past locale
+  # mechanics to colour mode, display time zone and the cookie policy. The
+  # project id is what `moon run <id>:build` is typed as, the boundary row's
+  # `decisionRef` points at this directory's README, and `commitlint.config.mjs`
+  # lists it as a scope — so the old name survives in exactly one place, which
+  # is the git history that carries the rename.
+  frontend-preferences: packages/frontend-preferences
