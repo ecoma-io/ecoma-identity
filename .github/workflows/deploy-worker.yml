@@ -299,11 +299,22 @@ on:
         value: ${{ jobs.promote_to_final.outputs.percentage || jobs.promote_to_full_percentage.outputs.percentage }}
 
 # `permissions: contents: read` is the only grant this workflow needs as a
-# whole. `build_and_upload` and `promote_to_final` re-declare it at job level
-# because a job-level block REPLACES this one rather than merging with it, and
-# omitting it there would cost those jobs their read access. Nothing here
-# writes to the repository, opens a pull request, or pushes a tag: a deploy
-# that also pushed would be a release (ADR-0012), and those are two acts.
+# whole. It is the workflow-level default, which matters because four of the
+# six jobs now carry NO job-level block and therefore inherit exactly this:
+#
+#   * `build_and_upload` — has a checkout and builds, but writes nothing.
+#   * `canary`, `promote_to_final`, `promote_to_policy_limit`,
+#     `promote_to_full_percentage` — no checkout at all. They read `.node-version`,
+#     `package.json` and `infra-topology/topology.json` through the contents API,
+#     which this grant authorises, and read nothing else from the repository.
+#   * `smoke` — calls no API and reads no file. It holds no `permissions` block
+#     because it needs no grant: it curls a public host over HTTPS. It is the
+#     only job here with no repository access of any kind, which is the correct
+#     posture for a job that asserts what a deployed host serves.
+#
+# Nothing here writes to the repository, opens a pull request, or pushes a tag:
+# a deploy that also pushed would be a release (ADR-0012), and those are two
+# acts.
 permissions:
   contents: read
 
@@ -727,28 +738,99 @@ jobs:
       HOME_SMOKE_BASE_URL: ${{ inputs.home-smoke-base-url }}
       IS_HOME_WEB: ${{ inputs.worker == 'home-web' && 'true' || 'false' }}
     steps:
-      # Checkout and toolchain for wrangler only. No moon task, no web app, no
-      # cargo: this job names an already-uploaded Version, and the guarantee it
-      # rests on is that the bytes it sends traffic to are the bytes that were
-      # built, uploaded and smoke-tested. Building here would make every canary
-      # step a rebuild (ADR-0013).
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Read the Cloudflare account id from the topology
+      # NO CHECKOUT, and this job does not build. It names an already-uploaded
+      # Version, and the guarantee it rests on is that the bytes it sends
+      # traffic to are the bytes that were built, uploaded and smoke-tested.
+      # Building here would make every canary step a rebuild (ADR-0013); that is
+      # why there is no `moon run`, no cargo and no web app below.
+      #
+      # It previously checked the repository out and ran
+      # `pnpm install --frozen-lockfile` to execute ONE wrangler command. The
+      # toolchain is now read from the API at `main` and wrangler comes from
+      # the npm registry at the pinned version — the arrangement `rollback.yml`
+      # already uses, and the only one that works on a runner with no
+      # `node_modules`. `pnpm exec wrangler` resolves the binary out of that
+      # directory, so the checkout was not merely slow here; keeping it while
+      # dropping the install would have failed every step with
+      # `Command "wrangler" not found`.
+      - name: Read the repository's pinned toolchain from the API (no checkout)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          ACCOUNT_ID="$(jq -er '.account.id | select(type == "string" and length > 0)' \
-            infra-topology/topology.json)" \
-            || { echo "::error::infra-topology/topology.json declares no usable account.id. Every wrangler command in this job needs it, and there is nowhere else to read it from."; exit 1; }
-          echo "CLOUDFLARE_ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+          REF="main"
+          read_one() {
+            gh api "repos/${{ github.repository }}/contents/$1?ref=$REF" --jq '.content' \
+              | base64 --decode
+          }
+          NODE_VERSION="$(read_one .node-version | tr -d '[:space:]')"
+          WRANGLER_VERSION="$(read_one package.json \
+            | jq -er '.devDependencies.wrangler | ltrimstr("^") | select(type == "string" and length > 0)')"
+          WRANGLER_VERSION="${WRANGLER_VERSION%%+*}"
+
+          # Node before anything else: wrangler 4.x declares `node >=22`, and a
+          # runner whose image drifts below that must fail here with the reason,
+          # not two steps later with a syntax error.
+          if [ -z "$NODE_VERSION" ]; then
+            echo "::error::could not read .node-version from $REF. The wrangler command in this job needs a pinned Node and there is no checkout to read it from."
+            exit 1
+          fi
+          # THE WRAPPER ITSELF HAS TO COME FROM SOMEWHERE. Dropping the
+          # checkout took the repository's own files with it, and the four
+          # wrangler steps in these jobs run
+          # `bash tooling/scripts/wrangler-step.sh` to make their failures
+          # legible. Without this line every one of them would die with
+          # `bash: tooling/scripts/wrangler-step.sh: No such file or
+          # directory` — a run that looks like a wrangler failure and is not
+          # one. So the wrapper is fetched from the API at the same ref as the
+          # toolchain it names, into $RUNNER_TEMP, and used from there.
+          #
+          # `$REF` and not the running SHA, matching `rollback.yml`: these jobs
+          # read what the repository currently declares rather than what the
+          # deploy commit declared, so a mid-incident commit cannot change the
+          # toolchain out from under a rollback or a promotion.
+          STEP_PATH="$RUNNER_TEMP/wrangler-step.sh"
+          if ! gh api "repos/${{ github.repository }}/contents/tooling/scripts/wrangler-step.sh?ref=$REF" \
+            --jq '.content' | base64 --decode > "$STEP_PATH"; then
+            echo "::error::could not read tooling/scripts/wrangler-step.sh from $REF. It is the wrapper that turns a wrangler failure into a legible annotation, and a job that cannot fetch it cannot use it."
+            exit 1
+          fi
+          if [ ! -s "$STEP_PATH" ]; then
+            echo "::error::tooling/scripts/wrangler-step.sh fetched from $REF is empty. A wrapper that produces no annotation is not the wrapper; refusing to run one."
+            exit 1
+          fi
+          echo "WRANGLER_STEP=$STEP_PATH" >> "$GITHUB_ENV"
+          echo "NODE_VERSION=$NODE_VERSION" >> "$GITHUB_ENV"
+          # The version, and the command spelling it names. `$WRANGLER_BIN` is
+          # what `wrangler-step.sh` executes; `$WRANGLER_VERSION` is for the
+          # `deployments list` verification below, which is NOT wrapped and so
+          # must name wrangler itself.
+          #
+          # That last distinction matters and it was a bug once: the wrapped
+          # steps run the command through a wrapper whose shell splits it, but
+          # `$WRANGLER_BIN deployments list` relies on the RUNNER's shell
+          # splitting an unquoted variable into a command. Under bash — which is
+          # what a `run:` step gets — that works. Under zsh it does not, and it
+          # did not fail loudly either: the call is followed by
+          # `|| echo "::warning::…"`, so a `command not found` became a warning
+          # and the step went green having verified nothing. A check that
+          # cannot run is not a pass, so the bare call spells the command out.
+          echo "WRANGLER_BIN=npx --yes wrangler@$WRANGLER_VERSION" >> "$GITHUB_ENV"
+          echo "WRANGLER_VERSION=$WRANGLER_VERSION" >> "$GITHUB_ENV"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: .node-version
-          cache: pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Read the Cloudflare account id from the topology
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ACCOUNT_ID="$(gh api \
+            "repos/${{ github.repository }}/contents/infra-topology/topology.json?ref=main" \
+            --jq '.content' | base64 --decode \
+            | jq -er '.account.id | select(type == "string" and length > 0)')" \
+            || { echo "::error::infra-topology/topology.json declares no usable account.id. Every wrangler command in this job needs it, and there is nowhere else to read it from."; exit 1; }
+          echo "CLOUDFLARE_ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
 
       - name: Promote each step of the ladder, with a health gate between
         env:
@@ -800,7 +882,7 @@ jobs:
               # cannot be changed here. Naming a config would also mean carrying
               # a file with real Cloudflare ids across a job boundary for an
               # operation that never reads them.
-              bash tooling/scripts/wrangler-step.sh "promote a version" -- versions deploy \
+              bash "$WRANGLER_STEP" "promote a version" -- versions deploy \
                 --name "$WORKER_NAME" \
                 --version-id "$VERSION_ID" \
                 --percentage "$PERCENTAGE" \
@@ -918,14 +1000,18 @@ jobs:
     needs: build_and_upload
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: read
     env:
       WORKER: ${{ inputs.worker }}
       LANE: ${{ inputs.lane }}
       ENVIRONMENT: ${{ inputs.environment }}
       VERSION_ID: ${{ needs.build_and_upload.outputs.version-id }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # NO CLOUDFLARE_API_TOKEN. This job used to hold one and never used it:
+      # it runs no wrangler command, writes nothing and reads nothing from the
+      # Cloudflare API — it `curl`s a public host over HTTPS and asserts what
+      # came back. A credential a job does not need is a credential that can
+      # leak from a job that does, so the grant is gone rather than left
+      # unreferenced. Nothing below resolves it: if a step here ever needs to
+      # reach the API, that step needs its own token and its own reason.
       # The Identity Workers' live host. Read from the repository's own
       # namespace here rather than passed by the caller, because it predates
       # the second deployable and changing it would touch all three Identity
@@ -938,24 +1024,14 @@ jobs:
       HOME_SMOKE_BASE_URL: ${{ inputs.home-smoke-base-url }}
       IS_HOME_WEB: ${{ inputs.worker == 'home-web' && 'true' || 'false' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Read the Cloudflare account id from the topology
-        run: |
-          set -euo pipefail
-          ACCOUNT_ID="$(jq -er '.account.id | select(type == "string" and length > 0)' \
-            infra-topology/topology.json)" \
-            || { echo "::error::infra-topology/topology.json declares no usable account.id. Every wrangler command in this job needs it, and there is nowhere else to read it from."; exit 1; }
-          echo "CLOUDFLARE_ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
+      # NO CHECKOUT, NO pnpm, NO TOOLCHAIN AT ALL. This job's only step below
+      # is `curl` and `grep` against a public host, and the runner image ships
+      # both. It used to check the repository out, set up pnpm and Node, install
+      # the lockfile, read the Cloudflare account id out of `topology.json` and
+      # hold the Cloudflare API token — none of which any step below touched.
+      # `jq` is still used by the assertions, and it is preinstalled on
+      # `ubuntu-latest`; if that ever stops being true the step fails loudly
+      # rather than silently skipping a body assertion.
       - name: The version must answer this deployable's smoke contract
         run: |
           set -euo pipefail
@@ -1184,29 +1260,98 @@ jobs:
       FINAL_PERCENTAGE: ${{ inputs.final-percentage }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
-      # Checkout and the toolchain are here for wrangler itself, NOT for a build.
-      # No `moon run`, no `pnpm build`, no web app — `wrangler versions deploy`
-      # names an already-uploaded Version and creates a Deployment pointing at
-      # it, and the whole safety of the operation is that the bytes promoted are
-      # the bytes that were uploaded and smoke-tested. Building here would make
-      # every promotion a rebuild (ADR-0013).
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Read the Cloudflare account id from the topology
+      # NO CHECKOUT, and this job does not build — that is the whole safety of
+      # the operation. `wrangler versions deploy` names an already-uploaded
+      # Version and creates a Deployment pointing at it, and what makes that
+      # safe is that the bytes promoted are the bytes that were uploaded and
+      # smoke-tested. No `moon run`, no `pnpm build`, no cargo, no web app.
+      # Building here would make every promotion a rebuild (ADR-0013), and a
+      # checkout that produces no build is 40 seconds and ~1,400 packages spent
+      # so that one wrangler command can resolve out of `node_modules`.
+      #
+      # The toolchain comes from the API at `main` and wrangler from the npm
+      # registry at the pinned version — the arrangement `rollback.yml` already
+      # uses and the only one that works with no `node_modules`. `WRANGLER_BIN`
+      # is what `wrangler-step.sh` runs; it defaults to `pnpm exec wrangler`
+      # where there IS a checkout, and is set here because there is not.
+      - name: Read the repository's pinned toolchain from the API (no checkout)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          ACCOUNT_ID="$(jq -er '.account.id | select(type == "string" and length > 0)' \
-            infra-topology/topology.json)" \
-            || { echo "::error::infra-topology/topology.json declares no usable account.id. Every wrangler command in this job needs it, and there is nowhere else to read it from."; exit 1; }
-          echo "CLOUDFLARE_ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+          REF="main"
+          read_one() {
+            gh api "repos/${{ github.repository }}/contents/$1?ref=$REF" --jq '.content' \
+              | base64 --decode
+          }
+          NODE_VERSION="$(read_one .node-version | tr -d '[:space:]')"
+          WRANGLER_VERSION="$(read_one package.json \
+            | jq -er '.devDependencies.wrangler | ltrimstr("^") | select(type == "string" and length > 0)')"
+          WRANGLER_VERSION="${WRANGLER_VERSION%%+*}"
+
+          # Node before anything else: wrangler 4.x declares `node >=22`, and a
+          # runner whose image drifts below that must fail here with the reason,
+          # not two steps later with a syntax error.
+          if [ -z "$NODE_VERSION" ]; then
+            echo "::error::could not read .node-version from $REF. The wrangler commands in this job need a pinned Node and there is no checkout to read it from."
+            exit 1
+          fi
+          # THE WRAPPER ITSELF HAS TO COME FROM SOMEWHERE. Dropping the
+          # checkout took the repository's own files with it, and the four
+          # wrangler steps in these jobs run
+          # `bash tooling/scripts/wrangler-step.sh` to make their failures
+          # legible. Without this line every one of them would die with
+          # `bash: tooling/scripts/wrangler-step.sh: No such file or
+          # directory` — a run that looks like a wrangler failure and is not
+          # one. So the wrapper is fetched from the API at the same ref as the
+          # toolchain it names, into $RUNNER_TEMP, and used from there.
+          #
+          # `$REF` and not the running SHA, matching `rollback.yml`: these jobs
+          # read what the repository currently declares rather than what the
+          # deploy commit declared, so a mid-incident commit cannot change the
+          # toolchain out from under a rollback or a promotion.
+          STEP_PATH="$RUNNER_TEMP/wrangler-step.sh"
+          if ! gh api "repos/${{ github.repository }}/contents/tooling/scripts/wrangler-step.sh?ref=$REF" \
+            --jq '.content' | base64 --decode > "$STEP_PATH"; then
+            echo "::error::could not read tooling/scripts/wrangler-step.sh from $REF. It is the wrapper that turns a wrangler failure into a legible annotation, and a job that cannot fetch it cannot use it."
+            exit 1
+          fi
+          if [ ! -s "$STEP_PATH" ]; then
+            echo "::error::tooling/scripts/wrangler-step.sh fetched from $REF is empty. A wrapper that produces no annotation is not the wrapper; refusing to run one."
+            exit 1
+          fi
+          echo "WRANGLER_STEP=$STEP_PATH" >> "$GITHUB_ENV"
+          echo "NODE_VERSION=$NODE_VERSION" >> "$GITHUB_ENV"
+          # The version, and the command spelling it names. `$WRANGLER_BIN` is
+          # what `wrangler-step.sh` executes; `$WRANGLER_VERSION` is for the
+          # `deployments list` verification below, which is NOT wrapped and so
+          # must name wrangler itself.
+          #
+          # That last distinction matters and it was a bug once: the wrapped
+          # steps run the command through a wrapper whose shell splits it, but
+          # `$WRANGLER_BIN deployments list` relies on the RUNNER's shell
+          # splitting an unquoted variable into a command. Under bash — which is
+          # what a `run:` step gets — that works. Under zsh it does not, and it
+          # did not fail loudly either: the call is followed by
+          # `|| echo "::warning::…"`, so a `command not found` became a warning
+          # and the step went green having verified nothing. A check that
+          # cannot run is not a pass, so the bare call spells the command out.
+          echo "WRANGLER_BIN=npx --yes wrangler@$WRANGLER_VERSION" >> "$GITHUB_ENV"
+          echo "WRANGLER_VERSION=$WRANGLER_VERSION" >> "$GITHUB_ENV"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: .node-version
-          cache: pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Read the Cloudflare account id from the topology
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ACCOUNT_ID="$(gh api \
+            "repos/${{ github.repository }}/contents/infra-topology/topology.json?ref=main" \
+            --jq '.content' | base64 --decode \
+            | jq -er '.account.id | select(type == "string" and length > 0)')" \
+            || { echo "::error::infra-topology/topology.json declares no usable account.id. Every wrangler command in this job needs it, and there is nowhere else to read it from."; exit 1; }
+          echo "CLOUDFLARE_ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
 
       # `--name` and NOT `--config`, and that is deliberate: a Deployment is a
       # routing rule, and it needs the Worker's name and a Version id and
@@ -1220,14 +1365,14 @@ jobs:
         id: promote
         run: |
           set -euo pipefail
-          bash tooling/scripts/wrangler-step.sh "promote a version" -- versions deploy \
+          bash "$WRANGLER_STEP" "promote a version" -- versions deploy \
             --name "$WORKER_NAME" \
             --version-id "$VERSION_ID" \
             --percentage "$FINAL_PERCENTAGE" \
             --message "release $RELEASE_TAG at ${FINAL_PERCENTAGE}%" \
             --yes
           echo "percentage=$FINAL_PERCENTAGE" >> "$GITHUB_OUTPUT"
-          pnpm exec wrangler deployments list --name "$WORKER_NAME" \
+          npx --yes "wrangler@$WRANGLER_VERSION" deployments list --name "$WORKER_NAME" \
             || echo "::warning::could not list deployments; the promotion above reported success."
           {
             echo "### Promoted"
@@ -1290,28 +1435,98 @@ jobs:
       POLICY_LIMIT_PERCENTAGE: ${{ inputs.policy-limit-percentage }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
-      # Checkout and toolchain for wrangler only. No build, no moon task, no web
-      # app — a promotion names an already-uploaded Version, and the guarantee
-      # this job relies on is that the bytes it sends traffic to are the bytes
-      # that were canaried and smoke-tested. Building here would make every
-      # promotion a rebuild (ADR-0013).
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Read the Cloudflare account id from the topology
+      # NO CHECKOUT, and this job does not build — a promotion names an
+      # already-uploaded Version, and the guarantee it relies on is that the
+      # bytes it sends traffic to are the bytes that were canaried and
+      # smoke-tested. No `moon run`, no `pnpm build`, no cargo, no web app:
+      # building here would make every promotion a rebuild (ADR-0013), and a
+      # checkout that produces no build is ~40 seconds and ~1,400 packages
+      # spent so one wrangler command can resolve out of `node_modules`.
+      #
+      # The toolchain is read from the API at `main` and wrangler comes from
+      # the npm registry at the pinned version, which is how `rollback.yml`
+      # already runs and the only spelling that works with no `node_modules`.
+      # `WRANGLER_BIN` is what `wrangler-step.sh` executes; it defaults to
+      # `pnpm exec wrangler` where there IS a checkout and is set here because
+      # there is not.
+      - name: Read the repository's pinned toolchain from the API (no checkout)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          ACCOUNT_ID="$(jq -er '.account.id | select(type == "string" and length > 0)' \
-            infra-topology/topology.json)" \
-            || { echo "::error::infra-topology/topology.json declares no usable account.id. Every wrangler command in this job needs it, and there is nowhere else to read it from."; exit 1; }
-          echo "CLOUDFLARE_ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+          REF="main"
+          read_one() {
+            gh api "repos/${{ github.repository }}/contents/$1?ref=$REF" --jq '.content' \
+              | base64 --decode
+          }
+          NODE_VERSION="$(read_one .node-version | tr -d '[:space:]')"
+          WRANGLER_VERSION="$(read_one package.json \
+            | jq -er '.devDependencies.wrangler | ltrimstr("^") | select(type == "string" and length > 0)')"
+          WRANGLER_VERSION="${WRANGLER_VERSION%%+*}"
+
+          # Node before anything else: wrangler 4.x declares `node >=22`, and a
+          # runner whose image drifts below that must fail here with the reason,
+          # not two steps later with a syntax error.
+          if [ -z "$NODE_VERSION" ]; then
+            echo "::error::could not read .node-version from $REF. The wrangler commands in this job need a pinned Node and there is no checkout to read it from."
+            exit 1
+          fi
+          # THE WRAPPER ITSELF HAS TO COME FROM SOMEWHERE. Dropping the
+          # checkout took the repository's own files with it, and the four
+          # wrangler steps in these jobs run
+          # `bash tooling/scripts/wrangler-step.sh` to make their failures
+          # legible. Without this line every one of them would die with
+          # `bash: tooling/scripts/wrangler-step.sh: No such file or
+          # directory` — a run that looks like a wrangler failure and is not
+          # one. So the wrapper is fetched from the API at the same ref as the
+          # toolchain it names, into $RUNNER_TEMP, and used from there.
+          #
+          # `$REF` and not the running SHA, matching `rollback.yml`: these jobs
+          # read what the repository currently declares rather than what the
+          # deploy commit declared, so a mid-incident commit cannot change the
+          # toolchain out from under a rollback or a promotion.
+          STEP_PATH="$RUNNER_TEMP/wrangler-step.sh"
+          if ! gh api "repos/${{ github.repository }}/contents/tooling/scripts/wrangler-step.sh?ref=$REF" \
+            --jq '.content' | base64 --decode > "$STEP_PATH"; then
+            echo "::error::could not read tooling/scripts/wrangler-step.sh from $REF. It is the wrapper that turns a wrangler failure into a legible annotation, and a job that cannot fetch it cannot use it."
+            exit 1
+          fi
+          if [ ! -s "$STEP_PATH" ]; then
+            echo "::error::tooling/scripts/wrangler-step.sh fetched from $REF is empty. A wrapper that produces no annotation is not the wrapper; refusing to run one."
+            exit 1
+          fi
+          echo "WRANGLER_STEP=$STEP_PATH" >> "$GITHUB_ENV"
+          echo "NODE_VERSION=$NODE_VERSION" >> "$GITHUB_ENV"
+          # The version, and the command spelling it names. `$WRANGLER_BIN` is
+          # what `wrangler-step.sh` executes; `$WRANGLER_VERSION` is for the
+          # `deployments list` verification below, which is NOT wrapped and so
+          # must name wrangler itself.
+          #
+          # That last distinction matters and it was a bug once: the wrapped
+          # steps run the command through a wrapper whose shell splits it, but
+          # `$WRANGLER_BIN deployments list` relies on the RUNNER's shell
+          # splitting an unquoted variable into a command. Under bash — which is
+          # what a `run:` step gets — that works. Under zsh it does not, and it
+          # did not fail loudly either: the call is followed by
+          # `|| echo "::warning::…"`, so a `command not found` became a warning
+          # and the step went green having verified nothing. A check that
+          # cannot run is not a pass, so the bare call spells the command out.
+          echo "WRANGLER_BIN=npx --yes wrangler@$WRANGLER_VERSION" >> "$GITHUB_ENV"
+          echo "WRANGLER_VERSION=$WRANGLER_VERSION" >> "$GITHUB_ENV"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: .node-version
-          cache: pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Read the Cloudflare account id from the topology
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ACCOUNT_ID="$(gh api \
+            "repos/${{ github.repository }}/contents/infra-topology/topology.json?ref=main" \
+            --jq '.content' | base64 --decode \
+            | jq -er '.account.id | select(type == "string" and length > 0)')" \
+            || { echo "::error::infra-topology/topology.json declares no usable account.id. Every wrangler command in this job needs it, and there is nowhere else to read it from."; exit 1; }
+          echo "CLOUDFLARE_ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
 
       # `--name` rather than `--config`, for the reason in `promote_to_final`:
       # a Deployment needs the Worker's name and a Version id, and the bindings
@@ -1321,14 +1536,14 @@ jobs:
         id: promote
         run: |
           set -euo pipefail
-          bash tooling/scripts/wrangler-step.sh "promote a version" -- versions deploy \
+          bash "$WRANGLER_STEP" "promote a version" -- versions deploy \
             --name "$WORKER_NAME" \
             --version-id "$VERSION_ID" \
             --percentage "$POLICY_LIMIT_PERCENTAGE" \
             --message "release $RELEASE_TAG at ${POLICY_LIMIT_PERCENTAGE}% (approved, gate 1 of 2)" \
             --yes
           echo "percentage=$POLICY_LIMIT_PERCENTAGE" >> "$GITHUB_OUTPUT"
-          pnpm exec wrangler deployments list --name "$WORKER_NAME" \
+          npx --yes "wrangler@$WRANGLER_VERSION" deployments list --name "$WORKER_NAME" \
             || echo "::warning::could not list deployments; the promotion above reported success."
           {
             echo "### Gate 1 passed — $WORKER at ${POLICY_LIMIT_PERCENTAGE}%"
@@ -1374,38 +1589,111 @@ jobs:
       FINAL_PERCENTAGE: ${{ inputs.final-percentage }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
-      # Checkout and toolchain for wrangler only — no build, no moon task, no
-      # web app, for the same reason as `promote_to_policy_limit`.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Read the Cloudflare account id from the topology
+      # NO CHECKOUT, and this job does not build — a promotion names an
+      # already-uploaded Version, and the guarantee it relies on is that the
+      # bytes it sends traffic to are the bytes that were canaried and
+      # smoke-tested. No `moon run`, no `pnpm build`, no cargo, no web app:
+      # building here would make every promotion a rebuild (ADR-0013), and a
+      # checkout that produces no build is ~40 seconds and ~1,400 packages
+      # spent so one wrangler command can resolve out of `node_modules`.
+      #
+      # The toolchain is read from the API at `main` and wrangler comes from
+      # the npm registry at the pinned version, which is how `rollback.yml`
+      # already runs and the only spelling that works with no `node_modules`.
+      # `WRANGLER_BIN` is what `wrangler-step.sh` executes; it defaults to
+      # `pnpm exec wrangler` where there IS a checkout and is set here because
+      # there is not.
+      - name: Read the repository's pinned toolchain from the API (no checkout)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          ACCOUNT_ID="$(jq -er '.account.id | select(type == "string" and length > 0)' \
-            infra-topology/topology.json)" \
-            || { echo "::error::infra-topology/topology.json declares no usable account.id. Every wrangler command in this job needs it, and there is nowhere else to read it from."; exit 1; }
-          echo "CLOUDFLARE_ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+          REF="main"
+          read_one() {
+            gh api "repos/${{ github.repository }}/contents/$1?ref=$REF" --jq '.content' \
+              | base64 --decode
+          }
+          NODE_VERSION="$(read_one .node-version | tr -d '[:space:]')"
+          WRANGLER_VERSION="$(read_one package.json \
+            | jq -er '.devDependencies.wrangler | ltrimstr("^") | select(type == "string" and length > 0)')"
+          WRANGLER_VERSION="${WRANGLER_VERSION%%+*}"
+
+          # Node before anything else: wrangler 4.x declares `node >=22`, and a
+          # runner whose image drifts below that must fail here with the reason,
+          # not two steps later with a syntax error.
+          if [ -z "$NODE_VERSION" ]; then
+            echo "::error::could not read .node-version from $REF. The wrangler commands in this job need a pinned Node and there is no checkout to read it from."
+            exit 1
+          fi
+          # THE WRAPPER ITSELF HAS TO COME FROM SOMEWHERE. Dropping the
+          # checkout took the repository's own files with it, and the four
+          # wrangler steps in these jobs run
+          # `bash tooling/scripts/wrangler-step.sh` to make their failures
+          # legible. Without this line every one of them would die with
+          # `bash: tooling/scripts/wrangler-step.sh: No such file or
+          # directory` — a run that looks like a wrangler failure and is not
+          # one. So the wrapper is fetched from the API at the same ref as the
+          # toolchain it names, into $RUNNER_TEMP, and used from there.
+          #
+          # `$REF` and not the running SHA, matching `rollback.yml`: these jobs
+          # read what the repository currently declares rather than what the
+          # deploy commit declared, so a mid-incident commit cannot change the
+          # toolchain out from under a rollback or a promotion.
+          STEP_PATH="$RUNNER_TEMP/wrangler-step.sh"
+          if ! gh api "repos/${{ github.repository }}/contents/tooling/scripts/wrangler-step.sh?ref=$REF" \
+            --jq '.content' | base64 --decode > "$STEP_PATH"; then
+            echo "::error::could not read tooling/scripts/wrangler-step.sh from $REF. It is the wrapper that turns a wrangler failure into a legible annotation, and a job that cannot fetch it cannot use it."
+            exit 1
+          fi
+          if [ ! -s "$STEP_PATH" ]; then
+            echo "::error::tooling/scripts/wrangler-step.sh fetched from $REF is empty. A wrapper that produces no annotation is not the wrapper; refusing to run one."
+            exit 1
+          fi
+          echo "WRANGLER_STEP=$STEP_PATH" >> "$GITHUB_ENV"
+          echo "NODE_VERSION=$NODE_VERSION" >> "$GITHUB_ENV"
+          # The version, and the command spelling it names. `$WRANGLER_BIN` is
+          # what `wrangler-step.sh` executes; `$WRANGLER_VERSION` is for the
+          # `deployments list` verification below, which is NOT wrapped and so
+          # must name wrangler itself.
+          #
+          # That last distinction matters and it was a bug once: the wrapped
+          # steps run the command through a wrapper whose shell splits it, but
+          # `$WRANGLER_BIN deployments list` relies on the RUNNER's shell
+          # splitting an unquoted variable into a command. Under bash — which is
+          # what a `run:` step gets — that works. Under zsh it does not, and it
+          # did not fail loudly either: the call is followed by
+          # `|| echo "::warning::…"`, so a `command not found` became a warning
+          # and the step went green having verified nothing. A check that
+          # cannot run is not a pass, so the bare call spells the command out.
+          echo "WRANGLER_BIN=npx --yes wrangler@$WRANGLER_VERSION" >> "$GITHUB_ENV"
+          echo "WRANGLER_VERSION=$WRANGLER_VERSION" >> "$GITHUB_ENV"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: .node-version
-          cache: pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Read the Cloudflare account id from the topology
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ACCOUNT_ID="$(gh api \
+            "repos/${{ github.repository }}/contents/infra-topology/topology.json?ref=main" \
+            --jq '.content' | base64 --decode \
+            | jq -er '.account.id | select(type == "string" and length > 0)')" \
+            || { echo "::error::infra-topology/topology.json declares no usable account.id. Every wrangler command in this job needs it, and there is nowhere else to read it from."; exit 1; }
+          echo "CLOUDFLARE_ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
 
       - name: Promote the uploaded version to the final percentage
         id: promote
         run: |
           set -euo pipefail
-          bash tooling/scripts/wrangler-step.sh "promote a version" -- versions deploy \
+          bash "$WRANGLER_STEP" "promote a version" -- versions deploy \
             --name "$WORKER_NAME" \
             --version-id "$VERSION_ID" \
             --percentage "$FINAL_PERCENTAGE" \
             --message "release $RELEASE_TAG at ${FINAL_PERCENTAGE}% (approved, gate 2 of 2)" \
             --yes
           echo "percentage=$FINAL_PERCENTAGE" >> "$GITHUB_OUTPUT"
-          pnpm exec wrangler deployments list --name "$WORKER_NAME" \
+          npx --yes "wrangler@$WRANGLER_VERSION" deployments list --name "$WORKER_NAME" \
             || echo "::warning::could not list deployments; the promotion above reported success."
           {
             echo "### Gate 2 passed — $WORKER at ${FINAL_PERCENTAGE}%"

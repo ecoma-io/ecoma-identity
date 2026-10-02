@@ -341,6 +341,38 @@ own KV; nothing is shared with production, because a shared staging database is 
 staging environment that can corrupt production data through a test. `home-web`
 has no database or KV at all, so this is a statement about the Identity Workers.
 
+## Which jobs check the repository out, and why
+
+**One job does.** `build_and_upload` checks the repository out, installs the
+workspace and builds — it is the only job that produces bytes.
+
+The other four Cloudflare jobs — `canary`, `smoke`, and the three promotions —
+**do not check the repository out at all**, and none of them builds. That is not a
+speed optimisation; it is the mechanical expression of ADR-0013. A promotion names
+an already-uploaded Version id, and what makes that safe is that the bytes it
+sends traffic to are the bytes that were built, uploaded and smoke-tested. Any
+toolchain in those jobs is a toolchain that could grow a build step, and a build
+step in a promotion is a rebuild.
+
+What replaced the checkout, and where each piece comes from:
+
+| What                           | Where it comes from in a no-checkout job                          |
+| ------------------------------ | ----------------------------------------------------------------- |
+| Node version                   | `.node-version`, read through the contents API at `main`          |
+| wrangler version               | `package.json`'s `devDependencies.wrangler`, same API             |
+| wrangler itself                | `npx --yes wrangler@<pinned>`, from the npm registry              |
+| Cloudflare account id          | `infra-topology/topology.json`, same API                          |
+| the failure-annotation wrapper | `tooling/scripts/wrangler-step.sh`, same API, into `$RUNNER_TEMP` |
+
+All five are read at `main`, not at the running SHA — the same rule
+[rollback.md](rollback.md) uses, and for the same reason: a rollback must read the
+repository as it is now, not the mid-incident commit that happened to be running.
+
+`smoke` is the strongest case: it calls no API, reads no file and runs no wrangler
+at all. It is `curl`, `grep` and `jq` against a public host, and it carries no
+Cloudflare API token — a credential a job never uses is a credential that can leak
+from a job that does.
+
 ## What is deployed from what
 
 A Worker version is built from three inputs, and all three are in the version:
