@@ -242,18 +242,19 @@ jobs:
   # the failure mode of forgetting is a repository that believes it has preview
   # coverage it does not have. This reads the implementation itself.
   #
-  # `Route::is_implemented()` (`crates/identity-oidc/src/route.rs`) returns
-  # true only for the routes that actually answer, and `/health` reports the
-  # count. It is 0 today and will not be 0 again until an authentication phase
-  # lands — which is exactly the event this gate exists to notice. Nothing here
-  # has to be edited when that happens, and nothing has to be remembered when it
-  # does.
+  # IT ASKS THE DEPLOYED WORKER, NOT THE ROUTE TABLE. `Route::is_implemented()`
+  # (`crates/identity-oidc/src/route.rs`) was the obvious signal and it is the
+  # WRONG one: `deploy-worker.yml` expects `READY_STATUS=503` from
+  # `identity-admin` and `identity-jobs`, so a gate keyed on the route count
+  # would turn this workflow red exactly when authentication lands — a red check
+  # whose meaning is "go and mark me required". `/health` on the deployed Worker
+  # reports the same count in the same context the smoke test uses, so the two
+  # cannot disagree.
   #
   # This job checks the IDENTITY Worker only, and that is deliberate rather
   # than lazy: `identity` is the one deployable whose readiness the others
-  # depend on (they bind it), and it is the one with the route table that
-  # reports its own state. `home-web` is a real site today and needs no such
-  # signal.
+  # depend on (they bind it), and it is the one that answers `/health` with a
+  # route table. `home-web` is a real site today and needs no such signal.
   gate:
     name: Preview gate
     runs-on: ubuntu-latest
