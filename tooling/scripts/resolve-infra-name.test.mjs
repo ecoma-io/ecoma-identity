@@ -331,6 +331,18 @@ test("a non-string value renders as JSON, never as [object Object]", () => {
     );
   }
 
+  // No printable form is `null` rather than a crash. `JSON.stringify` answers
+  // `undefined` — not a string — for a function, so a caller doing
+  // `text.includes(...)` died with an uncaught TypeError. Reachable before
+  // `readPath` stopped walking into `Object.prototype`, and worth pinning on its
+  // own because the two facts are independent.
+  assert.equal(
+    renderValue(() => {}),
+    null,
+  );
+  assert.equal(renderValue(undefined), null);
+  assert.equal(renderValue(Symbol("x")), null);
+
   // And through the LIST path, which is where the divergence actually was: the
   // array branch used to build its own string with `${entry}` while every other
   // branch normalised. Testing `renderValue` alone does NOT catch that — the
@@ -347,6 +359,49 @@ test("a non-string value renders as JSON, never as [object Object]", () => {
       `renderList(${JSON.stringify(value)}) printed [object Object]`,
     );
   }
+
+  // A list with one unprintable element is refused WHOLE. Returning the
+  // printable prefix would be a shorter list, and the caller — a shell loop over
+  // resource names — would deploy against fewer resources than the manifest
+  // declares without being told. "Partial answer" is this tool's worst output.
+  assert.equal(renderList(["a", () => {}, "b"]), null);
+  assert.equal(renderList([{ ok: 1 }, Symbol("x")]), null);
+});
+
+test("a path into Object.prototype is absent, not a crash", () => {
+  // `--ask constructor` used to answer `Object`, `toString` a function, and
+  // `JSON.stringify` of a function is `undefined`, which the `{pr}` assertion
+  // then dereferenced: an uncaught TypeError, exit 1, and a stack trace. The
+  // caller is a shell step that wants a message and a non-zero exit, so a crash
+  // is the one outcome it cannot use.
+  //
+  // An inherited key is not a value the manifest declares, so answering "absent"
+  // is not a special case — it is the same answer as any other undeclared key.
+  for (const key of ["constructor", "toString", "valueOf", "hasOwnProperty"]) {
+    const result = run(["--environment", "staging", "--ask", key]);
+    assert.equal(result.code, 0, `${key} must be absent, not fatal`);
+    assert.equal(
+      result.stdout.trim(),
+      "",
+      `${key} answered a value from Object.prototype`,
+    );
+    assert.equal(
+      result.stderr,
+      "",
+      `${key} printed prose on a successful absence`,
+    );
+  }
+
+  // And a nested one: `resources.identity.constructor.d1` is two hops into the
+  // prototype, and the walk must stop at the first key the manifest does not own.
+  const nested = run([
+    "--environment",
+    "staging",
+    "--ask",
+    "resources.identity.constructor.d1",
+  ]);
+  assert.equal(nested.code, 0);
+  assert.equal(nested.stdout.trim(), "");
 });
 
 test("an unknown environment and an unknown argument are usage errors", () => {

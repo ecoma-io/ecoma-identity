@@ -110,10 +110,26 @@ function parseArgs(argv) {
   return options;
 }
 
+/**
+ * Walk a dotted path, and only over properties the manifest ITSELF declares.
+ *
+ * The `hasOwn` check is what keeps `--ask constructor` from answering. A plain
+ * `cursor[key]` walks into `Object.prototype`, so `constructor` yielded
+ * `Object`, `toString` yielded a function, and `JSON.stringify` of a function is
+ * `undefined` — which the next line dereferenced, so the tool died with an
+ * uncaught `TypeError`, exit 1, and a stack trace. The caller is a shell step
+ * that wants a message and a non-zero exit; a crash is the one outcome it cannot
+ * report usefully.
+ *
+ * An inherited key is not a value the manifest declares, so treating it as
+ * absent is not a special case — it is the same answer as any other key the
+ * topology does not carry.
+ */
 function readPath(source, path) {
   let cursor = source;
   for (const key of String(path).split(".")) {
     if (cursor === null || typeof cursor !== "object") return undefined;
+    if (!Object.hasOwn(cursor, key)) return undefined;
     cursor = cursor[key];
   }
   return cursor;
@@ -129,7 +145,14 @@ function readPath(source, path) {
  * through a fixture, and a rule that cannot be exercised is a rule that comes back.
  */
 export function renderValue(value) {
-  return typeof value === "string" ? value : JSON.stringify(value);
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  // `JSON.stringify` returns `undefined` — not a string — for a function, for
+  // `undefined`, and for a symbol. A caller that then did `text.includes(...)`
+  // would die with an uncaught `TypeError`. Every such value is absent from this
+  // manifest, and `readPath` no longer lets one reach here, but the two facts are
+  // independent and the second is cheap: this function's contract is a string or
+  // nothing.
+  return typeof text === "string" ? text : null;
 }
 
 /**
@@ -139,12 +162,25 @@ export function renderValue(value) {
  * with `$(...)` would otherwise get the whole JSON array, which is the opposite
  * of what it asked for.
  *
+ * Returns `null` — not a partial list — if any element has no printable form.
+ * See the loop for why.
+ *
  * Exported for the same reason as `renderValue` — the array branch calls THIS,
  * so a test of this function is a test of the branch rather than of a helper
  * nothing uses.
  */
 export function renderList(value) {
-  return value.map((entry) => `${renderValue(entry)}\n`).join("");
+  const lines = [];
+  for (const entry of value) {
+    const text = renderValue(entry);
+    // `null` means the element has no printable form. It is NOT dropped: a list
+    // that silently loses an element is a shorter list, and a caller iterating it
+    // would deploy against fewer resources than the manifest declares without
+    // ever being told. The whole list is refused instead.
+    if (text === null) return null;
+    lines.push(`${text}\n`);
+  }
+  return lines.join("");
 }
 
 function main(argv) {
@@ -239,6 +275,15 @@ function main(argv) {
   }
 
   const text = renderValue(value);
+  // No printable form, and not absent either — a value the manifest carries that
+  // cannot be rendered. A stack trace would be the one outcome a shell step cannot
+  // report, so this is a message and a non-zero exit.
+  if (text === null) {
+    process.stderr.write(
+      `${options.ask} names a ${typeof value}, which has no printable form. Refusing to print it rather than guessing at one.\n`,
+    );
+    return EXIT_INVALID;
+  }
   // The one assertion this tool exists to make structural. If a template ever
   // reaches this point, something upstream stopped substituting and a real
   // Cloudflare call would be made against a name that has never existed. Checked
@@ -266,7 +311,17 @@ function main(argv) {
       );
       return EXIT_INVALID;
     }
-    process.stdout.write(renderList(value));
+    const list = renderList(value);
+    // One element of the list has no printable form. The whole list is refused
+    // rather than shortened, because a silently shorter list is a caller
+    // deploying against fewer resources than the manifest declares.
+    if (list === null) {
+      process.stderr.write(
+        `${options.ask} resolved to a list for ${options.environment} with at least one element that has no printable form. The whole list is refused rather than shortened, because a shorter list is a caller deploying against fewer resources than this manifest declares.\n`,
+      );
+      return EXIT_INVALID;
+    }
+    process.stdout.write(list);
     return EXIT_OK;
   }
 
