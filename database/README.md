@@ -21,10 +21,12 @@ document is fixed in the same commit (`AGENTS.md`, "one fact, one owner").
 | Row constructors, repositories, D1 adapters                      | `DEFERRED` — no code reads or writes any of these tables                                              |
 | Seed data                                                        | `DEFERRED` — there is nothing to seed yet, and `seeds/` says so                                       |
 | A test runner that applies these migrations in CI                | `DEFERRED` — the integration test shells out to `wrangler`, which is not on PATH in every environment |
+| A deploy applies these migrations before uploading a version     | `IMPLEMENTED` — `deploy-worker.yml:695`, in `build_and_upload`, `--remote`                            |
 
 **The schema is real. Nothing is stored.** No repository exists, no row has ever
 been written by the platform, and every authentication route answers `501`. A
-table existing is not a feature working.
+table existing is not a feature working — and a migration file existing is not a
+migration having run.
 
 ## Why the directory is split in two
 
@@ -162,6 +164,51 @@ moon run identity:db-migrate
 production step in this document on purpose; the deployment procedure is
 `docs/operations/deployment-model.md` and an operator follows it, not a
 developer copying a line from a README.
+
+## A deploy applies them
+
+**Nothing in this directory applied these migrations until a deploy did.**
+Sixteen files sit here and no run had ever executed one — the schema was real
+SQL, and the database a version would have been uploaded against was empty.
+That gap is [#22](../docs/README.md) and it is closed by one step in
+`build_and_upload`.
+
+Before `wrangler versions upload`, `deploy-worker.yml` runs:
+
+```sh
+wrangler d1 migrations apply IDENTITY_DB --remote
+```
+
+Three details are load-bearing, and each has a failure mode that looks like
+success:
+
+- **`--remote` is not optional.** Without it wrangler writes a local sqlite
+  file and exits `0`. A green step that migrated nothing is indistinguishable
+  from a green step that migrated everything.
+- **The binding, never a name and never a UUID.** wrangler's positional argument
+  matches `database_name` or `binding` by strict equality and rejects a UUID. It
+  is read from the config that was just rendered, so the migration and the
+  upload name the same binding.
+- **It runs before the upload, not after.** A version reaching Cloudflare
+  against an un-migrated database answers 500 to every route that touches a
+  table, and the smoke test reports a Worker fault for what is a schema fault.
+
+The step skips itself when the topology declares no D1 for the deployable.
+`identity-admin` and `identity-jobs` have no database by design (ADR-0003), and
+charging them a migration step would be charging them a resource they must not
+have.
+
+**The ledger is shared with wrangler's own, deliberately.** `0001_schema_migrations.sql`
+creates `d1_migrations` and the topology sets `migrations_table` to that same
+name, so wrangler and any hand-run `migrations apply` share one record of what
+has run. That is the point of the naming — the cost is that two concurrent
+applies against one database race on it. So the step reads the topology first and
+**refuses to run** when two deployables declare the same D1, telling the operator
+to split the resource or serialise the deploys rather than let them interleave.
+
+No migration has been applied yet. The Cloudflare account held no database until
+the deploy that provisions resources began running, and this step has not yet run
+against a real one.
 
 ## Fixtures and seeds
 
