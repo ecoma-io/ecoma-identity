@@ -56,7 +56,10 @@ export default {
         "identity-admin-web",
         "home-web", // the public-facing web application (ADR-0016)
         // ---- packages/ — shared libraries ---------------------------------
-        "shared-i18n", // shared i18n utilities and types
+        // Renamed from `shared-i18n` in the same commit that widened the
+        // package: locale mechanics alone did not describe what it owns, and a
+        // scope is the vocabulary a reviewer checks a diff against.
+        "frontend-preferences", // preference mechanics for the three frontends
         // ---- repository-level — changes no single project owns ----------
         "arch", // the boundary law itself (pnpm arch, the config, the prose)
         "ci", // .github/workflows and the CI matrix

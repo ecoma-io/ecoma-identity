@@ -119,9 +119,28 @@ jobs:
       # stderr. Found by the first CI run in this repository's history: this
       # job died before `Install dependencies` and printed no step output at
       # all, which is why the two errors it was hiding took a second run to see.
+      # `with: toolchain: $RUST_TOOLCHAIN` is DERIVED, not restated. The
+      # channel is declared once, in `.moon/toolchains.yml` (`rust.version`),
+      # and `tooling/scripts/read-rust-toolchain.sh` reads it from there, so
+      # the four rust-toolchain call sites in this repository cannot drift away
+      # from the declaration. The four sites used to say `toolchain: stable`
+      # literally, which made "the channel" a fact owned in five places and
+      # correct in at most one of them after any change.
+      #
+      # It is a script rather than `moon toolchain info rust` because moon
+      # 2.5.6 exposes no such machine-readable path: that command prints the
+      # PLUGIN's schema and never the configured value, has no `--json`, and
+      # `moon query` has no `toolchains` subcommand. The script's own comment
+      # records that, so the next reader does not re-derive it.
+      #
+      # It runs before `pnpm install` and before the moon toolchain cache
+      # below, which is why it is a plain script and not a moon task.
+      - name: Read the declared Rust channel
+        id: rust-toolchain
+        run: echo "channel=$(tooling/scripts/read-rust-toolchain.sh)" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ steps.rust-toolchain.outputs.channel }}
           # `wasm32-unknown-unknown` is an INPUT to this job, not only to the
           # two that compile a Worker directly. `moon ci` runs each affected
           # project's `build` and `package`, and those tasks are the
@@ -206,6 +225,17 @@ jobs:
         run: pnpm contracts
       - name: The deployment topology is internally coherent
         run: pnpm topology:validate
+      # The frontend-coherence gate, here for the same structural reason as the
+      # three above: it judges files that no moon project owns, so `moon ci`'s
+      # affected graph correctly answers "no tasks affected" for a change that
+      # reintroduces a second owner of a preference value.
+      #
+      # It is cheap — pure Node, three directories — and unconditional, because
+      # a frontend preference value with two owners is a fact about the tree
+      # rather than about whichever pull request introduced it. See
+      # docs/architecture/frontend-preferences.md.
+      - name: Each frontend preference value has exactly one owner
+        run: pnpm frontend:check
 
       # Every pull-request commit reaches main verbatim — under merge-commit
       # merging as the SAME object, through the merge's second parent — and the
@@ -343,9 +373,14 @@ jobs:
       # that depend on the graph reported `could not run` — correctly, since the
       # script refuses to pass a gate it could not evaluate — and the job failed
       # for a reason that has nothing to do with any boundary.
+      # The channel comes from `.moon/toolchains.yml` rather than a literal
+      # `stable`, for the reason recorded at the first call site above.
+      - name: Read the declared Rust channel
+        id: rust-toolchain
+        run: echo "channel=$(tooling/scripts/read-rust-toolchain.sh)" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ steps.rust-toolchain.outputs.channel }}
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: ". -> target"
@@ -408,10 +443,14 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       # The dry-run compiles the Worker, so the Rust toolchain and the wasm
-      # target are inputs to this job and not only to `checks`.
+      # target are inputs to this job and not only to `checks`. The channel
+      # comes from `.moon/toolchains.yml`, as at the first call site above.
+      - name: Read the declared Rust channel
+        id: rust-toolchain
+        run: echo "channel=$(tooling/scripts/read-rust-toolchain.sh)" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ steps.rust-toolchain.outputs.channel }}
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
@@ -427,13 +466,15 @@ jobs:
       #
       # Moon tasks, not `pnpm --filter`. Both apps now have their own `moon.yml`,
       # so `identity-web:build` resolves — and each task carries
-      # `deps: ["^build"]`, which is what builds `@ecoma-io/shared-i18n` first.
-      # That ordering used to be implicit and it was wrong: `dist/` is
-      # gitignored, so on a clean CI checkout the shared library had no entry
-      # point and both builds failed with `Rolldown failed to resolve import
-      # "@ecoma-io/shared-i18n"`. Naming the dependency in the task graph fixes
-      # it for every workflow, rather than restating the same build step in
-      # each one that happens to need this app.
+      # `deps: ["frontend-preferences:build"]`, which is what builds
+      # `@ecoma-io/frontend-preferences` first. That ordering used to be implicit
+      # and it was wrong: `dist/` is gitignored, so on a clean CI checkout the
+      # shared library had no entry point and both builds failed with
+      # `Rolldown failed to resolve import "@ecoma-io/frontend-preferences"`.
+      # Naming the dependency in the task graph fixes it for every workflow,
+      # rather than restating the same build step in each one that happens to
+      # need this app. The edge is named rather than spelled `^build` because
+      # moon 2.5.6 does not implement the shorthand.
       - name: Build the web apps (their dist/ is inside the version)
         run: pnpm exec moon run identity-web:build identity-admin-web:build
 

@@ -6,9 +6,10 @@
   Each option is a `SwitchLocalePathLink` to the SAME page in the other
   language, so switching does not navigate the visitor somewhere they did not
   ask to go. It is a link rather than a button that calls `setLocale()` because
-  of the cookie: `SwitchLocalePathLink` is what actually writes
-  `ecoma_locale`, and `setLocale()` changes the rendered language without
-  persisting the choice — which would mean the language resets on the next
+  of the cookie: `SwitchLocalePathLink` is what actually writes the locale
+  cookie — whose name the projected frontend config carries, one per
+  environment — and `setLocale()` changes the rendered language without
+  persisting the choice, which would mean the language resets on the next
   visit and never reaches the other two apps.
 
   A `<select>` was the other option and was rejected: with real URLs, the
@@ -59,8 +60,18 @@ const year = new Date().getFullYear();
             :class="{ active: l.code === locale }"
             :aria-current="l.code === locale ? 'true' : undefined"
           >
-            <!-- Each language named in itself, never in the current one. -->
-            {{ l.code === "vi" ? "Tiếng Việt" : "English" }}
+            <!--
+              Each language named in itself, never in the current one.
+
+              `name` is the locale's own name from `nuxt.config.ts`, which
+              derives it from the projected locale code via `Intl.DisplayNames`.
+              It used to be a `code === …` ternary with both display strings
+              written out beside it — a second copy of the vocabulary, and one
+              that rendered a site with three languages while offering two.
+              A locale with no `name` would fall back to its own tag here, which
+              is a worse label but never a wrong one.
+            -->
+            {{ l.name ?? l.code }}
           </SwitchLocalePathLink>
         </span>
       </nav>

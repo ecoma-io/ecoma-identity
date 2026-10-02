@@ -28,6 +28,10 @@ import { fileURLToPath } from "node:url";
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.resolve(SCRIPT_DIR, "..", "..");
 const TOPOLOGY_PATH = path.join("infra-topology", "topology.json");
+const FRONTEND_SUPPORT_PATH = path.join(
+  "infra-topology",
+  "frontend-support.json",
+);
 
 /** The four deployables. ADR-0016 added home-web. */
 export const DEPLOYABLES = [
@@ -173,6 +177,91 @@ export function loadTopology(root = DEFAULT_ROOT) {
     const message = error instanceof Error ? error.message : String(error);
     throw new TopologyError(`${file} is not valid JSON: ${message}`);
   }
+}
+
+/**
+ * Read and validate `infra-topology/frontend-support.json`.
+ *
+ * It is the second tracked input to the renderer, and it answers a question
+ * `topology.json` does not: not *where* a site is deployed but *what the
+ * frontends may say*. The cookie NAME is a deployment fact and lives in
+ * `cookie_namespaces`; the locale vocabulary is a product fact and lives here,
+ * beside it rather than inside `topology.json` because it has no cloud resource
+ * in it and `topology.schema.json` validates cloud resources.
+ *
+ * Validation is real rather than assumed, because every field here is consumed
+ * by an application as if it were a `SupportedLocale` or a `ColorMode`, and a
+ * typo would arrive at runtime as an unsupported value rather than as a build
+ * failure. Specifically it refuses a default locale that is not in the
+ * supported list — that combination renders a document in a language the
+ * application has no catalog for, which is the exact failure a `zh` entry
+ * would produce.
+ *
+ * Throws `TopologyError` for the same reason `loadTopology` does: the caller
+ * prints `error.message`, and a bare `JSON.parse` stack trace names no file.
+ */
+export function loadFrontendSupport(root = DEFAULT_ROOT) {
+  const file = path.join(root, FRONTEND_SUPPORT_PATH);
+  let source;
+  try {
+    source = fs.readFileSync(file, "utf8");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new TopologyError(`could not read ${file}: ${message}`);
+  }
+
+  let support;
+  try {
+    support = JSON.parse(source);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new TopologyError(`${file} is not valid JSON: ${message}`);
+  }
+
+  const { supportedLocales, defaultLocale, defaultColorMode } = support ?? {};
+
+  if (!Array.isArray(supportedLocales) || supportedLocales.length === 0) {
+    throw new TopologyError(
+      `${file}: supportedLocales must be a non-empty array.`,
+    );
+  }
+  const malformed = supportedLocales.filter(
+    (locale) =>
+      typeof locale !== "string" ||
+      !/^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(locale),
+  );
+  if (malformed.length > 0) {
+    throw new TopologyError(
+      `${file}: supportedLocales must be BCP 47 language tags; got ${JSON.stringify(malformed)}.`,
+    );
+  }
+  const duplicates = supportedLocales.filter(
+    (locale, index) => supportedLocales.indexOf(locale) !== index,
+  );
+  if (duplicates.length > 0) {
+    throw new TopologyError(
+      `${file}: supportedLocales contains duplicates: ${JSON.stringify(duplicates)}.`,
+    );
+  }
+  if (!supportedLocales.includes(defaultLocale)) {
+    throw new TopologyError(
+      `${file}: defaultLocale ${JSON.stringify(defaultLocale)} is not in supportedLocales. An application would then render a language it holds no catalog for.`,
+    );
+  }
+  if (!["system", "light", "dark"].includes(defaultColorMode)) {
+    throw new TopologyError(
+      `${file}: defaultColorMode must be "system", "light" or "dark"; got ${JSON.stringify(defaultColorMode)}.`,
+    );
+  }
+
+  return {
+    file,
+    support: {
+      supportedLocales: [...supportedLocales],
+      defaultLocale,
+      defaultColorMode,
+    },
+  };
 }
 
 /** Whether a PR number is well-formed and within the manifest's cap. */

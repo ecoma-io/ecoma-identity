@@ -6,12 +6,107 @@
   rendered by Vue, and anything baked into this file would be a second source
   of truth for what the console is. The title says what this is and does not
   claim that any administrative action works.
+
+  `lang="en"` is a pre-hydration placeholder and is not the locale an operator
+  gets. It has to be here, in the static HTML, because the document must parse
+  before any module has run; `initializeI18n` overwrites it from the resolved
+  preference before the app mounts. Generating it instead would mean a
+  build-time HTML transform to substitute one word.
 -->
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Ecoma Identity — Console</title>
+
+    <!--
+      The colour-mode bootstrap. Blocking, inline, and in `<head>`, and it is
+      all three on purpose: a deferred or external script runs after the
+      browser has already decided what to paint, and by then the white flash
+      this exists to prevent has happened.
+
+      It reads the same cookie `@ecoma-io/frontend-preferences` writes, and
+      resolves in the same order — stored choice, then the operating system,
+      then the platform default — because it cannot import either. `npm run
+      test`'s `tests/color-mode.test.ts` reads THIS SCRIPT'S SOURCE out of this
+      file and asserts the two agree, which is the only thing keeping that
+      duplication honest; edit one without the other and that test fails.
+
+      THE NO-FLASH GUARANTEE IS EXACTLY AS STRONG AS THE VERIFIED CLAIMS BELOW,
+      and they were each checked rather than assumed:
+
+        - Vite's `%NAME%` substitution is fed by `import.meta.env.*` DEFINES,
+          not by `envPrefix`. `vite.config.ts` defines one, read from the
+          projected config. Checked in Vite 8.3.1.
+
+        - That substitution lands inside a CLASSIC, non-module inline script.
+          Also checked in Vite 8.3.1, which is why this script is classic rather
+          than `type="module"`. The module form would work — Vite transforms
+          those too — but a module script is deferred, and a deferred script
+          that sets an attribute has missed the paint. The classic form is what
+          makes the guarantee real rather than approximate.
+
+        - An UNDEFINED variable is left in the HTML verbatim, with a warning
+          rather than an error. So a missing define would not fail this build;
+          it would ship a bundle reading a cookie named
+          `%ECOMA_FRONTEND_COOKIE_NAME%`, forever finding nothing and always
+          following the operating system. That is why the value comes from a
+          define, which cannot be undefined, and not from a process environment
+          variable that every task would have to remember to export.
+
+      What this script does NOT do is watch the operating system afterwards, and
+      it cannot: doing so needs the media-query listener `useColorMode`
+      registers when the operator picks "system". So an operator whose OS
+      switches to dark while the tab is open does not repaint until something
+      else happens. That is the real limit of the mechanism, and it is a smaller
+      one than it looks — a console repainted mid-investigation because the sun
+      set is a surprise nobody asked for, and an operator mid-incident is better
+      served by a page that changes only when they change it.
+    -->
+    <script>
+      (function () {
+        // The name is substituted at build time from the projected config, so
+        // this is the same cookie the running app writes. The value is a cookie
+        // NAME: it is in the rendered HTML of every environment already, and in
+        // the request headers of anyone who has the cookie at all.
+        var cookieName = "%ECOMA_FRONTEND_COOKIE_NAME%";
+
+        // Read the stored CHOICE, by hand, because there is nothing here to
+        // import. Spelled out rather than derived from a list: the same three
+        // words appear below, and a loop over a literal array would be those
+        // three strings with more punctuation.
+        var stored = null;
+        for (var entry in document.cookie.split(";")) {
+          var separator = entry.indexOf("=");
+          if (separator === -1) continue;
+          if (entry.slice(0, separator).trim() !== cookieName) continue;
+          stored = decodeURIComponent(entry.slice(separator + 1).trim());
+          break;
+        }
+
+        // A stored choice wins, whatever the operating system says. This is the
+        // case an explicit-choice operator is in, and it is why the "maybe one
+        // frame" caveat below does not apply to them.
+        var mode = stored === "light" || stored === "dark" ? stored : null;
+
+        // No choice: follow the operating system. `matchMedia` rather than
+        // reading the attribute, because the attribute is what this script is
+        // about to write and cannot be its own input.
+        if (mode === null) {
+          var prefersDark =
+            typeof window.matchMedia === "function" &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches;
+          mode = prefersDark ? "dark" : "light";
+        }
+
+        // ALWAYS set an attribute, including when the answer came from the
+        // system. The token sheet's `:root` block holds the light tokens, so an
+        // absent attribute is indistinguishable from light — and "leave it unset
+        // to mean system" would then mean light, which is the flash this script
+        // exists to prevent.
+        document.documentElement.setAttribute("data-color-mode", mode);
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>

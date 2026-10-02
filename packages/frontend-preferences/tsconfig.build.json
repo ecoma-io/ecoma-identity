@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // The build config, and the only one that emits.
+  //
+  // `rootDir: ./src` with `include: ["src/**/*"]` is what keeps `dist/index.js`
+  // a real entry point rather than `dist/src/index.js`, and it is also what
+  // keeps a test file out of the published package. The declaration output is
+  // not optional: the two Vue apps resolve `@ecoma-io/frontend-preferences`
+  // through this package's `types` field, and without `.d.ts` their `vue-tsc`
+  // run would see an untyped module and fall back to `any` — silently, at the
+  // boundary this package exists to type.
+  //
+  // `resolveJsonModule` is what lets `src/config.ts` import the projected
+  // configuration at the workspace root. It is inherited from `tsconfig.json`
+  // rather than repeated here, and the import resolves without widening
+  // `rootDir`: `tsc` uses the JSON only for its types, emits nothing for it,
+  // and the emitted `dist/` keeps its flat layout — verified, not assumed,
+  // because a `rootDir` escape would have turned `dist/index.js` into
+  // `dist/src/index.js` and broken both Vue apps' `main` field.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "tests", "vitest.config.ts"]
+}

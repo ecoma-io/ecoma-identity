@@ -18,6 +18,48 @@
 
   When a real design system lands, this file is what gets replaced, and the
   class names in `app.css` are the contract that has to survive the swap.
+
+  ---------------------------------------------------------------------------
+  WHY THERE ARE THREE BLOCKS AND NO MEDIA QUERY
+  ---------------------------------------------------------------------------
+
+  This file used to end with `@media (prefers-color-scheme: dark) { :root { …16
+  overrides } }`. That is gone, and the attribute blocks below replace it.
+
+  A media query and an attribute cannot both be present without the duplication
+  this shape exists to remove. `@media` only sees what the OPERATING SYSTEM
+  asks for, so it cannot honour an explicit choice: a visitor who picked light
+  on a dark machine still got dark tokens. Supporting both therefore needs
+  `:not([data-color-mode])` variants of both token sets — four blocks, two
+  copies of every colour, and a fourth place for a token to be forgotten.
+
+  So the operating system is consulted ONCE, by the blocking script in
+  `index.html`, which writes the attribute before the first paint. This file
+  then only has to answer one question — what colour is the attribute? — which
+  is two answers.
+
+  TWO FACTS THIS SHAPE DEPENDS ON, both of which are easy to get wrong:
+
+  1. SOURCE ORDER, NOT SPECIFICITY. `:root` and `[data-color-mode]` are BOTH
+     (0,1,0): a pseudo-class and an attribute selector weigh exactly the same.
+     Specificity cannot break that tie, so the attribute blocks below MUST come
+     after `:root` — move one above it and every dark override silently stops
+     applying, with no error anywhere. If you add a block here, add it BELOW.
+
+  2. `color-scheme` IS RESTATED IN EVERY BLOCK. Without it the page paints dark
+     while the browser still believes the page is light: the scrollbar, the
+     text-selection highlight, the UA background behind short pages, and every
+     unstyled form control all render light-on-white against dark text. That is
+     not a cosmetic difference — it is a contrast failure, on an identity app,
+     in the exact place the token set exists to prevent one.
+
+  The blocks also do not restate the light tokens a third time. `[data-color-
+  mode="light"]` repeats `:root`'s light block verbatim, which is a duplication
+  of about forty lines. It is deliberate: with the attribute blocks placed after
+  `:root`, `:root` is ALWAYS overridden by `[data-color-mode="light"]` on this
+  page, so the light block there is what an explicit light choice actually gets.
+  Dropping it and letting `:root` through would be fewer lines and one more
+  thing to hold in the reader's head.
 */
 
 :root {
@@ -84,31 +126,70 @@
 }
 
 /*
-  The dark scheme overrides only what has to change, and names the same roles
-  the light scheme does. A token that silently means something different in dark
-  mode is a bug waiting for the one screen that depends on it.
+  An EXPLICIT light choice, and a no-op for the bootstrap's default. The tokens
+  are `:root`'s, restated rather than inherited, for the reason in the header:
+  an explicit choice has to be a first-class answer here and not a "nothing
+  matched, so use the default" that a future edit to `:root` could change out
+  from under it.
+
+  `color-scheme: light` rather than the `:root` value of `light dark`, and that
+  is the restatement the header warns about: a page that says it follows the
+  system while its tokens are pinned to light gives the browser's own widgets a
+  different answer than the page does.
 */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --colour-canvas: #16181d;
-    --colour-surface: #1e2126;
-    --colour-surface-raised: #24272d;
-    --colour-border: #3a3f47;
-    --colour-border-strong: #6c737d;
+[data-color-mode="light"] {
+  color-scheme: light;
 
-    --colour-text: #f2f3f5;
-    --colour-text-muted: #b6bbc4;
+  --colour-canvas: #ffffff;
+  --colour-surface: #f6f7f9;
+  --colour-surface-raised: #ffffff;
+  --colour-border: #d4d7dd;
+  --colour-border-strong: #9aa1ac;
 
-    --colour-accent: #8fb0ff;
-    --colour-accent-contrast: #0b1220;
-    --colour-deferred-surface: #2c2410;
-    --colour-deferred-border: #e0b04a;
-    --colour-deferred-text: #f5e3ba;
+  --colour-text: #16181d;
+  --colour-text-muted: #565c66;
 
-    --colour-error-surface: #2e1616;
-    --colour-error-border: #f08c8c;
-    --colour-error-text: #f7d4d4;
+  --colour-accent: #1b4fd8;
+  --colour-accent-contrast: #ffffff;
+  --colour-deferred-surface: #fff8e6;
+  --colour-deferred-border: #b58100;
+  --colour-deferred-text: #4d3600;
 
-    --colour-focus: #9dbcff;
-  }
+  --colour-error-surface: #fdecec;
+  --colour-error-border: #a01b1b;
+  --colour-error-text: #6d1010;
+
+  --colour-focus: #0b3ec4;
+}
+
+/*
+  The dark scheme. The same roles as the light scheme above, by name and in the
+  same order: a token that silently means something different in dark mode is a
+  bug waiting for the one screen that depends on it. Non-colour tokens are NOT
+  repeated — spacing, type and radius are the same in both schemes, and
+  restating them would be a fourth place to change one.
+*/
+[data-color-mode="dark"] {
+  color-scheme: dark;
+
+  --colour-canvas: #16181d;
+  --colour-surface: #1e2126;
+  --colour-surface-raised: #24272d;
+  --colour-border: #3a3f47;
+  --colour-border-strong: #6c737d;
+
+  --colour-text: #f2f3f5;
+  --colour-text-muted: #b6bbc4;
+
+  --colour-accent: #8fb0ff;
+  --colour-accent-contrast: #0b1220;
+  --colour-deferred-surface: #2c2410;
+  --colour-deferred-border: #e0b04a;
+  --colour-deferred-text: #f5e3ba;
+
+  --colour-error-surface: #2e1616;
+  --colour-error-border: #f08c8c;
+  --colour-error-text: #f7d4d4;
+
+  --colour-focus: #9dbcff;
 }

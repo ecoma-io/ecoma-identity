@@ -22,6 +22,16 @@
 # change, which is the failure mode a formatting gate exists to prevent.
 # `Cargo.lock` needs no entry: prettier infers no parser for it and skips it.
 
+# `packages/frontend-preferences/frontend-support.json` is the third case, and
+# the most mechanical one. Its owner is `tooling/scripts/render-wrangler-config.mjs`,
+# which writes it with `JSON.stringify(…, null, 2)`; prettier formats a short
+# array onto one line. The two disagree on every render, so a format check over
+# it fails as soon as the renderer has run and passes as soon as it has not —
+# which is to say the gate would be reporting the order two tools happened to
+# run in, not anything about the code. Same remedy as the lock file: leave the
+# owner's bytes alone and keep `format:check` able to say something.
+packages/frontend-preferences/frontend-support.json
+
 .claude/
 pnpm-lock.yaml
 node_modules/
