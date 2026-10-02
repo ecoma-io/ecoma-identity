@@ -266,13 +266,6 @@ jobs:
     timeout-minutes: 15
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
-      # How wrangler is reached, NOT hardcoded in the script. See the step that
-      # sets it, and `wranglerInvocation()` in `preview-teardown.mjs`: a
-      # `pnpm exec wrangler` on a runner with no `node_modules` fails every
-      # delete with "Command wrangler not found", and a failure of that shape is
-      # reported as a resource that SURVIVED rather than as a teardown that never
-      # ran.
-      PREVIEW_TEARDOWN_WRANGLER: ""
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Check out the base repository
@@ -298,6 +291,13 @@ jobs:
         # Two files are read through the API at `main` rather than off the
         # checked-out tree, so what is installed cannot be chosen by anything
         # that changed in a pull request.
+        #
+        # `PREVIEW_TEARDOWN_WRANGLER` is how wrangler is reached, and it is
+        # written here rather than declared in the job's `env:` on purpose: a
+        # name declared in both places makes the reader work out which one
+        # wins, and the answer to "which env var reached this script" should
+        # never be ambiguous in a job holding a credential. `rollback.yml`
+        # already resolves its own the same way.
         run: |
           set -euo pipefail
           read_one() {
@@ -411,7 +411,6 @@ jobs:
     timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
-      WRANGLER_VERSION: ""
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Check out the base repository
