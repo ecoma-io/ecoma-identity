@@ -61,10 +61,12 @@ import {
   EXIT_CANNOT_RUN,
   EXIT_INVALID,
   EXIT_OK,
+  EXIT_USAGE,
   TopologyError,
   loadTopology,
   reportFailure,
   resolveEnvironment,
+  validatePrNumber,
 } from "./topology-model.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -317,8 +319,14 @@ function usage() {
     "Usage:",
     "  node tooling/scripts/reconcile-infra.mjs --environment <env> [options]",
     "",
-    "  --environment <env>   production | staging | development (the environment",
-    "                        whose resources this run ensures)",
+    "  --environment <env>   production | staging | development | preview (the",
+    "                        environment whose resources this run ensures)",
+    "  --pr <number>         REQUIRED for preview, refused elsewhere. Every",
+    "                        preview resource name is a function of the pull",
+    "                        request number, so reconciling a preview without",
+    "                        it would ensure a resource called `identity-pr-{pr}`.",
+    "                        Validated against preview.pr_number and capped by",
+    "                        preview.max_pr_number.",
     "  --deployable <name>   restrict to one deployable's resources. A deployable",
     "                        that declares none is answered without a single API",
     "                        call. Defaults to every deployable in the environment.",
@@ -337,7 +345,7 @@ function usage() {
 }
 
 function parseArgs(argv) {
-  const options = { environment: null, deployable: null, out: null };
+  const options = { environment: null, deployable: null, out: null, pr: null };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--help" || arg === "-h") {
@@ -348,6 +356,8 @@ function parseArgs(argv) {
       options.deployable = argv[++index] ?? null;
     } else if (arg === "--out") {
       options.out = argv[++index] ?? null;
+    } else if (arg === "--pr") {
+      options.pr = argv[++index] ?? null;
     } else {
       throw new TopologyError(`unknown argument ${JSON.stringify(arg)}`);
     }
@@ -355,7 +365,7 @@ function parseArgs(argv) {
   return options;
 }
 
-export async function reconcile(environment, outPath, { deployable } = {}) {
+export async function reconcile(environment, outPath, { deployable, pr } = {}) {
   const token = process.env.CLOUDFLARE_API_TOKEN;
   if (!token) {
     throw new TopologyError(
@@ -369,7 +379,7 @@ export async function reconcile(environment, outPath, { deployable } = {}) {
       `${topologyFile} declares no usable account.id. Every wrangler command needs it, and there is nowhere else to read it from.`,
     );
   }
-  const resolved = resolveEnvironment(topology, environment);
+  const resolved = resolveEnvironment(topology, environment, { pr });
 
   const all = resolved.resources;
   if (deployable !== undefined && deployable !== null) {
@@ -489,6 +499,13 @@ export async function reconcile(environment, outPath, { deployable } = {}) {
     // topology's single-account decision exists to prevent.
     account: accountId,
     environment,
+    // The pull request these ids belong to, for the same reason and with more
+    // force in the preview lane: every name below is a FUNCTION of this number,
+    // so a preview descriptor without it is a list of ids that cannot be traced
+    // back to the review that asked for them. `null` on every fixed lane,
+    // which is what makes `descriptor.pr !== null` an honest test for "is this
+    // a preview descriptor" rather than a guess.
+    pr: pr ?? null,
     reconciled_at: new Date().toISOString(),
     resources,
   };
@@ -518,11 +535,30 @@ export async function main(argv = process.argv.slice(2)) {
     process.stderr.write("--environment is required.\n\n" + usage());
     return EXIT_INVALID;
   }
-  if (options.environment === "preview") {
+  if (options.environment === "preview" && options.pr === null) {
     process.stderr.write(
-      "preview is not reconcilable by name: every preview resource is a function of the PR number and is created by the preview provisioner, not discovered from a long-lived account. Reconciling one would look for a name that has never existed.\n",
+      "--environment preview requires --pr <number>. Every preview resource name is a function of the pull request number, and reconciling one without that number would look for a name that has never existed — `identity-pr-{pr}` is a real-looking name for a real account, which is exactly the wrong thing to send.\n",
     );
-    return EXIT_INVALID;
+    return EXIT_USAGE;
+  }
+  if (options.environment !== "preview" && options.pr !== null) {
+    process.stderr.write(
+      `--pr is meaningless in environment ${JSON.stringify(options.environment)}: that environment's resource names are fixed and must not become a function of a pull request. --pr applies to preview only.\n`,
+    );
+    return EXIT_USAGE;
+  }
+  // The PR number is validated HERE, before the token is read and before any
+  // network call, so a mistyped number is answered as a usage error with a
+  // message naming the rule it broke. Deferring it to `resolveEnvironment`
+  // would report it through `reportFailure` as EXIT_CANNOT_RUN, which says "I
+  // could not run" about something the operator typed.
+  if (options.pr !== null) {
+    try {
+      validatePrNumber(loadTopology(REPO_ROOT).topology, options.pr);
+    } catch (error) {
+      process.stderr.write(`${error.message}\n`);
+      return EXIT_USAGE;
+    }
   }
 
   const outPath =
@@ -535,6 +571,7 @@ export async function main(argv = process.argv.slice(2)) {
   try {
     const { out, descriptor } = await reconcile(options.environment, outPath, {
       deployable: options.deployable,
+      pr: options.pr,
     });
     const counts = Object.entries(descriptor.resources)
       .filter(([, bucket]) => Object.keys(bucket).length > 0)

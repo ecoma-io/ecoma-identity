@@ -376,15 +376,26 @@ and a reviewer releases it from the run's deployment page.
 
 ## Environments
 
-Three environments, each one a block in `infra-topology/topology.json`:
+Four environments, each one a block in `infra-topology/topology.json`:
 
-| Environment | Declared in                | Deployed by                                                             | Approval                             |
-| ----------- | -------------------------- | ----------------------------------------------------------------------- | ------------------------------------ |
-| development | `environments.development` | `wrangler dev` locally                                                  | none                                 |
-| staging     | `environments.staging`     | Automatically, after a merge to the default branch (constraint 16)      | none                                 |
-| production  | `environments.production`  | Post-tag, automatic build/upload/smoke (constraint 18), then the ladder | Two gates, `identity` and `home-web` |
+| Environment | Declared in                | Deployed by                                                                                     | Approval                             |
+| ----------- | -------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------ |
+| development | `environments.development` | `wrangler dev` locally                                                                          | none                                 |
+| preview     | `environments.preview`     | Every push to a pull request that changes a deployable (`.github/workflows/deploy-preview.yml`) | none                                 |
+| staging     | `environments.staging`     | Automatically, after a merge to the default branch (constraint 16)                              | none                                 |
+| production  | `environments.production`  | Post-tag, automatic build/upload/smoke (constraint 18), then the ladder                         | Two gates, `identity` and `home-web` |
 
-`pnpm infra:render` projects each block into one config per deployable, and
+**Preview is the only lane whose resource names are not written down.** The three
+fixed lanes declare the exact D1 database, KV namespace, queue and script name a
+deploy binds; preview declares templates — `identity-pr-{pr}`,
+`ecoma-identity-pr-{pr}`, `pr{pr}-identity.ecoma.io` — and every name it creates is
+a function of the pull request number. That is what makes it ephemeral, and it is
+also why `reconcile-infra.mjs` refuses `--environment preview` without `--pr`:
+rendering `{pr}` as a literal would look for a Worker called `identity-pr-{pr}`,
+find nothing, and create it, which is a real-looking name in a real account that
+the next run of the same pull request would duplicate.
+
+`pnpm infra:render` projects each FIXED block into one config per deployable, and
 `home-web` is in all three alongside the Workers:
 
 ```
@@ -394,13 +405,20 @@ Three environments, each one a block in `infra-topology/topology.json`:
 └── production/   identity/  identity-admin/  identity-jobs/  home-web/
 ```
 
-Twelve configs in total, none of them tracked. The script name inside each is not
-always the deployable name — staging appends `-staging` (`identity-staging`,
-`identity-admin-staging`, `identity-jobs-staging`, `home-web-staging`) so that a
-staging deploy cannot overwrite production's default environment. That suffix is
-a safety property, and `validate-topology.mjs` fails if any fixed name also
-matches the preview grammar, which is how a staging Worker would come to look
-disposable to a cleanup run.
+Twelve configs in total, none of them tracked. A preview's four configs are NOT
+among them: preview is excluded from the default render set and is produced
+during the deploy itself, from the descriptor `reconcile-infra.mjs` writes for
+that pull request, because the names are not knowable until the pull request is.
+
+The script name inside each fixed config is not always the deployable name —
+staging appends `-staging` (`identity-staging`, `identity-admin-staging`,
+`identity-jobs-staging`, `home-web-staging`) so that a staging deploy cannot
+overwrite production's default environment. Preview's is a function of the pull
+request (`identity-pr-42`), for the same reason in a stronger form: two pull
+requests open at once must not share a Worker. That suffix is a safety property,
+and `validate-topology.mjs` fails if any fixed name also matches the preview
+grammar, which is how a staging Worker would come to look disposable to a cleanup
+run.
 
 **Resource ids are discovered, not injected.** A deploy resolves each D1, KV and
 queue by its exact declared name against the Cloudflare API and renders the

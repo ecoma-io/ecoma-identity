@@ -35,6 +35,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { EXIT_USAGE } from "./topology-model.mjs";
+
 /** The account id this repository declares in infra-topology/topology.json. */
 const ACCOUNT = "406bdb82319b162b09bf5f137a156600";
 
@@ -649,4 +651,171 @@ test("a duplicate name is refused rather than resolved to one of them", async ()
       "picking one of two same-named databases is how a deploy writes into the wrong one",
     );
   });
+});
+
+// ---------------------------------------------------------------------------
+// PREVIEW: the fourth lane, and the only one whose resource names are a
+// function of something the caller supplies.
+// ---------------------------------------------------------------------------
+//
+// Every test above reconciles staging, where the names in `topology.json` ARE
+// the names on the wire. Preview has no such property: `identity-pr-{pr}` is a
+// TEMPLATE, and a reconciler that rendered it without a number would look for a
+// literal Worker called `identity-pr-{pr}`, find nothing, and create it. That is
+// the specific accident these tests exist to prevent — it produces a
+// real-looking name in a real account, and the next run of the same pull request
+// creates a second one.
+//
+// They therefore assert on NAMES, not on ids: the ids come from the fake and
+// mean nothing, but a name that is not `pr{N}` for the right `N` is a production
+// bug a real deploy would make irreversible.
+
+const PR = 123;
+
+test("a preview reconciles every name with the PR number in it", async () => {
+  const fake = fakeCloudflare({ inventory: { d1: [], kv: [], queue: [] } });
+  const { descriptor } = await withReconciler(fake, ({ reconcile }) =>
+    reconcile("preview", "/tmp/reconcile-test-preview-1.json", { pr: PR }),
+  );
+
+  assert.equal(descriptor.environment, "preview");
+  assert.equal(
+    descriptor.pr,
+    PR,
+    "the descriptor must record which pull request it resolved: every name in it derives from that number, and a descriptor without it cannot be diagnosed",
+  );
+
+  assert.deepEqual(Object.keys(descriptor.resources.d1), [
+    `ecoma-identity-pr-${PR}`,
+  ]);
+  assert.deepEqual(Object.keys(descriptor.resources.kv).sort(), [
+    `identity-pr-${PR}-kv`,
+    `jobs-pr-${PR}-kv`,
+  ]);
+  assert.deepEqual(Object.keys(descriptor.resources.queue).sort(), [
+    `identity-pr-${PR}`,
+    `identity-pr-${PR}-dlq`,
+  ]);
+
+  // Nothing anywhere in the descriptor may still carry the template. A single
+  // unrendered `{pr}` is a resource named with braces, which is a perfectly
+  // valid string and therefore one Cloudflare will happily create.
+  const written = JSON.stringify(descriptor);
+  assert.ok(
+    !written.includes("{pr}"),
+    `the descriptor still carries an unrendered template:\n${written}`,
+  );
+});
+
+test("two pull requests reconcile to two disjoint sets of names", async () => {
+  // The collision this guards against is not hypothetical: `preview.limits`
+  // caps `max_pr_number` at 999 and REFUSES beyond it, precisely because a
+  // fourth digit would let one PR's rate-limit id become another's.
+  const inventory = { d1: [], kv: [], queue: [] };
+  const first = fakeCloudflare({ inventory });
+  const { descriptor: a } = await withReconciler(first, ({ reconcile }) =>
+    reconcile("preview", "/tmp/reconcile-test-preview-2.json", { pr: 7 }),
+  );
+  const second = fakeCloudflare({ inventory });
+  const { descriptor: b } = await withReconciler(second, ({ reconcile }) =>
+    reconcile("preview", "/tmp/reconcile-test-preview-3.json", { pr: 700 }),
+  );
+
+  assert.notDeepEqual(
+    Object.keys(a.resources.d1),
+    Object.keys(b.resources.d1),
+    "two PR numbers must never resolve to one D1 database — that is a preview reading another pull request's rows",
+  );
+  assert.ok(
+    !/\d{4}/.test(Object.keys(a.resources.d1)[0]),
+    "PR 7 must not produce a four-digit name",
+  );
+});
+
+/**
+ * `main()` rather than `reconcile()` for the three refusal tests below.
+ *
+ * The distinction is the assertion: `reconcile()` throws, and `main()` maps a
+ * throw to EXIT_CANNOT_RUN, which says "I could not run". These three are
+ * argument mistakes — a missing number, a number in the wrong environment, a
+ * number past the cap — and the exit code has to say what is wrong, because the
+ * caller is a workflow that will otherwise report a credential problem.
+ */
+async function withMain(fake, argv, fn) {
+  const module = await import("./reconcile-infra.mjs");
+  const originalToken = process.env.CLOUDFLARE_API_TOKEN;
+  process.env.CLOUDFLARE_API_TOKEN = TOKEN;
+  try {
+    return await fn(() => module.main(argv));
+  } finally {
+    if (originalToken === undefined) delete process.env.CLOUDFLARE_API_TOKEN;
+    else process.env.CLOUDFLARE_API_TOKEN = originalToken;
+    fake.restore();
+  }
+}
+
+test("a preview with no --pr is a usage error, and names nothing", async () => {
+  const fake = fakeCloudflare({ inventory: { d1: [], kv: [], queue: [] } });
+  await withMain(
+    fake,
+    ["--environment", "preview", "--out", "/tmp/x.json"],
+    (run) =>
+      run().then((code) => {
+        assert.equal(
+          code,
+          EXIT_USAGE,
+          "a preview without a PR number is a usage error, not a run that fails later",
+        );
+        assert.equal(
+          fake.calls.length,
+          0,
+          "it must be refused BEFORE any network call",
+        );
+      }),
+  );
+});
+
+test("--pr on a fixed environment is refused rather than renaming production", async () => {
+  // `resolveEnvironment` throws on this today, but through `reconcile()`, which
+  // `main()` reports as EXIT_CANNOT_RUN. A production run that passed `--pr`
+  // must not go looking for `identity-pr-123` and create it.
+  const fake = fakeCloudflare({ inventory: { d1: [], kv: [], queue: [] } });
+  await withMain(
+    fake,
+    ["--environment", "production", "--pr", String(PR), "--out", "/tmp/x.json"],
+    (run) =>
+      run().then((code) => {
+        assert.equal(code, EXIT_USAGE);
+        assert.equal(fake.calls.length, 0);
+      }),
+  );
+});
+
+test("a PR number above the cap is refused before the token is read", async () => {
+  // The ORDERING is the assertion, not the code. `preview.max_pr_number` is 999
+  // with `on_exceed: "refuse"`: at 1000 the rate-limit template `9{pr}01`
+  // overflows to five digits and starts colliding with other lanes. A caller
+  // with no token set must still get the usage error, because the number is
+  // what is wrong — a credential error would send the operator to the wrong
+  // secret.
+  const module = await import("./reconcile-infra.mjs");
+  const fake = fakeCloudflare({ inventory: { d1: [], kv: [], queue: [] } });
+  const originalToken = process.env.CLOUDFLARE_API_TOKEN;
+  delete process.env.CLOUDFLARE_API_TOKEN;
+  try {
+    const code = await module.main([
+      "--environment",
+      "preview",
+      "--pr",
+      "1000",
+      "--out",
+      "/tmp/x.json",
+    ]);
+    assert.equal(code, EXIT_USAGE);
+    assert.equal(fake.calls.length, 0);
+  } finally {
+    if (originalToken !== undefined)
+      process.env.CLOUDFLARE_API_TOKEN = originalToken;
+    fake.restore();
+  }
 });
