@@ -280,8 +280,44 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
 
+      # The Rust toolchain and its registry cache are inputs to THIS job, not
+      # only to `checks`. `check-architecture.mjs` reads the dependency law from
+      # `cargo metadata --offline`, and `--offline` is deliberate there: a
+      # network call in a gate is a gate that fails for reasons unrelated to
+      # the tree. That trade is only sound if the registry is warm, which this
+      # job did not arrange — it had neither a toolchain step nor a cache, and
+      # `checks` cannot share a cache across jobs. So `cargo metadata` resolved
+      # against an empty index and reported
+      #
+      #     no matching package named `serde` found; location searched:
+      #     crates.io index
+      #
+      # which is a statement about the runner, not about the tree. The checks
+      # that depend on the graph reported `could not run` — correctly, since the
+      # script refuses to pass a gate it could not evaluate — and the job failed
+      # for a reason that has nothing to do with any boundary.
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: ". -> target"
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # The boundary law reads the GENERATED wrangler configs — `boundary-1` and
+      # `boundary-2` are about D1 bindings, and a binding only exists in a
+      # rendered config. `.generated/` is gitignored, so on a clean checkout it
+      # is absent and every check that reads one reports `skipped`; six of the
+      # ten then had nothing to judge and two of them counted as violations.
+      #
+      # `--stage offline` is the right stage here: it renders the SHAPE without
+      # contacting Cloudflare and without needing a token, which is what a gate
+      # on a pull request from a fork requires. The ids it leaves unresolved are
+      # `UNRESOLVED_SENTINEL` by design, and no boundary check reads an id.
+      - name: Render the wrangler configs the boundary law reads
+        run: pnpm infra:render
 
       - name: Boundary law (pnpm arch)
         run: pnpm arch
