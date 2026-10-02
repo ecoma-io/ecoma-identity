@@ -22,7 +22,7 @@ reason is in the next section.
 | Three rollback paths, decided                     | `PLANNED` — this document is the decision                        |
 | `wrangler versions upload` ≠ `versions deploy`    | `PLANNED` — the Cloudflare model                                 |
 | Every command below                               | `DEFERRED` — **no version has been uploaded to any environment** |
-| The rollback workflow                             | `DEFERRED` — `.github/workflows/` is empty                       |
+| The rollback workflow                             | `IMPLEMENTED` — `rollback.yml`, never dispatched                 |
 | A "which version is live?" query that works today | **No.** There is nothing deployed to query.                      |
 
 **Nothing in this document can be run today**, because there is no deployment.

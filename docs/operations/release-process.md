@@ -11,14 +11,14 @@ knows which part is a decision and which part is a script.
 
 | Fact                                                              | State                                                                            |
 | ----------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Release Please owns version, release PR and tag                   | `PLANNED` — decided; the config file is `DEFERRED`                               |
-| The release PR is merged by a human                               | `PLANNED` — constraint 17                                                        |
-| Post-tag build, version upload and smoke test are automatic       | `PLANNED` — constraint 18; the workflow is `DEFERRED`                            |
-| Staging deploys automatically after a merge to the default branch | `PLANNED` — constraint 16; the workflow is `DEFERRED`                            |
-| Production promotion of `identity` needs two human approvals      | `PLANNED` — constraint 19; the workflow is `DEFERRED`                            |
+| Release Please owns version, release PR and tag                   | `IMPLEMENTED` — `release.yml`, `release-please-config.json`, the manifest        |
+| The release PR is merged by a human                               | `IMPLEMENTED` — constraint 17; enforced by the merge queue, not by the workflow  |
+| Post-tag build, version upload and smoke test are automatic       | `IMPLEMENTED` — `deploy-worker.yml`; the run it starts has never happened        |
+| Staging deploys automatically after a merge to the default branch | `IMPLEMENTED` — `deploy.yml:42-43`, `push` to `branches: [main]`                 |
+| Production promotion of `identity` needs two human approvals      | `IMPLEMENTED` — two jobs carry `environment: production`; the environment exists |
 | Commitlint validates commit messages at `commit-msg` and in CI    | `IMPLEMENTED` — `commitlint.config.mjs`                                          |
-| A `.release-please-manifest.json`                                 | `DEFERRED` — named in the root `Cargo.toml` comment; the file does not exist yet |
-| Every workflow that does any of the above                         | `DEFERRED` — `.github/workflows/` is empty                                       |
+| A `.release-please-manifest.json`                                 | `IMPLEMENTED` — the file and `release-please-config.json` both exist             |
+| Every workflow that does any of the above                         | `IMPLEMENTED` — eight files; only `release.yml`'s own run is `DEFERRED`          |
 
 **No release has been cut. No tag exists. Nothing has been deployed.**
 

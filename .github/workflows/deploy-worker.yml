@@ -1603,14 +1603,18 @@ jobs:
     # request. This `environment:` key is the only thing in this repository
     # that makes the gate real; a comment above it would not be.
     #
-    # ADR-0014 records the enforcement as not yet built at the time of writing:
-    # the environment's required-reviewer rule is repository configuration, and
-    # `.github/repository-settings.json` carries no environment entry yet. Until
-    # an administrator adds the reviewers, this job passes on click-through —
-    # the key still names the gate, and it becomes a real gate the moment the
-    # setting exists. That gap is stated here rather than papered over, because
-    # a comment claiming the gate is enforced would be the exact kind of claim
-    # AGENTS.md forbids.
+    # ADR-0014 recorded this as "enforcement not yet built". It IS built: the
+    # `production` environment exists with a required-reviewer rule and
+    # `prevent_self_review`, recorded in `.github/repository-settings.json` and
+    # verified live with `GET /repos/ecoma-io/ecoma-identity/environments`.
+    #
+    # What that means in practice, stated here rather than discovered at 50% of
+    # production traffic: the named reviewer is the same person who pushes, and
+    # `prevent_self_review` forbids them from approving their own deployment.
+    # So this job will sit in `Waiting for approval` until a SECOND person is
+    # added as a collaborator and a reviewer. That is the gate working, not the
+    # gate broken — a single-maintainer repository cannot self-approve, and an
+    # environment that let it would be the rubber stamp this key exists to avoid.
     environment: production
     permissions:
       contents: read

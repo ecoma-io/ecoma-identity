@@ -37,18 +37,29 @@
 # honest state, not a gap in this file.
 #
 # ---------------------------------------------------------------------------
-# THE TWO GATES ARE NOT YET ARMED
+# THE TWO GATES ARE ARMED
 # ---------------------------------------------------------------------------
 # The 50% and 100% promotions are jobs carrying `environment: production`, and
-# the runner will not pass them without a named approver ONLY IF that
-# environment is configured with required reviewers. That configuration lives in
-# repository settings, not in this file, and `.github/repository-settings.json`
-# carries no environment entry yet — ADR-0014's own enforcement table records
-# this as "enforcement not yet built".
+# the runner will not pass them without a named approver because that
+# environment IS configured with required reviewers. That configuration lives in
+# repository settings, not in this file — deliberately: a workflow-level `if:`
+# can be edited by the same pull request that would benefit from editing it,
+# while an environment's protection rules cannot be changed by a pull request at
+# all.
 #
-# So today, a fresh repository would click through both gates. The `environment:`
-# keys are still correct and become real gates the moment the setting exists, and
-# this file says so rather than implying the gate is already load-bearing.
+# `.github/repository-settings.json` records the environment, and it is live:
+# `GET /repos/ecoma-io/ecoma-identity/environments` returns it with a
+# required-reviewer rule. ADR-0014 recorded this as "enforcement not yet built",
+# which was true when it was written and is not true now.
+#
+# ONE THING TO KNOW BEFORE THE FIRST PRODUCTION DEPLOYMENT. The named reviewer
+# is the same person who pushes, and `prevent_self_review` is on, so that person
+# cannot approve their own deployment. Both promotion jobs will therefore stop at
+# `Waiting for approval` until a second person is added as a collaborator and as
+# an environment reviewer. That is the gate functioning: a repository of one
+# cannot satisfy a two-eyes rule by itself, and the honest outcome is a queue
+# that waits rather than a promotion that clicks itself through. Add the second
+# reviewer in `.github/repository-settings.json` and this note becomes history.
 
 on:
   # Release Please's tag. `identity-v0.1.0` and `identity-admin-v0.1.0` arrive as
