@@ -45,8 +45,11 @@ name: Deploy Preview
 # `pull_request` withholds repository secrets from a fork, which is exactly
 # what should happen to a workflow that creates infrastructure: a fork's pull
 # request may propose code, never spend the account's budget or mint names in
-# it. The consequence is that a fork's run fails at the credential step with
-# the workflow's own message, not a deploy.
+# it. The consequence is that a fork's deploy job runs with an EMPTY
+# `CLOUDFLARE_API_TOKEN` and fails inside wrangler, whose error names a missing
+# credential rather than an outside contributor. The `fork-notice` job below
+# reports the true reason on the pull request; it does not make the run green,
+# and nothing in this file can or should.
 #
 # `pull_request_target` would fix that and is the wrong fix: it runs the
 # pull request's CODE with the base repository's secrets and write token, in a
@@ -122,6 +125,117 @@ permissions:
   contents: read
 
 jobs:
+  # ---- what a fork gets instead of a preview ---------------------------
+  #
+  # Not a workaround — a report. A fork's run cannot succeed: `pull_request`
+  # withholds `ECOMA_CLOUDFLARE_API_TOKEN`, and this workflow creates and binds
+  # real infrastructure, which is exactly the thing a fork must not be able to
+  # do. The only question is what the contributor reads afterwards.
+  #
+  # Left alone, the answer is wrangler's, and it names a credential:
+  #
+  #   Missing X-Auth-Key, X-Auth-Email or Authorization header
+  #
+  # which tells an outside contributor nothing about why their pull request did
+  # not get a preview, and tells a maintainer nothing about whether a secret is
+  # misconfigured. Those are different problems with the same symptom, and this
+  # job is what distinguishes them: if the token is present and the deploy still
+  # failed, that is a real failure; if the token is empty because the head is a
+  # fork, that is the policy working.
+  #
+  # It runs FIRST and every deploy depends on it, because a fork's deploy jobs
+  # are pointless work that costs minutes and leaves a red X beside a cause that
+  # was known before the first step ran. It never turns the run green — `if:
+  # always()` on the summary below means a skipped deploy still reports skipped,
+  # not passed.
+  fork-notice:
+    name: Explain why a fork gets no preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      # `pull-requests: write` to leave ONE comment. Nothing else: this job must
+      # not be able to push code, create infrastructure, or read a secret.
+      contents: read
+      pull-requests: write
+    outputs:
+      # The four deploy jobs read this to SKIP rather than to fail. `needs` alone
+      # orders jobs; it does not stop one, and a `failure()` condition here would
+      # report the fork as a deploy failure — which is the thing this whole job
+      # exists to stop being true.
+      is_fork: ${{ steps.classify.outputs.is_fork }}
+    steps:
+      - name: Decide whether this is a fork, before anything else happens
+        id: classify
+        env:
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          set -euo pipefail
+          if [ "$IS_FORK" = "true" ]; then
+            echo "is_fork=true" >> "$GITHUB_OUTPUT"
+            echo "Head is $HEAD_REPO, a fork. The deploy jobs will skip."
+          else
+            echo "is_fork=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: State the policy on the pull request
+        if: ${{ steps.classify.outputs.is_fork == 'true' }}
+        env:
+          # Everything through `env:` — `.github/semgrep`
+          # (`workflow-expression-interpolated-into-run`) is right that a `run:`
+          # body is a shell string GitHub substitutes into before the shell sees
+          # it, and `head.repo.full_name` is attacker-controlled on a fork. The
+          # repository is passed too so the `gh api` path below carries no `${{ }}`
+          # at all.
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "$IS_FORK" != "true" ]; then
+            echo "Not a fork (head is $HEAD_REPO); this job has nothing to report."
+            exit 0
+          fi
+
+          marker="preview-fork-notice-${PR}"
+          notice="$(mktemp)"
+          {
+            printf '<!-- %s -->\n' "$marker"
+            printf 'Preview deployment is not available to forks, and that is deliberate.\n\n'
+            printf '`Deploy Preview` runs on `pull_request`, which withholds this repository'"'"'s\n'
+            printf 'secrets from a fork — so the run has no `ECOMA_CLOUDFLARE_API_TOKEN` and no\n'
+            printf 'preview gets built. That is also what stops a fork'"'"'s code from spending this\n'
+            printf 'account'"'"'s budget or minting resource names in it, which is why the workflow\n'
+            printf 'uses `pull_request` and not `pull_request_target`.\n\n'
+            printf 'This check failing is expected and says nothing about your pull request.\n'
+            printf 'The `Checks (affected)` check runs a fork'"'"'s code exactly as it is, and the\n'
+            printf 'review that matters does not need a preview.\n\n'
+            printf 'For a preview, ask a maintainer to open the branch from this repository: a\n'
+            printf 'pull request opened from a fork keeps its fork origin no matter who pushes to it.\n'
+          } > "$notice"
+
+          # Skip the comment when the marker is already present. A fork pushes
+          # repeatedly and this job runs on every push, so an unguarded post would
+          # leave one identical comment per commit — which is how bot comments
+          # train people to ignore them.
+          existing="$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq "[.[] | select(.body | contains(\"<!-- $marker -->\"))] | length")"
+          if [ "$existing" -gt 0 ]; then
+            echo "Already reported on PR #${PR}; not commenting again."
+          else
+            # `--input` sends a file VERBATIM, so the payload has to be JSON.
+            # `jq -Rs` does the escaping: the notice is Markdown containing
+            # apostrophes and backticks, and neither is legal unescaped in a
+            # JSON string.
+            jq -Rs '{body: .}' "$notice" > "$notice.json"
+            gh api "repos/$REPO/issues/$PR/comments" \
+              --method POST --input "$notice.json" > /dev/null
+            echo "Posted the fork notice on PR #${PR}."
+          fi
+          rm -f "$notice" "$notice.json"
+
   # ---- the gate that decides whether this workflow runs at all -----------
   #
   # NOT A FLAG. A flag is a thing a person sets and then forgets to unset, and
@@ -213,8 +327,8 @@ jobs:
 
   identity:
     name: Preview — identity (PR #${{ github.event.pull_request.number }})
-    needs: [gate]
-    if: ${{ always() && needs.gate.result == 'success' }}
+    needs: [fork-notice, gate]
+    if: ${{ always() && needs.fork-notice.outputs.is_fork != 'true' && needs.gate.result == 'success' }}
     uses: ./.github/workflows/deploy-worker.yml
     permissions:
       contents: read
@@ -252,8 +366,8 @@ jobs:
   # their service bindings resolve, and they do not depend on each other.
   identity-admin:
     name: Preview — identity-admin (PR #${{ github.event.pull_request.number }})
-    needs: [gate, identity]
-    if: ${{ always() && needs.gate.result == 'success' && needs.identity.result == 'success' }}
+    needs: [fork-notice, gate, identity]
+    if: ${{ always() && needs.fork-notice.outputs.is_fork != 'true' && needs.gate.result == 'success' && needs.identity.result == 'success' }}
     uses: ./.github/workflows/deploy-worker.yml
     permissions:
       contents: read
@@ -274,8 +388,8 @@ jobs:
 
   identity-jobs:
     name: Preview — identity-jobs (PR #${{ github.event.pull_request.number }})
-    needs: [gate, identity]
-    if: ${{ always() && needs.gate.result == 'success' && needs.identity.result == 'success' }}
+    needs: [fork-notice, gate, identity]
+    if: ${{ always() && needs.fork-notice.outputs.is_fork != 'true' && needs.gate.result == 'success' && needs.identity.result == 'success' }}
     uses: ./.github/workflows/deploy-worker.yml
     permissions:
       contents: read
@@ -303,8 +417,8 @@ jobs:
 
   home-web:
     name: Preview — home-web (PR #${{ github.event.pull_request.number }})
-    needs: [gate, identity]
-    if: ${{ always() && needs.gate.result == 'success' && needs.identity.result == 'success' }}
+    needs: [fork-notice, gate, identity]
+    if: ${{ always() && needs.fork-notice.outputs.is_fork != 'true' && needs.gate.result == 'success' && needs.identity.result == 'success' }}
     uses: ./.github/workflows/deploy-worker.yml
     permissions:
       contents: read
@@ -332,7 +446,8 @@ jobs:
 
   summary:
     name: Preview summary
-    needs: [gate, identity, identity-admin, identity-jobs, home-web]
+    needs:
+      [fork-notice, gate, identity, identity-admin, identity-jobs, home-web]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -347,6 +462,7 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GATE_ENABLED: ${{ needs.gate.outputs.enabled }}
+          IS_FORK: ${{ needs.fork-notice.outputs.is_fork }}
           # Each result is named rather than joined into one string. A joined
           # string has to be compared against an exact four-word literal whose
           # ORDER this file happens to declare, so adding a deployable would
@@ -357,6 +473,19 @@ jobs:
           HOME: ${{ needs.home-web.result }}
         run: |
           set -euo pipefail
+
+          # A fork skips every deploy, so every result is `skipped`. Reporting
+          # that as four failures would put a red summary on a pull request that
+          # was never eligible for a preview in the first place, which is the
+          # opposite of what the `fork-notice` job just explained.
+          if [ "$IS_FORK" = "true" ]; then
+            echo "### Preview for PR #${PR} — not deployed (fork)"
+            echo ""
+            echo "Preview deployment does not run for forks, because \`pull_request\` withholds"
+            echo "this repository's secrets from one. See the comment on this pull request."
+            exit 0
+          fi
+
           echo "### Preview for PR #${PR}"
           echo ""
           echo "| Deployable | Host | Result |"
@@ -395,7 +524,10 @@ jobs:
           echo "declared protocol route answers 501, and \`identity\` declares an \`EMAIL_PROVIDER\`"
           echo "binding that is not provisioned — the deploy fails there, and that failure is correct."
           echo ""
-          echo "These resources are named for PR #${PR} and are not deleted automatically."
-          echo "When the pull request closes, \`Cleanup Preview\` deletes them; until then they"
-          echo "cost one D1 database, one KV namespace, one queue pair and three custom domains"
-          echo "out of the zone's 100."
+          echo "These resources are named for PR #${PR} and nothing deletes them yet."
+          echo "There is no cleanup workflow in this repository yet: the deletion policy is"
+          echo "declared and validated in \`infra-topology/topology.json\` (\`preview.deletion_order\`,"
+          echo "\`preview.evidence\`) and \`previewResources()\` in \`tooling/scripts/topology-model.mjs\`,"
+          echo "but nothing acts on it. Until a janitor lands, a merged pull request's preview"
+          echo "keeps its one D1 database, one KV namespace, one queue pair and three custom"
+          echo "domains out of the zone's 100, permanently."
