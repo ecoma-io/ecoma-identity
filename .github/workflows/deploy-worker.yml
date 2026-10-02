@@ -349,6 +349,28 @@ jobs:
       WORKER: ${{ inputs.worker }}
       LANE: ${{ inputs.lane }}
       ENVIRONMENT: ${{ inputs.environment }}
+
+      # Which frontend projection the browser bundles built below are assembled
+      # against. Without this every deploy built the `development` projection,
+      # because that is what the moon tasks default to when the variable is
+      # unset — measured, not assumed: a staging build with it unset shipped
+      # cookie `ecoma_dev_locale`, `secure: false` and `baseUrl: null`.
+      # `baseUrl: null` is the sharper edge: home-web then has no site URL to
+      # emit, so a staging deploy publishes no canonical and no hreflang
+      # alternates at all rather than the wrong ones.
+      #
+      # The per-environment cookie namespace exists to stop exactly this, so a
+      # deploy that ignores it publishes a preference no other environment
+      # shares, and a visitor who set one on staging carries nothing to
+      # production.
+      #
+      # `inputs.environment` is required and is one of `production`, `staging`
+      # or `development` — the fixed environments (`FIXED_ENVIRONMENTS` in
+      # `tooling/scripts/topology-model.mjs`). `preview` is never deployed
+      # through this workflow, which is why the value is forwarded rather than
+      # derived here. It is NOT a deployment credential: a topology environment
+      # name, carrying no token, id or secret.
+      FRONTEND_ENVIRONMENT: ${{ inputs.environment }}
       RELEASE_TAG: ${{ inputs.tag }}
       # wrangler reads the token from the environment. Passed through `env`
       # rather than a `--var` so the token never appears in a command line, in

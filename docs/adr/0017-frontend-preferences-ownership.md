@@ -97,10 +97,20 @@ values that all four environments are free of `account.id`, resource names and
 `EMAIL_PROVIDER`. The test is the backstop; the whitelist is the mechanism.
 
 **`FRONTEND_ENVIRONMENT` is a real build input.** Every task that reads the
-config renders it inline, in the same task, immediately before reading it, and
-deletes any previous render first. `home-web:build` sets `options: { cache:
-false }` because an inline shell command is not a `deps:` edge and moon's content
-hashing cannot see the file it produces.
+config renders it inline, in the same task, immediately before reading it. It
+does **not** delete a previous render first, and that is a correction rather than
+an omission: the renderer exits non-zero on every failure path and `set -eu`
+stops the task at the failed render, so a stale config is never reached — while
+the file is shared with three other projects, and under `moon ci` (concurrent)
+one project's delete failed an unrelated one with `TS2307`. Writing it is safe
+from any number of concurrent tasks; deleting it is not.
+
+`home-web:build` sets `options: { cache: false }` because an inline shell command
+is not a `deps:` edge and moon's content hashing cannot see the file it
+produces. `deploy-worker.yml` exports `FRONTEND_ENVIRONMENT` from
+`inputs.environment`, which is not an optimisation: unset, every deploy built
+the `development` projection, and `deploy-worker.yml` is the only thing that
+builds a deployable.
 
 **The package is renamed `shared-i18n` → `frontend-preferences`.** A package
 that owns a locale cookie, a colour-mode cookie and a timezone detector is not

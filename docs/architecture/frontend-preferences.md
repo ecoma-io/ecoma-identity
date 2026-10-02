@@ -145,10 +145,19 @@ that there is one. A build or boot that cannot find the config throws a named
 error pointing at `pnpm infra:render` / `moon run home-web:dev`.
 
 This is why each task that reads the config renders it **inline, in the same
-task**, immediately before reading it, and **deletes any previous render first**.
-Without the delete, a failed render leaves the last environment's file in place
-and a preview build would silently ship production's cookie name — a stale
-success, which is the failure mode a gate exists to prevent.
+task**, immediately before reading it. It deliberately does **not** delete a
+previous render first. `set -eu` plus the renderer's non-zero exit on every
+failure path means a failed render stops the task before the command that reads
+the config is reached, so there is no stale success to prevent — while the file
+is shared by four projects, and under `moon ci`, which runs projects
+concurrently, one task's `rm` failed an unrelated one with `TS2307`. If you add a
+delete here, you have deleted another project's input.
+
+What makes `FRONTEND_ENVIRONMENT` load-bearing instead is that it is exported by
+the thing that builds a deployable: `deploy-worker.yml` sets it from
+`inputs.environment`. Unset, every deploy built the `development` projection —
+measured: cookie `ecoma_dev_locale`, `secure: false`, `baseUrl: null`, which is
+a staging deploy publishing no canonical URL at all.
 
 ## Resolution order
 
