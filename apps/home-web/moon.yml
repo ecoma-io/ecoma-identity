@@ -15,14 +15,18 @@ tags:
 # so which environment this is decides which cookie name, cookie domain and site
 # URL the bundle is built with — never a value written in this file.
 #
-# THE `rm` IS NOT DECORATION. `.generated/` is shared by every frontend in the
-# repository and survives between tasks. Without the delete, a render that fails
-# leaves the previous environment's file in place and the task proceeds against
-# it — a preview silently shipping the production cookie name, which is exactly
-# the failure the per-environment namespace exists to prevent. `set -eu` stops
-# the task at the failed render before `nuxt` is reached. Delete first, render
-# second: the worst case is then a loud "config is missing" error, which
-# `nuxt.config.ts` throws with a named message.
+# WHY THERE IS NO `rm -f` BEFORE THE RENDER, because deleting it looked like a
+# small win and was not. `.generated/frontend/config.json` is shared by every
+# frontend in the repository, and an earlier version of this file deleted it
+# before rendering, reasoning that a failed render would otherwise leave the
+# previous environment's file in place and the task would proceed against it. It
+# would not: the renderer returns non-zero on every failure path and `set -eu`
+# stops the task at the failed render, before `nuxt` is reached. The delete
+# bought no correctness and cost real correctness — under `moon ci`, where
+# projects run CONCURRENTLY, home-web's `rm` could land between
+# `frontend-preferences`' compile reading the file and `tsc` resolving it, and
+# the package failed with `TS2307` on a file another project had removed. A
+# frontend task must not delete state another project reads.
 #
 # WHY INLINE, IN EACH OF THE FOUR TASKS THAT READ IT, INSTEAD OF A TASK OR A
 # `deps:` EDGE. `deps:` names another task in this project; the renderer is a
@@ -43,7 +47,7 @@ tags:
 
 tasks:
   format-check:
-    script: '"$MOON_WORKSPACE_ROOT/node_modules/.bin/prettier" --check --ignore-unknown .'
+    script: '"$MOON_WORKSPACE_ROOT/node_modules/.bin/prettier" --check --ignore-unknown --ignore-path "$MOON_WORKSPACE_ROOT/.prettierignore" --ignore-path "$MOON_WORKSPACE_ROOT/.gitignore" .'
     inputs:
       - "**/*.{js,mjs,cjs,ts,vue,json,jsonc,yml,yaml,md,css,html}"
     outputs: []
@@ -61,7 +65,6 @@ tasks:
     script: |
       set -eu
       cd "$MOON_PROJECT_ROOT"
-      rm -f "$MOON_WORKSPACE_ROOT/.generated/frontend/config.json"
       if [ "${FRONTEND_ENVIRONMENT:-development}" = "preview" ]; then
         : "${FRONTEND_PR:?FRONTEND_PR must be the pull request number when FRONTEND_ENVIRONMENT=preview; the renderer will not invent a preview hostname.}"
         node "$MOON_WORKSPACE_ROOT/tooling/scripts/render-wrangler-config.mjs" \
@@ -104,7 +107,6 @@ tasks:
     script: |
       set -eu
       cd "$MOON_PROJECT_ROOT"
-      rm -f "$MOON_WORKSPACE_ROOT/.generated/frontend/config.json"
       if [ "${FRONTEND_ENVIRONMENT:-development}" = "preview" ]; then
         : "${FRONTEND_PR:?FRONTEND_PR must be the pull request number when FRONTEND_ENVIRONMENT=preview; the renderer will not invent a preview hostname.}"
         node "$MOON_WORKSPACE_ROOT/tooling/scripts/render-wrangler-config.mjs" \
@@ -131,7 +133,6 @@ tasks:
     script: |
       set -eu
       cd "$MOON_PROJECT_ROOT"
-      rm -f "$MOON_WORKSPACE_ROOT/.generated/frontend/config.json"
       if [ "${FRONTEND_ENVIRONMENT:-development}" = "preview" ]; then
         : "${FRONTEND_PR:?FRONTEND_PR must be the pull request number when FRONTEND_ENVIRONMENT=preview; the renderer will not invent a preview hostname.}"
         node "$MOON_WORKSPACE_ROOT/tooling/scripts/render-wrangler-config.mjs" \
@@ -162,7 +163,6 @@ tasks:
     script: |
       set -eu
       cd "$MOON_PROJECT_ROOT"
-      rm -f "$MOON_WORKSPACE_ROOT/.generated/frontend/config.json"
       if [ "${FRONTEND_ENVIRONMENT:-development}" = "preview" ]; then
         : "${FRONTEND_PR:?FRONTEND_PR must be the pull request number when FRONTEND_ENVIRONMENT=preview; the renderer will not invent a preview hostname.}"
         node "$MOON_WORKSPACE_ROOT/tooling/scripts/render-wrangler-config.mjs" \

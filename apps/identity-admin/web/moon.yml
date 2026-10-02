@@ -54,12 +54,19 @@ tags:
 # costs a rebuild; a stale cookie name in a shipped bundle costs a preference
 # that silently stops following the visitor between applications.
 #
-# `rm -f` before the render is load-bearing. The renderer exits non-zero on a
-# bad topology, and the task exits with it — but `set -eu` alone would leave the
-# PREVIOUS render's config in place, so the next command would read a config
-# describing a different deployment than the one being built, and the failure
-# would look like a bundler problem rather than a topology problem. Deleting
-# first means a failed render leaves NO config, which fails loudly instead.
+# There is deliberately no `rm -f` before the render. An earlier version of this
+# file deleted the config first, reasoning that a failed render would otherwise
+# leave the previous environment's file in place for the next command to read.
+# It would not: the renderer exits non-zero on every failure path and `set -eu`
+# stops the task at the failed render, so the bundler is never reached with a
+# stale config. The delete bought no correctness and cost real correctness — the
+# file is shared with `frontend-preferences` and `home-web`, and under `moon ci`,
+# where projects run CONCURRENTLY, this task's `rm` could land between that
+# package's compile reading the file and `tsc` resolving it, failing an unrelated
+# project with `TS2307`. A task must not delete state another project reads. The
+# per-environment copy (`.generated/frontend/<environment>.json`) remains the
+# record of what was rendered; the shared copy is what each task overwrites
+# immediately before reading it.
 #
 # `FRONTEND_ENVIRONMENT` defaults to `development`. The deploy workflows export
 # the real environment before invoking moon, so a production bundle is built
@@ -69,7 +76,7 @@ tags:
 
 tasks:
   format-check:
-    script: '"$MOON_WORKSPACE_ROOT/node_modules/.bin/prettier" --check --ignore-unknown .'
+    script: '"$MOON_WORKSPACE_ROOT/node_modules/.bin/prettier" --check --ignore-unknown --ignore-path "$MOON_WORKSPACE_ROOT/.prettierignore" --ignore-path "$MOON_WORKSPACE_ROOT/.gitignore" .'
     inputs:
       - "**/*.{js,mjs,cjs,ts,vue,json,jsonc,yml,yaml,md,css,html}"
     outputs: []
@@ -94,7 +101,6 @@ tasks:
       set -eu
       cd "$MOON_PROJECT_ROOT"
       environment="${FRONTEND_ENVIRONMENT:-development}"
-      rm -f "$MOON_WORKSPACE_ROOT/.generated/frontend/config.json"
       node "$MOON_WORKSPACE_ROOT/tooling/scripts/render-wrangler-config.mjs" \
         --stage offline --environment "$environment" --write
       "$MOON_PROJECT_ROOT/node_modules/.bin/vue-tsc" --noEmit
@@ -145,7 +151,6 @@ tasks:
       set -eu
       cd "$MOON_PROJECT_ROOT"
       environment="${FRONTEND_ENVIRONMENT:-development}"
-      rm -f "$MOON_WORKSPACE_ROOT/.generated/frontend/config.json"
       node "$MOON_WORKSPACE_ROOT/tooling/scripts/render-wrangler-config.mjs" \
         --stage offline --environment "$environment" --write
       "$MOON_PROJECT_ROOT/node_modules/.bin/vite" build
@@ -173,7 +178,6 @@ tasks:
       set -eu
       cd "$MOON_PROJECT_ROOT"
       environment="${FRONTEND_ENVIRONMENT:-development}"
-      rm -f "$MOON_WORKSPACE_ROOT/.generated/frontend/config.json"
       node "$MOON_WORKSPACE_ROOT/tooling/scripts/render-wrangler-config.mjs" \
         --stage offline --environment "$environment" --write
       "$MOON_PROJECT_ROOT/node_modules/.bin/vite"
