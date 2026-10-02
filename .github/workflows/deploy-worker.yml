@@ -331,6 +331,11 @@ on:
         required: false
         default: "false"
         type: boolean
+      smoke-gated-elsewhere:
+        description: "This deployable's real health gate lives in another job, not in an HTTP probe, so the probe job has nothing to do. Skips it as SKIPPED rather than failing it — which promoted_to_final would otherwise read as a failed deploy. Use only alongside smoke-host-is-absent-by-design, and only when some other job in this call actually gates the deployment."
+        required: false
+        default: "false"
+        type: boolean
 
     secrets:
       # THE ONLY Cloudflare credential this repository holds. One account, one
@@ -1443,6 +1448,7 @@ jobs:
       # no repository variable can hold.
       SMOKE_HOST: ${{ inputs.smoke-host || vars.SMOKE_PROBE_BASE_URL }}
       SMOKE_HOST_ABSENT_BY_DESIGN: ${{ inputs.smoke-host-is-absent-by-design }}
+      SMOKE_GATED_ELSEWHERE: ${{ inputs.smoke-gated-elsewhere }}
       # home-web's own host, per lane, passed by the caller. It is NOT a
       # fallback to `SMOKE_HOST`: an absent value is a non-zero exit in the
       # step below, because probing the Identity host with a landing-page
@@ -1461,6 +1467,23 @@ jobs:
       - name: The version must answer this deployable's smoke contract
         run: |
           set -euo pipefail
+
+          # ---- a deployable whose gate is not an HTTP probe ---------------
+          # `promote_to_final` needs this job, so a non-zero here is not just a
+          # failed check: it means the deployment was uploaded and NEVER
+          # promoted, every run, silently. A preview `identity-jobs` hit that
+          # deterministically — it declares no host, and "no host" alone could
+          # only ever mean `exit 1` here, which is correct for a deployable whose
+          # gate lives nowhere else and wrong for one whose gate is the D1
+          # migration step inside `build_and_upload`.
+          #
+          # The caller has to say which case this is. It cannot be inferred:
+          # `home-web` also passes `smoke-host-is-absent-by-design` and DOES
+          # have a host, so the boolean cannot carry both meanings.
+          if [ "$SMOKE_GATED_ELSEWHERE" = "true" ]; then
+            echo "::notice::$WORKER ($LANE) declares no public host and its health gate is another job, so there is nothing here to probe. Skipping the probe, NOT recording a pass: see smoke-gated-elsewhere on the workflow_call."
+            exit 0
+          fi
 
           # ---- which host, and why the absence is fatal -------------------
           # Two variables, two deployables, and no fallback between them. The

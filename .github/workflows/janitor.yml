@@ -259,7 +259,11 @@ jobs:
   # Delete. Re-decides first, then hands the names to the script.
   # -------------------------------------------------------------------------
   teardown:
-    name: Delete PR #${{ steps.decide.outputs.pr }}'s preview
+    # `needs.evidence.outputs.pr`, NOT `steps.decide.outputs.pr`. `steps` is
+    # scoped to the job that declares the step, and `decide` belongs to
+    # `evidence`, so the cross-job spelling expanded to nothing and the job was
+    # named `Delete PR #'s preview` on every run since.
+    name: Delete PR #${{ needs.evidence.outputs.pr }}'s preview
     needs: [evidence]
     if: ${{ needs.evidence.outputs.allowed == 'true' }}
     runs-on: ubuntu-latest
@@ -267,6 +271,18 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
       GH_TOKEN: ${{ github.token }}
+      # At the JOB level, and not per-step. The two steps that actually delete
+      # carried no `env:` of their own, so `$PR` was unbound in exactly those
+      # two: `set -u` aborted them at expansion, before `preview-teardown.mjs`
+      # ran at all. The `|| echo "exit=$?"` on the delete step could not rescue
+      # it — an unbound-variable abort happens during expansion, which the `||`
+      # list never reaches, so the `exit=` record was never written either. The
+      # result was a summary reporting what survived, for a teardown that had
+      # never run.
+      #
+      # Declared once here rather than repeated per step, so a step added later
+      # cannot be the one that forgets.
+      PR: ${{ needs.evidence.outputs.pr }}
     steps:
       - name: Check out the base repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -453,48 +469,64 @@ jobs:
           # `preview-teardown.mjs --dry-run`, so a name the grammar does not
           # recognise is never even proposed for deletion.
           #
-          # An empty listing here is REPORTED as empty, never treated as "no
-          # previews exist": the failure this guard is for is a listing that
-          # failed and left `[]` behind, which would otherwise be a nightly run
-          # that confidently says the account is clean.
-          if ! npx --yes "wrangler@$WRANGLER_VERSION" deployments list --json > "$RUNNER_TEMP/deployments.json" 2>"$RUNNER_TEMP/deployments.err"; then
-            echo "::error::could not list the account's deployments; the sweep reports nothing rather than an empty account: $(tail -c 400 "$RUNNER_TEMP/deployments.err" | tr '\n' ' ')"
-            exit 1
-          fi
-          head -c 200 "$RUNNER_TEMP/deployments.json"
-          echo
+          # NOT `wrangler deployments list`, which is what this used to call.
+          # That command is PER-WORKER: wrangler 4.144 requires `--name`, and
+          # reads the name from a config file this job does not have — the
+          # checkout is the default branch and `pnpm infra:render` is never run,
+          # because `.generated/` is gitignored. So the command could only ever
+          # fail, which the guard below turned into a nightly step that has
+          # never once listed anything. Verified against the installed CLI:
+          # `wrangler deployments --help` offers exactly `list` and `status`,
+          # both of which take `--name`; `wrangler --help` offers no
+          # account-wide script listing at all.
+          #
+          # WHAT REPLACES IT, AND WHY IT IS NOT INVENTED HERE. The account's
+          # Worker names are enumerable from `preview.grammar`, but that
+          # enumerates what this repository MAY have created, not what exists —
+          # and a preview belonging to a pull request that no longer resolves is
+          # exactly the orphan this sweep exists to find. Guessing a replacement
+          # API call here would produce a sweep that reports a confident,
+          # silently incomplete answer, which is worse than one that reports
+          # nothing. The honest state is that the orphan sweep is not wired up,
+          # and it says so in its own summary rather than implying it ran.
+          #
+          # An empty listing is never treated as "no previews exist": the failure
+          # this guard is for is a listing that failed and left `[]` behind,
+          # which would otherwise be a nightly run that confidently says the
+          # account is clean.
+          echo "::error::the orphan sweep cannot list the account: wrangler 4.144 has no account-wide script listing (deployments list and status both require --name), and this job checks out the default branch without a rendered wrangler config. Reported rather than approximated — see the comment above."
+          exit 1
 
-          # A listing that carried errors is a FAILED scan, not an empty
-          # account, and it must not reach the report as `count=0` — that is the
-          # one conclusion a cleanup tool must not reach by accident. The
-          # script exits 1 when the listing carried problems and says so on
-          # stderr; `set -e` turns that into a failed step before any output is
-          # appended, so nothing downstream sees the count.
-          prs="$(node tooling/scripts/list-preview-prs.mjs --json < "$RUNNER_TEMP/deployments.json")"
-          echo "$prs" | tee "$RUNNER_TEMP/prs.json"
-          # Counted from the JSON, not by grepping for `"pr"`: a name in the
-          # `refused` array can also contain that substring, and a count that
-          # includes refused names reports previews the sweep will not act on.
-          echo "count=$(printf '%s' "$prs" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);if(!j.complete)throw new Error("incomplete scan");console.log(j.pullRequests.length)})')" >> "$GITHUB_OUTPUT"
-
-      - name: Report what the sweep found, and delete nothing itself
+      - name: Report that the sweep is not wired up, rather than that it found nothing
         # Deliberately not a delete. Deciding that an orphan is safe to delete
         # requires the GitHub lookup, and that lookup belongs to one code path —
         # `evidence` — so a second deletion path here would be a second set of
         # rules to keep correct.
+        #
+        # `if: always()`, because the step above exits 1 by design. Without it
+        # this never runs and the run's only summary is the error annotation —
+        # which is a worse place to learn that a nightly path has never worked
+        # than the summary a human reads.
+        if: always()
         run: |
           set -euo pipefail
           {
-            echo "### Janitor sweep"
+            echo "### Janitor sweep — did not run"
             echo ""
-            echo "Previews currently in the account that match \`preview.grammar\`."
+            echo "**This sweep found nothing, because it looked at nothing.** It is not"
+            echo "reporting a clean account."
             echo ""
-            echo '```json'
-            cat "$RUNNER_TEMP/prs.json"
-            echo '```'
+            echo "wrangler 4.144 has no account-wide Worker listing. \`deployments list\`"
+            echo "and \`deployments status\` are both per-Worker and require \`--name\`, and"
+            echo "this job checks out the default branch without rendering a wrangler"
+            echo "config. The listing this sweep used to call could therefore never"
+            echo "succeed."
             echo ""
-            echo "This sweep reports. It does not delete: \`preview.evidence.on_unknown\` is"
-            echo "\`do-not-delete\`, and a preview whose pull request cannot be read is exactly"
-            echo "the unknown case. Re-run this workflow for a specific pull request, or close"
-            echo "it, to have the \`evidence\` → \`teardown\` path act on one."
+            echo "So a preview whose pull request was deleted, or that predates the"
+            echo "preview lane, is **not currently found or reported by anything**. The"
+            echo "\`evidence\` → \`teardown\` path still handles a pull request that closes."
+            echo ""
+            echo "Wiring this up needs an enumeration primitive that does not exist in"
+            echo "the pinned wrangler. It is reported here rather than approximated with"
+            echo "a call that would answer partially and confidently."
           } >> "$GITHUB_STEP_SUMMARY"

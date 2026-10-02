@@ -420,6 +420,14 @@ jobs:
       # to `vars.SMOKE_PROBE_BASE_URL` — which would have probed the FIXED
       # Identity host and reported that result as `identity-jobs`'s own.
       smoke-host-is-absent-by-design: true
+      # And `smoke-gated-elsewhere`, because `smoke-host-is-absent-by-design`
+      # alone made this deployable fail its health gate on EVERY preview run:
+      # `promote_to_final` needs the `smoke` job, and that job's only possible
+      # answer to "no host" was `exit 1`. So the deployment was uploaded and
+      # never promoted, silently, every time. The two flags together say the
+      # real thing — this deployable has no host to probe, and its gate is the
+      # migration step above — which neither flag can say alone.
+      smoke-gated-elsewhere: true
     secrets:
       CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
 
@@ -508,16 +516,34 @@ jobs:
           echo "| home-web | https://pr${PR}-home.ecoma.io | ${HOME} |"
           echo ""
           failed=0
+          skipped_all=1
           for pair in "identity:${IDENTITY}" "identity-admin:${ADMIN}" "identity-jobs:${JOBS}" "home-web:${HOME}"; do
             name="${pair%%:*}"
             result="${pair#*:}"
-            if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
+            # A fork is already handled above and returned. Past that point a
+            # `skipped` result means something UPSTREAM did not succeed —
+            # `gate`, or `identity` — and all four deploys share that
+            # condition, so all four are skipped and nothing was deployed. The
+            # fork exemption was here once and applied to every skip; the line
+            # underneath it said all four were promoted, over a table showing
+            # four skips. Only `success` is promoted.
+            if [ "$result" != "success" ]; then
               failed=1
+              if [ "$result" = "skipped" ]; then
+                skipped_all=0
+              fi
               echo "::warning::${name} did not succeed (${result}). Nothing was promoted for it; do not trust a version id from this run."
             fi
           done
           if [ "$failed" -eq 0 ]; then
             echo "All four deployables were promoted to preview traffic."
+          elif [ "$skipped_all" -eq 0 ]; then
+            # Named rather than left to the per-row warnings, because
+            # "nothing was deployed" and "some deployables failed" are different
+            # diagnoses and the table alone does not distinguish them.
+            echo "**Nothing was deployed.** Every deployable was skipped, which means an"
+            echo "upstream job did not succeed — read the \`gate\` and \`identity\` jobs above"
+            echo "for why. This run built no preview, so this PR has no preview URL."
           fi
           echo ""
           if [ "$GATE_ENABLED" = "true" ]; then
