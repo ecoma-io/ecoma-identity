@@ -28,10 +28,12 @@
  * condition a resolver must not guess about.
  *
  * CREATE OR FAIL. A missing resource is NOT created here. Provisioning is a
- * separate, deliberate act (`infra:provision`), because a deploy that silently
- * creates the database it is about to write to turns a typo in a name into an
- * empty production database rather than a failed run. This script reports what
- * is missing and stops.
+ * separate, deliberate act — the Cloudflare dashboard or `wrangler d1 create`,
+ * `wrangler kv namespace create`, `wrangler queues create` — because a deploy
+ * that silently creates the database it is about to write to turns a typo in a
+ * name into an empty production database rather than a failed run. This script
+ * reports what is missing and stops. There is no `pnpm infra:provision` and
+ * this repository does not claim one.
  *
  * No dependencies. Node ≥ 20. Reads the token from the environment
  * (`CLOUDFLARE_API_TOKEN`) and never from an argument, so it never appears in a
@@ -61,25 +63,59 @@ const CLOUDFLARE_API = "https://api.cloudflare.com/client/v4";
 /**
  * What a lookup costs and how to find the value in the response.
  *
- * `path` is the field to read inside one result element. A kind whose list
- * endpoint needs a POST body (`listD1`) carries `body` instead — D1 is the one
- * kind Cloudflare refuses to paginate with a query string.
+ * `path` is the field carrying the resource id inside one result element, and
+ * `name` is the field carrying the human name — which is NOT the same field for
+ * every kind, and is not `title` for KV.
+ *
+ * EVERY lookup here is a GET with pagination in the QUERY STRING. This is not a
+ * style preference. `/accounts/{account}/d1/database` serves two methods on one
+ * path, and they are not interchangeable:
+ *
+ *   GET  → `d1-list-databases`   (this is what this script wants)
+ *   POST → `d1-create-database`  (body: required ['name'])
+ *
+ * So a D1 lookup sent as a POST does not return a validation error about
+ * pagination. It returns
+ *
+ *     HTTP 400 {"code":7400,"message":"Invalid property: name => Required"}
+ *
+ * because `{"per_page":100,"page":1}` is being read as the body of a request to
+ * CREATE a database, and it has no name to create one with. Nothing is created
+ * — Cloudflare refuses first — but the message names a property this script
+ * never asked about, and the failure looks like a malformed request rather than
+ * a wrong verb. If you are changing this table, the verb is load-bearing.
+ *
+ * `per_page` is bounded at 10 000 by Cloudflare; 100 is comfortably legal and
+ * keeps the pages small enough that a large account does not arrive all at once.
  */
 const LOOKUPS = {
-  d1: {
-    list: "/accounts/{account}/d1/database",
-    body: { per_page: 100 },
-    path: "uuid",
+  d1: { list: "/accounts/{account}/d1/database", path: "uuid", name: "name" },
+  kv: {
+    list: "/accounts/{account}/storage/kv/namespaces",
+    path: "id",
+    name: "title",
   },
-  kv: { list: "/accounts/{account}/storage/kv/namespaces", path: "id" },
-  queue: { list: "/accounts/{account}/queues", path: "queue_id" },
+  queue: {
+    list: "/accounts/{account}/queues",
+    path: "queue_id",
+    name: "queue_name",
+  },
 };
+
+const PER_PAGE = 100;
 
 /**
  * Cloudflare's list endpoints are paginated and the default page size is not
  * every account's resource count. A name on page 2 must be FOUND, not reported
  * missing — a resolver that stops at the first page turns a working deploy into
  * a spurious "no such namespace".
+ *
+ * Every response is `{ success, errors, messages, result, result_info }` and
+ * `result` is a FLAT ARRAY for all three kinds — there is no
+ * `result.databases` wrapper to unwrap. `result_info.total_count` is what tells
+ * the loop there is another page, rather than guessing from a short page (which
+ * would silently drop the last page of an account whose count is an exact
+ * multiple of `per_page`).
  */
 async function fetchAll(token, accountId, kind) {
   const spec = LOOKUPS[kind];
@@ -87,25 +123,13 @@ async function fetchAll(token, accountId, kind) {
   const results = [];
   let page = 1;
   for (;;) {
-    // A kind whose pagination rides in a request BODY is a POST. Sending that
-    // body on the default GET is refused outright —
-    //
-    //     Request with GET/HEAD method cannot have body.
-    //
-    // — so the method and the page parameter have to move together with the
-    // body, and this loop keeps them in step.
-    const usesBody = spec.body !== undefined;
-    const url_ = usesBody ? url : `${url}?per_page=100&page=${page}`;
+    const url_ = `${url}?page=${page}&per_page=${PER_PAGE}`;
     const init = {
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
     };
-    if (usesBody) {
-      init.method = "POST";
-      init.body = JSON.stringify({ ...spec.body, page });
-    }
     const response = await fetch(url_, init);
     if (!response.ok) {
       const detail = await response.text();
@@ -119,10 +143,27 @@ async function fetchAll(token, accountId, kind) {
         `Cloudflare returned success=false while listing ${kind}: ${JSON.stringify(payload.errors ?? [])}`,
       );
     }
-    const batch = payload.result ?? [];
+    const batch = Array.isArray(payload.result) ? payload.result : [];
     results.push(...batch);
     const info = payload.result_info ?? {};
-    if (!info.has_more) break;
+    // `result_info` is `{ count, page, per_page, total_count }` — it has NO
+    // `has_more` field. Reading one that is not there yields `undefined`, which
+    // is falsy, which ends the loop on page 1 of an account with more than one
+    // page — and the names on page 2 are then reported as "does not exist".
+    // That is the worst shape this script has: a wrong answer that reads as a
+    // correct one. Compare against the count Cloudflare actually reports.
+    const total = Number(info.total_count);
+    if (!Number.isFinite(total)) {
+      throw new TopologyError(
+        `listing ${kind} returned no result_info.total_count, so this script cannot tell whether it has seen every page. Refusing to resolve names from a partial listing.`,
+      );
+    }
+    if (results.length >= total) break;
+    if (batch.length === 0) {
+      throw new TopologyError(
+        `listing ${kind} reported ${total} resources but returned an empty page at page ${page}; the listing is inconsistent and this script will not resolve names from it.`,
+      );
+    }
     page += 1;
     if (page > 100) {
       throw new TopologyError(
@@ -143,11 +184,18 @@ async function fetchAll(token, accountId, kind) {
  * traffic into somebody's scratch database.
  */
 function exactMatch(kind, name, results, path_ = null) {
-  const field = path_ ?? LOOKUPS[kind].path;
-  const matches = results.filter((entry) => entry && entry.name === name);
+  const spec = LOOKUPS[kind];
+  const field = path_ ?? spec.path;
+  // The NAME lives in a different field per kind — `title` for a KV namespace,
+  // `queue_name` for a queue — so matching on `entry.name` silently finds
+  // nothing for those two and every lookup reports a resource as missing. The
+  // fallback exists only so a kind added to LOOKUPS without a `name` fails with
+  // an empty match list rather than a TypeError.
+  const nameField = spec.name ?? "name";
+  const matches = results.filter((entry) => entry?.[nameField] === name);
   if (matches.length === 0) {
     const nearby = results
-      .map((entry) => entry && entry.name)
+      .map((entry) => entry?.[nameField])
       .filter((n) => typeof n === "string")
       .sort()
       .slice(0, 8);
@@ -156,7 +204,7 @@ function exactMatch(kind, name, results, path_ = null) {
         nearby.length > 0
           ? `Names present in this account include: ${nearby.join(", ")}.`
           : "The account returned no named resources of this kind at all."
-      } Provision it deliberately (infra:provision) or correct the name in infra-topology/topology.json — this script does not guess and does not create.`,
+      } Provision it in the Cloudflare dashboard and then dispatch again, or correct the name in infra-topology/topology.json — this script does not guess and does not create.`,
     );
   }
   if (matches.length > 1) {
@@ -207,7 +255,7 @@ function parseArgs(argv) {
   return options;
 }
 
-async function reconcile(environment, outPath) {
+export async function reconcile(environment, outPath) {
   const token = process.env.CLOUDFLARE_API_TOKEN;
   if (!token) {
     throw new TopologyError(
