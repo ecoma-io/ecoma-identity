@@ -444,6 +444,43 @@ jobs:
       - name: Build home-web (Nuxt/Nitro application)
         run: pnpm exec moon run home-web:package
 
+      # `wasm-opt` IS A SHARED-CACHE RACE, AND THE FIX IS TO WIN IT ONCE HERE.
+      #
+      # `worker-build` downloads a `wasm-opt` binary into
+      # `~/.cache/worker-build/` and caches it. `moon run :wrangler-validate`
+      # runs one `wrangler-validate` per deployable, and with
+      # `MOON_CONCURRENCY=4` those three run AT THE SAME TIME — so on a cold
+      # cache all three decide the binary is absent and all three try to write
+      # it. Two of them get `Text file busy (os error 26)` from the kernel,
+      # which is what happens when a file is being executed while another
+      # process writes to it, and the job dies with a wasm error that has
+      # nothing to do with any wrangler config.
+      #
+      # This is not hypothetical: it failed the run on 2026-10-02 at 11:07Z
+      # and passed the two runs before it, which is the signature of a race and
+      # not of a defect in a config. `build_and_upload` never sees it because
+      # that job's four jobs each build ONE Worker.
+      #
+      # Warming the cache in a step of its own, before any parallelism exists,
+      # removes the race rather than hiding its symptom. It is `continue-on-
+      # error` because this step is an optimisation and the task below is the
+      # check: if the warm-up cannot download, `worker-build` downloads it
+      # itself and the real failure — a genuine compile error in a genuine
+      # config — still fails the job. The alternative, `MOON_CONCURRENCY=1`,
+      # would also remove the race and would serialise every other task in the
+      # repository to do it.
+      - name: Warm the shared wasm-opt cache before the tasks run in parallel
+        continue-on-error: true
+        run: |
+          cargo install -q "worker-build@^0.8" --locked
+          worker-build --version || true
+          if [ -d "$HOME/.cache/worker-build" ]; then
+            echo "worker-build cache present:"
+            ls -1 "$HOME/.cache/worker-build"
+          else
+            echo "::notice::worker-build did not populate a cache; the validate tasks will download it themselves."
+          fi
+
       - name: Validate every wrangler config (real dry-run, uploads nothing)
         run: pnpm exec moon run :wrangler-validate
 
