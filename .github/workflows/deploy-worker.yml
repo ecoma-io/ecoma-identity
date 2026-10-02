@@ -831,9 +831,24 @@ jobs:
         id: upload
         env:
           CONFIG_PATH: .generated/cloudflare/${{ inputs.environment }}/${{ inputs.worker }}/wrangler.jsonc
+          # THROUGH `env:`, NOT INTERPOLATED INTO THE SCRIPT. Semgrep rule
+          # `workflow-expression-interpolated-into-run` (alert #3, error) is
+          # right about this line: GitHub substitutes an expression into a `run:`
+          # body BEFORE the shell parses it, so a value carrying shell
+          # metacharacters runs as commands with this workflow's permissions. It
+          # names `steps.<id>.outputs.*` as a source because the step that wrote
+          # the output may itself have been reachable from untrusted input — the
+          # second-order case.
+          #
+          # The value here is `true` or `false` and nothing can currently write
+          # anything else, so there is no live exploit — but "no live exploit" is
+          # not the standard, and a rule that fires on the safe instance fires
+          # on the unsafe one written next year. `$WORKER_EXISTS` reaches the
+          # shell as an environment variable, which is inert data.
+          WORKER_EXISTS: ${{ steps.worker_exists.outputs.exists }}
         run: |
           set -euo pipefail
-          if [ "${{ steps.worker_exists.outputs.exists }}" = "true" ]; then
+          if [ "$WORKER_EXISTS" = "true" ]; then
             bash tooling/scripts/wrangler-step.sh "upload a version" -- versions upload \
               --config "$CONFIG_PATH" \
               --no-bundle \
