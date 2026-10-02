@@ -354,6 +354,18 @@ jobs:
       # rather than a `--var` so the token never appears in a command line, in
       # a process listing, or in a log line.
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # The SCRIPT name, which is not `WORKER`: staging deploys a Worker named
+      # `identity-staging`, not `identity`, so that a merge to `main` cannot
+      # promote the production default environment by accident
+      # (`deploy.yml:96-99`). The promotion jobs each declare this too; it is
+      # declared here as well because this job now has to ask the Cloudflare API
+      # whether the Worker exists, and an empty `$WORKER_NAME` would query
+      # `/workers/services/` — the account's script list — and find a Worker
+      # that is not the one being deployed.
+      WORKER_NAME: ${{ inputs.worker-name }}
+      # Read by the first-deploy branch below for its summary text. The
+      # promotion percentage the bootstrap deploy lands on.
+      FINAL_PERCENTAGE: ${{ inputs.final-percentage }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -711,17 +723,94 @@ jobs:
             echo "or narrow, and wrangler never down-migrates."
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # ---- does this Worker exist yet? -------------------------------------
+      # THE BOOTSTRAP CYCLE, AND THE ONLY STEP THAT BREAKS IT (#27).
+      #
+      # `wrangler versions upload` CANNOT CREATE A WORKER. Verified in wrangler
+      # 4.144.0, `wrangler-dist/cli.js:175354-175361`: the "does it exist"
+      # pre-check ends in a hard-coded throw —
+      #
+      #     if (isWorkerNotFoundError(e11)) {
+      #       if (props.command === "versions upload") {
+      #         throw new UserError("You cannot upload a new version of a Worker
+      #           that does not yet exist. Please run the `deploy` command first.");
+      #       }
+      #       workerExists = false;
+      #     }
+      #
+      # The `workerExists = false` branch — the one that proceeds to create the
+      # Worker — is reachable ONLY for `deploy`. So the Versions API is
+      # unusable until a `deploy` has created the Worker, and the first deploy
+      # of a Worker has no Versions API path at all. Neither command closes the
+      # cycle: `versions upload` refuses because the Worker is absent, and
+      # `wrangler deploy` creates it and immediately sends 100% of traffic.
+      #
+      # This is why the step below branches, and why the branch is not
+      # optimisable away. It is a property of the two Cloudflare APIs, not of
+      # this repository's taste.
+      #
+      # `--name "$WORKER_NAME"` and NOT `inputs.worker`: the script name carries
+      # the staging suffix (`identity-staging`, `home-web-staging`) so a merge to
+      # `main` cannot promote the PRODUCTION default environment
+      # (`deploy.yml:96-99`).
+      #
+      # THE CHECK IS A CLOUDFLARE API CALL, NOT `wrangler versions list`. A
+      # subshell that treats any non-zero exit as "the Worker is absent" would
+      # route a bad token, an unreachable API or a malformed config into the
+      # BOOTSTRAP branch, and bootstrapping sends traffic — so a transient auth
+      # failure would silently become a first deploy. Only error 10007
+      # ("workers.api.error.script_not_found") means absent; every other failure
+      # is a failure and stops the run.
+      - name: Check whether this Worker already exists
+        id: worker_exists
+        env:
+          CONFIG_PATH: .generated/cloudflare/${{ inputs.environment }}/${{ inputs.worker }}/wrangler.jsonc
+        run: |
+          set -euo pipefail
+          HTTP_CODE="$(curl -s -o /tmp/worker-meta.json -w '%{http_code}' \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/services/$WORKER_NAME")"
+          case "$HTTP_CODE" in
+            200)
+              echo "exists=true" >> "$GITHUB_OUTPUT"
+              echo "Worker $WORKER_NAME already exists — the Versions API path is available."
+              ;;
+            404)
+              echo "exists=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::Worker $WORKER_NAME does not exist yet. This is its first deploy, and the Versions API cannot create a Worker; the upload step below will bootstrap it with \`wrangler deploy\`, which also sends it 100% of traffic. There is no earlier version to displace, and nothing has ever requested this hostname. See #27."
+              ;;
+            *)
+              echo "::error::could not determine whether Worker $WORKER_NAME exists: the Cloudflare API answered HTTP $HTTP_CODE. This is NOT the same as the Worker being absent, and continuing would guess — so the run stops here rather than bootstrap a Worker because a lookup failed."
+              jq -r '.errors[]?.message // empty' /tmp/worker-meta.json 2>/dev/null || cat /tmp/worker-meta.json
+              exit 1
+              ;;
+          esac
+
       # ---- the upload ------------------------------------------------------
       # THE COMMAND THAT CREATES A VERSION AND SENDS NO TRAFFIC. Not
       # `wrangler deploy`, which creates a Deployment and immediately sends
       # 100% of traffic — the one command in this file that would put an
       # unreviewed binary on the production request path.
       #
+      # EXCEPT ON THE FIRST DEPLOY OF A WORKER, which is the branch above and
+      # the reason this step has two paths. On that one run `deploy` is not
+      # "the command that would put an unreviewed binary on the path" — it is
+      # the only command that can make the Worker exist at all, and a Worker
+      # that has never received traffic has no users to endanger. The traffic
+      # it sends on that run goes to a hostname nothing has ever requested.
+      #
+      # The first deploy is NOT therefore a canary-free production deploy: the
+      # bytes are the same reviewed bytes, and the promotion ladder below still
+      # runs on every subsequent deploy. What is different is that on the very
+      # first one there is no earlier version to hold traffic while a new one is
+      # tested, which is precisely what the ladder is for.
+      #
       # `--tag` is the git tag, which is the whole traceability story: a
       # version's Cloudflare tag is its git tag, so "which version had tag X"
       # is a lookup and a rollback decision is decidable. `--message` carries
       # the same string plus the commit, so the version describes itself in the
-      # Cloudflare dashboard without a git checkout.
+      # Cloudflare dashboard without a git checkout. Both paths pass them, so
+      # the tag an operator reads back is the same either way.
       #
       # `--no-bundle` is load-bearing. The build already happened through moon
       # in the step above; without it wrangler would run the config's
@@ -729,30 +818,56 @@ jobs:
       # `worker-build --release` — producing a SECOND set of bytes from the
       # same source, and uploading the one nobody reviewed. The bytes that get
       # promoted must be the bytes that got tested.
-      - name: Upload a version (NO TRAFFIC)
+      - name: Upload a version (NO TRAFFIC), or bootstrap the Worker (first deploy only)
         id: upload
         env:
           CONFIG_PATH: .generated/cloudflare/${{ inputs.environment }}/${{ inputs.worker }}/wrangler.jsonc
         run: |
           set -euo pipefail
-          bash tooling/scripts/wrangler-step.sh "upload a version" -- versions upload \
-            --config "$CONFIG_PATH" \
-            --no-bundle \
-            --tag "$RELEASE_TAG" \
-            --message "$RELEASE_TAG ($GITHUB_SHA) uploaded by .github/workflows/deploy-worker.yml"
-          {
-            echo "### Uploaded a version — no traffic was sent"
-            echo ""
-            echo "A Cloudflare **Version** now exists. Nothing serves it yet."
-            echo "Promoting it is a separate act, below and in the promotion jobs,"
-            echo "and a version that is uploaded and never promoted is the normal"
-            echo "state of a version that failed its smoke test."
-            echo ""
-            echo "- Worker: \`$WORKER\`"
-            echo "- Environment: \`$ENVIRONMENT\` (lane \`$LANE\`)"
-            echo "- Version tag: \`$RELEASE_TAG\`"
-            echo "- Commit: \`$GITHUB_SHA\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.worker_exists.outputs.exists }}" = "true" ]; then
+            bash tooling/scripts/wrangler-step.sh "upload a version" -- versions upload \
+              --config "$CONFIG_PATH" \
+              --no-bundle \
+              --tag "$RELEASE_TAG" \
+              --message "$RELEASE_TAG ($GITHUB_SHA) uploaded by .github/workflows/deploy-worker.yml"
+            {
+              echo "### Uploaded a version — no traffic was sent"
+              echo ""
+              echo "A Cloudflare **Version** now exists. Nothing serves it yet."
+              echo "Promoting it is a separate act, below and in the promotion jobs,"
+              echo "and a version that is uploaded and never promoted is the normal"
+              echo "state of a version that failed its smoke test."
+              echo ""
+              echo "- Worker: \`$WORKER\`"
+              echo "- Environment: \`$ENVIRONMENT\` (lane \`$LANE\`)"
+              echo "- Version tag: \`$RELEASE_TAG\`"
+              echo "- Commit: \`$GITHUB_SHA\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            bash tooling/scripts/wrangler-step.sh "bootstrap a first deploy" -- deploy \
+              --config "$CONFIG_PATH" \
+              --no-bundle \
+              --tag "$RELEASE_TAG" \
+              --message "$RELEASE_TAG ($GITHUB_SHA) first deploy by .github/workflows/deploy-worker.yml" \
+              --yes
+            {
+              echo "### Bootstrapped the Worker with its first deployment"
+              echo ""
+              echo "\`wrangler versions upload\` **cannot create a Worker** — Cloudflare"
+              echo "refuses it for a Worker that does not exist, so the first deploy of"
+              echo "any Worker has to go through \`wrangler deploy\`. That command also"
+              echo "sends 100% of traffic, and on this run there was no earlier version"
+              echo "holding traffic, so nothing was displaced. See #27."
+              echo ""
+              echo "**This is the only run of this Worker that took this path.** Every"
+              echo "deploy from now on uploads a version and waits for its promotion."
+              echo ""
+              echo "- Worker: \`$WORKER\` (\`$WORKER_NAME\`)"
+              echo "- Environment: \`$ENVIRONMENT\` (lane \`$LANE\`)"
+              echo "- Version tag: \`$RELEASE_TAG\`"
+              echo "- Commit: \`$GITHUB_SHA\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       # Resolve the Version id from the tag, as documented above.
       - name: Resolve the version id from its tag
