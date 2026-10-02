@@ -184,8 +184,33 @@ test("a deployable that binds no D1 answers empty and succeeds", () => {
       `bindings.${deployable}.d1`,
     ]);
     assert.equal(slot.code, 0, `${deployable}: a null slot should resolve`);
-    assert.equal(slot.stdout.trim(), "");
+    // Byte length, not `.trim()`. The comment above states the contract as a
+    // NEWLINE rather than zero bytes, and `assert.equal(slot.stdout.trim(), "")`
+    // cannot tell the two apart — so the test passed with the newline deleted.
+    // Asserted here because that contract is what a caller counting bytes sees.
+    assert.equal(
+      slot.stdout.length,
+      1,
+      `${deployable}: a declared null slot answers exactly one newline, not zero bytes`,
+    );
   }
+});
+
+test("a declared null slot and an absent path are different answers", () => {
+  // The distinction the test above cannot make on its own. Both succeed; one
+  // printed a byte and the other printed nothing, and a caller that counts
+  // bytes can tell them apart while a caller that tests `-z` cannot.
+  const nullSlot = run([
+    "--environment",
+    "staging",
+    "--ask",
+    "bindings.identity-jobs.d1",
+  ]);
+  const absent = run(["--environment", "staging", "--ask", "no.such.path"]);
+  assert.equal(nullSlot.code, 0);
+  assert.equal(absent.code, 0);
+  assert.equal(nullSlot.stdout.length, 1);
+  assert.equal(absent.stdout.length, 0);
 });
 
 test("a binding slot is the env var name and never carries a template", () => {
