@@ -167,7 +167,11 @@ test("a deployable that binds no D1 answers empty and succeeds", () => {
     ]);
     assert.equal(name.code, 0, `${deployable}: a name should resolve`);
     assert.equal(name.stdout.trim(), "");
-    assert.match(name.stderr, /is not declared/);
+    assert.equal(
+      name.stderr,
+      "",
+      `${deployable}: an absent resource must not write prose to stderr, because the caller captures 2>&1 and would use it as the database name`,
+    );
 
     const slot = run([
       "--environment",
@@ -200,23 +204,25 @@ test("a binding slot is the env var name and never carries a template", () => {
   assert.ok(!result.stdout.includes("{pr}"));
 });
 
-test("--ask deployables lists one per line for a caller that iterates it", () => {
-  // The migration step walks every deployable to find which one owns a database.
-  // An array printed as JSON would make `for x in $(...)` iterate one string; an
-  // array printed on one line would make it iterate four.
+test("a deployable list is one name per line, which is what the caller's loop needs", () => {
+  // `deploy-worker.yml` walks this answer with `for candidate in $(...)`, so the
+  // shape is a contract rather than a formatting choice: one line per element, no
+  // brackets, and nothing else. An array printed as JSON would make the loop
+  // iterate one candidate named `["identity","identity-admin"]`; an array printed
+  // on one line would make it iterate four.
   const result = run(["--environment", "staging", "--ask", "deployables"]);
   assert.equal(result.code, 0);
-  const names = result.stdout.trim().split("\n");
-  assert.deepEqual(names, [
+  assert.deepEqual(result.stdout.split("\n").filter(Boolean), [
     "identity",
     "identity-admin",
     "identity-jobs",
     "home-web",
   ]);
+  assert.equal(result.stderr, "", "a populated list has nothing to explain");
 });
 
-test("an unknown path reports itself instead of printing nothing in silence", () => {
-  const result = run([
+test("an unknown path is silent unless the caller asks for the explanation", () => {
+  const absent = run([
     "--environment",
     "preview",
     "--pr",
@@ -224,9 +230,78 @@ test("an unknown path reports itself instead of printing nothing in silence", ()
     "--ask",
     "resources.identity.nope",
   ]);
-  assert.equal(result.code, 0, "an absent path is an answer, not a failure");
-  assert.equal(result.stdout.trim(), "");
-  assert.match(result.stderr, /is not declared/);
+  assert.equal(absent.code, 0, "an absent path is an answer, not a failure");
+  assert.equal(absent.stdout.trim(), "");
+  // Silent by default, and that is the fix. `deploy-worker.yml`'s `infra_name`
+  // captures with `2>&1` so a resolver FAILURE arrives as text, which means an
+  // unconditional stderr explanation arrives as the VALUE — and a prose
+  // sentence handed to `wrangler d1 migrations apply` as `database_name` is a
+  // command against a database name that does not exist.
+  assert.equal(
+    absent.stderr,
+    "",
+    "an absent path must not write to stderr unless --explain is passed",
+  );
+
+  // The explanation is still available to a caller that reads stderr on its own,
+  // which is what `--explain` is for: making the decision the caller's rather
+  // than this tool's.
+  const explained = run([
+    "--environment",
+    "preview",
+    "--pr",
+    "33",
+    "--ask",
+    "resources.identity.nope",
+    "--explain",
+  ]);
+  assert.equal(explained.code, 0);
+  assert.equal(explained.stdout.trim(), "", "--explain must not print a value");
+  assert.match(explained.stderr, /is not declared/);
+});
+
+test("--field reaches a leaf, and against a scalar it is the whole value", () => {
+  // `--field` is in USAGE and in `main`, and no test reached it — so the branch
+  // it selects between was unexercised in both directions. They are not the same
+  // answer, and the lenient one is the deliberate reading: `found` is applied
+  // only when it is an object, so `--field` against a string is ignored and the
+  // string is printed whole. The alternative — making `--field` an error when the
+  // caller asked one level too deep — would be stricter about a case where the
+  // answer the caller wanted is already on stdout.
+  const leaf = run([
+    "--environment",
+    "preview",
+    "--pr",
+    "33",
+    "--ask",
+    "resources.identity.d1",
+    "--field",
+    "name",
+  ]);
+  assert.equal(leaf.code, 0);
+  assert.equal(
+    leaf.stdout.trim(),
+    "ecoma-identity-pr-33",
+    "--field must select the leaf rather than printing the whole object",
+  );
+  assert.equal(leaf.stdout.includes("{pr}"), false);
+
+  const scalar = run([
+    "--environment",
+    "preview",
+    "--pr",
+    "33",
+    "--ask",
+    "resources.identity.d1.name",
+    "--field",
+    "ignored",
+  ]);
+  assert.equal(scalar.code, 0);
+  assert.equal(
+    scalar.stdout.trim(),
+    "ecoma-identity-pr-33",
+    "--field against a non-object leaves the value alone rather than answering null",
+  );
 });
 
 test("an unknown environment and an unknown argument are usage errors", () => {

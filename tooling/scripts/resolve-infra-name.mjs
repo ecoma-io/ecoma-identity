@@ -51,16 +51,25 @@ import {
   validatePrNumber,
 } from "./topology-model.mjs";
 
-const USAGE = `Usage: resolve-infra-name.mjs --environment <env> [--pr <n>] --ask <path> [--field <f>]
+const USAGE = `Usage: resolve-infra-name.mjs --environment <env> [--pr <n>] --ask <path> [--field <f>] [--explain]
 
   --environment <env>   production | staging | development | preview
   --pr <n>              required for preview, refused elsewhere
   --ask <path>          dotted path into the resolved environment, e.g.
                         resources.identity.d1.name
   --field <f>           one leaf of the value at --ask, e.g. name
+  --explain             say on stderr why a value is absent; stdout stays the
+                        VALUE channel either way, and stays empty on absence
   --help                this text
 
-Prints one already-rendered value as TSV. Never prints a {pr} template.`;
+Prints one already-rendered value as TSV. Never prints a {pr} template.
+
+STDOUT IS THE ONLY VALUE CHANNEL. An absent value prints nothing on stdout
+and exits 0 — the explanation is on stderr, and only with --explain. The
+caller in deploy-worker.yml captures with 2>&1 so that a resolver FAILURE
+arrives as text instead of a bare exit code, which means an unconditional
+stderr explanation becomes the captured VALUE. --explain exists so that the
+decision is the caller's, not this tool's.`;
 
 function parseArgs(argv) {
   const options = {
@@ -68,6 +77,7 @@ function parseArgs(argv) {
     pr: null,
     ask: null,
     field: null,
+    explain: false,
     help: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -84,6 +94,9 @@ function parseArgs(argv) {
         break;
       case "--field":
         options.field = argv[++i] ?? null;
+        break;
+      case "--explain":
+        options.explain = true;
         break;
       case "--help":
       case "-h":
@@ -172,9 +185,23 @@ function main(argv) {
       : found;
 
   if (value === undefined) {
-    process.stderr.write(
-      `${options.ask}${options.field ? `.${options.field}` : ""} is not declared for ${options.environment}${options.environment === "preview" ? ` (pr ${options.pr})` : ""}. An absent value and an empty one are the same answer here: this deployable declares no such resource in this environment.\n`,
-    );
+    // Silent by DEFAULT, which is the point of --explain. The documented
+    // contract is that an absent path prints an empty string, and a caller
+    // that captures `2>&1` — deploy-worker.yml's `infra_name` does, so that a
+    // resolver FAILURE arrives as text rather than as a bare exit code — would
+    // otherwise capture this prose and use it as `database_name`.
+    //
+    // Masked today only by luck: `bindings.<deployable>.d1` is `null` rather
+    // than undefined for every deployable that binds no database, so the
+    // `-z "$D1_BINDING"` guard fires before this value is ever used. A
+    // deployable declaring a `d1` slot with no matching resource entry is the
+    // case that turns the mask into a real bug, and nothing else in the tree
+    // catches it.
+    if (options.explain) {
+      process.stderr.write(
+        `${options.ask}${options.field ? `.${options.field}` : ""} is not declared for ${options.environment}${options.environment === "preview" ? ` (pr ${options.pr})` : ""}. An absent value and an empty one are the same answer here: this deployable declares no such resource in this environment.\n`,
+      );
+    }
     return EXIT_OK;
   }
   if (value === null) {
@@ -198,6 +225,13 @@ function main(argv) {
   // JSON array, which is the opposite of what it asked for. An EMPTY array is an
   // error rather than silence: every path that iterates a list would otherwise
   // do nothing at all and report success.
+  //
+  // Each element goes through the SAME string-or-JSON normalisation the scalar
+  // branch above applies, rather than a template literal of its own. `${entry}`
+  // on an object prints `[object Object]` and exits 0 — a silent wrong answer,
+  // which is the whole failure mode this tool exists to remove. Every array
+  // reachable today is a string array, so this is latent; the divergence
+  // between the two branches is what makes it worth closing.
   if (Array.isArray(value)) {
     if (value.length === 0) {
       process.stderr.write(
@@ -205,7 +239,11 @@ function main(argv) {
       );
       return EXIT_INVALID;
     }
-    process.stdout.write(value.map((entry) => `${entry}\n`).join(""));
+    const render = (entry) =>
+      typeof entry === "string" ? entry : JSON.stringify(entry);
+    process.stdout.write(
+      `${value.map((entry) => `${render(entry)}\n`).join("")}`,
+    );
     return EXIT_OK;
   }
 
