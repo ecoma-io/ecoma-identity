@@ -42,6 +42,7 @@
  */
 
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 import {
   EXIT_INVALID,
   EXIT_OK,
@@ -116,6 +117,34 @@ function readPath(source, path) {
     cursor = cursor[key];
   }
   return cursor;
+}
+
+/**
+ * The one string form every value is rendered through, at every depth.
+ *
+ * Exported so it can be tested directly. Every array the manifest declares holds
+ * strings, so no lookup through the real topology reaches these functions with an
+ * object in hand — the divergence this now prevents (the array branch printing
+ * `${entry}` and producing `[object Object]` with exit 0) could only be reproduced
+ * through a fixture, and a rule that cannot be exercised is a rule that comes back.
+ */
+export function renderValue(value) {
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+/**
+ * A list, one element per line, every element through `renderValue`.
+ *
+ * A caller doing `for x in $(...)` needs one per line; a caller reading one name
+ * with `$(...)` would otherwise get the whole JSON array, which is the opposite
+ * of what it asked for.
+ *
+ * Exported for the same reason as `renderValue` — the array branch calls THIS,
+ * so a test of this function is a test of the branch rather than of a helper
+ * nothing uses.
+ */
+export function renderList(value) {
+  return value.map((entry) => `${renderValue(entry)}\n`).join("");
 }
 
 function main(argv) {
@@ -209,10 +238,11 @@ function main(argv) {
     return EXIT_OK;
   }
 
-  const text = typeof value === "string" ? value : JSON.stringify(value);
+  const text = renderValue(value);
   // The one assertion this tool exists to make structural. If a template ever
   // reaches this point, something upstream stopped substituting and a real
-  // Cloudflare call would be made against a name that has never existed.
+  // Cloudflare call would be made against a name that has never existed. Checked
+  // on the rendered text, so it also holds for an element inside an array.
   if (text.includes("{pr}")) {
     process.stderr.write(
       `refusing to print ${JSON.stringify(text)}: an unresolved {pr} template reached the end of resolution. This is a bug in the model, not a value to deploy.\n`,
@@ -220,18 +250,15 @@ function main(argv) {
     return EXIT_USAGE;
   }
 
-  // An array prints one element per line. A caller doing `for x in $(...)` needs
-  // that; a caller reading one name with `$(...)` would otherwise get the whole
-  // JSON array, which is the opposite of what it asked for. An EMPTY array is an
-  // error rather than silence: every path that iterates a list would otherwise
-  // do nothing at all and report success.
+  // An array prints one element per line. An EMPTY array is an error rather than
+  // silence: every path that iterates a list would otherwise do nothing at all
+  // and report success.
   //
-  // Each element goes through the SAME string-or-JSON normalisation the scalar
-  // branch above applies, rather than a template literal of its own. `${entry}`
-  // on an object prints `[object Object]` and exits 0 — a silent wrong answer,
-  // which is the whole failure mode this tool exists to remove. Every array
-  // reachable today is a string array, so this is latent; the divergence
-  // between the two branches is what makes it worth closing.
+  // Every element goes through the SAME `renderValue` the scalar branch uses, via
+  // `renderList`. `${entry}` on an object prints `[object Object]` and exits 0 — a
+  // silent wrong answer, which is the whole failure mode this tool exists to
+  // remove. Every array reachable today is a string array, so this is latent; the
+  // divergence between the two branches is what makes it worth closing.
   if (Array.isArray(value)) {
     if (value.length === 0) {
       process.stderr.write(
@@ -239,16 +266,20 @@ function main(argv) {
       );
       return EXIT_INVALID;
     }
-    const render = (entry) =>
-      typeof entry === "string" ? entry : JSON.stringify(entry);
-    process.stdout.write(
-      `${value.map((entry) => `${render(entry)}\n`).join("")}`,
-    );
+    process.stdout.write(renderList(value));
     return EXIT_OK;
   }
 
-  process.stdout.write(`${text}\n`);
+  process.stdout.write(`${renderValue(value)}\n`);
   return EXIT_OK;
 }
 
-process.exitCode = main(process.argv.slice(2));
+// Entrypoint check, the idiom `validate-topology.mjs` and `reconcile-infra.mjs`
+// already use. Without it this file cannot be imported at all: importing it runs
+// `main()` against the importing process's argv, so a test file that imported
+// `renderValue` set `process.exitCode` to 64 and the whole suite failed at the
+// FILE level with every individual test passing — which is a confusing way to
+// learn that a module has no entrypoint guard.
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  process.exitCode = main(process.argv.slice(2));
+}

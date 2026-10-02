@@ -33,6 +33,8 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { renderList, renderValue } from "./resolve-infra-name.mjs";
+
 const REPO_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -302,6 +304,49 @@ test("--field reaches a leaf, and against a scalar it is the whole value", () =>
     "ecoma-identity-pr-33",
     "--field against a non-object leaves the value alone rather than answering null",
   );
+});
+
+test("a non-string value renders as JSON, never as [object Object]", () => {
+  // The failure this tool exists to remove is a WRONG ANSWER WITH EXIT 0, and an
+  // object is how one happens: `${entry}` on an object prints `[object Object]`
+  // and the caller cannot tell that from a name. It was a silent wrong answer in
+  // the array branch, which re-derived the string form with a template literal
+  // while every other branch used the normalisation.
+  //
+  // Reachable only as a unit: every array the manifest declares holds strings,
+  // and this tool reads the topology from disk rather than taking one, so no
+  // lookup against the real tree can produce an object element. That is why the
+  // rule is now a named export the array branch and the scalar branch share,
+  // rather than a rule that cannot be exercised. A rule that cannot be tested is
+  // a rule that comes back.
+  assert.equal(renderValue("ecoma-identity-pr-33"), "ecoma-identity-pr-33");
+  assert.equal(renderValue({ name: "x" }), '{"name":"x"}');
+  assert.equal(renderValue(["a", "b"]), '["a","b"]');
+  assert.equal(renderValue(7), "7");
+  assert.equal(renderValue(true), "true");
+  for (const value of [{}, { a: { b: 1 } }, [], [{}]]) {
+    assert.ok(
+      !renderValue(value).includes("[object"),
+      `${JSON.stringify(value)} rendered as [object Object]`,
+    );
+  }
+
+  // And through the LIST path, which is where the divergence actually was: the
+  // array branch used to build its own string with `${entry}` while every other
+  // branch normalised. Testing `renderValue` alone does NOT catch that — the
+  // branch could stop calling it and every assertion below would still pass, which
+  // is what a first attempt at this test did. So the list renderer is tested too,
+  // and the array branch calls it rather than inlining the map.
+  assert.equal(renderList(["a", "b"]), "a\nb\n");
+  assert.equal(renderList([{ name: "x" }]), '{"name":"x"}\n');
+  assert.equal(renderList(["a", { n: 1 }, 2]), 'a\n{"n":1}\n2\n');
+  assert.equal(renderList([{}]), "{}\n");
+  for (const value of [[{}], [{ a: 1 }], [[{}]], [{}]]) {
+    assert.ok(
+      !renderList(value).includes("[object"),
+      `renderList(${JSON.stringify(value)}) printed [object Object]`,
+    );
+  }
 });
 
 test("an unknown environment and an unknown argument are usage errors", () => {
