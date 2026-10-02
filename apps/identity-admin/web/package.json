@@ -22,7 +22,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@ecoma-io/shared-i18n": "workspace:*",
+    "@ecoma-io/frontend-preferences": "workspace:*",
     "pinia": "^4.0.3",
     "vue": "^3.5.43",
     "vue-i18n": "^11.4.12",
