@@ -450,6 +450,12 @@ const WALK_SKIP_DIRS = new Set([
   ".turbo",
   ".wrangler",
   "coverage",
+  // Generated configuration, not source. `SOURCE_EXTENSIONS` includes `.json`,
+  // so without this entry the guard walks `.generated/**.json` into
+  // `checkMonorepoSelfContained` and `checkNoAuthBypass` and judges files this
+  // repository deliberately does not author. Same reasoning as the `.wrangler`
+  // entry above it.
+  ".generated",
 ]);
 
 /** §2 check 4: the two directories the rule is phrased over. */

@@ -221,6 +221,10 @@ export default tseslint.config(
       "**/.wrangler/**",
       "**/coverage/**",
       "**/.moon/**",
+      // Generated configuration, for the reason `check-architecture.mjs` skips
+      // it: the files are a projection of `infra-topology/`, not source, and
+      // linting them would judge code nobody wrote against rules nobody chose.
+      "**/.generated/**",
       // Agent worktrees are full checkouts of this repository inside it, so
       // walking them lints the same file N times and — worse — every nested
       // `tsconfig.json` becomes a candidate `tsconfigRootDir`, which makes

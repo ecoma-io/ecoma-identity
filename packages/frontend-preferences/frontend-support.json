@@ -1,0 +1,5 @@
+{
+  "supportedLocales": ["en", "vi"],
+  "defaultLocale": "en",
+  "defaultColorMode": "system"
+}

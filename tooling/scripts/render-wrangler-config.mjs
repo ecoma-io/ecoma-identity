@@ -67,6 +67,7 @@ import {
   EXIT_OK,
   EXIT_USAGE,
   TopologyError,
+  loadFrontendSupport,
   loadTopology,
   matchesGrammar,
   reportFailure,
@@ -306,6 +307,52 @@ function rustBuildCommand(shape, configDirAbs, root) {
 }
 
 /**
+ * Build the browser-safe configuration the three frontends read.
+ *
+ * IT IS A DIFFERENT FILE FROM THE DEPLOYMENT DESCRIPTOR, and the difference is
+ * not tidiness: the descriptor carries `account`, `zone` and the resolved
+ * resource names, none of which a browser bundle may read. A frontend that
+ * could read it would have a path to an account identifier and to every
+ * resource name in the platform, so the projection it gets is built by
+ * WHITELIST from the same resolved values rather than by deleting keys from the
+ * descriptor. A field added to the descriptor later cannot reach a browser
+ * bundle by being forgotten here — it is simply not on the list.
+ *
+ * What a frontend legitimately needs, and what this therefore carries:
+ *
+ *   - the cookie policy, which is a property of where the site is deployed;
+ *   - the site's own base URL, for canonicals and hreflang alternates;
+ *   - the locale and colour-mode vocabulary, which is a property of the
+ *     product rather than of the deployment.
+ *
+ * `baseUrl` is read from `resolved.hosts["home-web"]` and NOT from the
+ * deployable loop's `host`. That is not a stylistic choice: `buildConfig()`
+ * returns a per-deployable `host`, but the emitted file is per-ENVIRONMENT, so
+ * a `baseUrl` taken from the loop would be `https://admin.ecoma.io` in a file
+ * the public site reads to build its canonicals.
+ */
+function buildFrontendConfig({ topology, support, environment, pr }) {
+  const resolved = resolveEnvironment(topology, environment, { pr });
+  const host = resolved.hosts["home-web"];
+
+  return {
+    environment,
+    baseUrl: host === null ? null : `https://${host}`,
+    cookie: {
+      name: resolved.cookie_name,
+      // Null outside production, for the reason the descriptor states: a
+      // cookie scoped to the zone apex is readable by every other preview and
+      // by staging, which is the sharing the per-environment NAME prevents.
+      domain: environment === "production" ? topology.account.zone : null,
+      secure: environment !== "development",
+    },
+    supportedLocales: support.supportedLocales,
+    defaultLocale: support.defaultLocale,
+    defaultColorMode: support.defaultColorMode,
+  };
+}
+
+/**
  * Build one deployable's config for one environment.
  *
  * Exported so the tests can assert against a real object without writing to
@@ -314,6 +361,7 @@ function rustBuildCommand(shape, configDirAbs, root) {
  */
 export function buildConfig({
   topology,
+  support,
   environment,
   deployable,
   pr,
@@ -625,6 +673,7 @@ export function buildConfig({
     // no separate object model, because a config assembled two ways and emitted
     // one way is a config whose object model and its text can disagree.
     descriptor: deploymentDescriptor,
+    frontend: buildFrontendConfig({ topology, support, environment, pr }),
     lines: [
       `// GENERATED. Do not edit, and do not commit.`,
       `//`,
@@ -853,9 +902,13 @@ export function main(argv = process.argv.slice(2)) {
   }
 
   let topology;
+  let support;
   let descriptor = null;
   try {
     ({ topology } = loadTopology(REPO_ROOT));
+    // Loaded here rather than per environment: the vocabulary is a property of
+    // the product, not of a deployment, so one read serves every render.
+    ({ support } = loadFrontendSupport(REPO_ROOT));
     descriptor = resolveDescriptorArgument(options.stage, options.descriptor);
   } catch (error) {
     reportFailure("render-wrangler-config", error);
@@ -873,8 +926,13 @@ export function main(argv = process.argv.slice(2)) {
         deployable,
       );
       try {
-        const { lines, descriptor: deploymentDescriptor } = buildConfig({
+        const {
+          lines,
+          descriptor: deploymentDescriptor,
+          frontend,
+        } = buildConfig({
           topology,
+          support,
           environment,
           deployable,
           pr: options.pr,
@@ -886,6 +944,11 @@ export function main(argv = process.argv.slice(2)) {
         const descriptorFile = path.join(
           options.outDir,
           "deployment",
+          `${environment}.json`,
+        );
+        const frontendFile = path.join(
+          options.outDir,
+          "frontend",
           `${environment}.json`,
         );
         if (options.write || options.check) {
@@ -913,6 +976,57 @@ export function main(argv = process.argv.slice(2)) {
           } else {
             written.push(
               relativeGeneratedPath(options.outDir, environment, deployable),
+            );
+          }
+          // The frontend projection follows the same rule: one file per
+          // environment, written once, from the first config rendered for it.
+          if (
+            !written.some((w) => w.endsWith(`frontend/${environment}.json`))
+          ) {
+            fs.mkdirSync(path.dirname(frontendFile), { recursive: true });
+            const text = `${JSON.stringify(frontend, null, 2)}\n`;
+            fs.writeFileSync(frontendFile, text, "utf8");
+            // `config.json` is the COPY every frontend imports — one path for
+            // all three applications, so no app needs to know which environment
+            // it is building. The per-environment file above remains the record.
+            //
+            // Overwriting it is what makes `FRONTEND_ENVIRONMENT` a real input:
+            // a render for staging replaces a development copy rather than
+            // leaving the previous environment's cookie name in place. When a
+            // run renders several environments at once (`pnpm infra:render`),
+            // the LAST one wins — which is why every frontend build renders its
+            // OWN environment explicitly rather than relying on a default.
+            fs.writeFileSync(
+              path.join(options.outDir, "frontend", "config.json"),
+              text,
+              "utf8",
+            );
+            written.push(
+              `${GENERATED_ROOT}/frontend/${environment}.json`,
+              `${GENERATED_ROOT}/frontend/config.json`,
+            );
+            // The package's own copy of the vocabulary, so a test or a build
+            // with no generated config present still has ONE owner to read. It
+            // is GENERATED, and `check-frontend-config.mjs` REFUSES a commit
+            // when it has drifted from `infra-topology/frontend-support.json`:
+            // the duplication is produced, never maintained.
+            fs.writeFileSync(
+              path.join(
+                REPO_ROOT,
+                "packages",
+                "frontend-preferences",
+                "frontend-support.json",
+              ),
+              `${JSON.stringify(
+                {
+                  supportedLocales: support.supportedLocales,
+                  defaultLocale: support.defaultLocale,
+                  defaultColorMode: support.defaultColorMode,
+                },
+                null,
+                2,
+              )}\n`,
+              "utf8",
             );
           }
           continue;
