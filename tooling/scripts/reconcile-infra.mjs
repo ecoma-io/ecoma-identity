@@ -60,7 +60,6 @@ import { fileURLToPath } from "node:url";
 import {
   ENVIRONMENTS,
   EXIT_CANNOT_RUN,
-  EXIT_INVALID,
   EXIT_OK,
   EXIT_USAGE,
   TopologyError,
@@ -558,13 +557,23 @@ export async function reconcile(environment, outPath, { deployable, pr } = {}) {
   return { out: resolvedOut, descriptor };
 }
 
+/**
+ * `EXIT_USAGE` for every argument fault, including a malformed argv.
+ *
+ * These two branches used to answer `EXIT_INVALID` (1) while the argument checks
+ * below answered `EXIT_USAGE` (64) — one class of fault, two exit codes, so a
+ * caller could not branch on "the operator mistyped something". `EXIT_USAGE` is
+ * what `resolve-infra-name.mjs` and `preview-teardown.mjs` both already use, and
+ * 64 is `EX_USAGE` from `sysexits.h`: the class of the fault is the same however
+ * the argument was wrong, and the message says which.
+ */
 export async function main(argv = process.argv.slice(2)) {
   let options;
   try {
     options = parseArgs(argv);
   } catch (error) {
     process.stderr.write(`${error.message}\n\n${usage()}`);
-    return EXIT_INVALID;
+    return EXIT_USAGE;
   }
   if (options.help) {
     process.stdout.write(`${usage()}\n`);
@@ -572,7 +581,7 @@ export async function main(argv = process.argv.slice(2)) {
   }
   if (!options.environment) {
     process.stderr.write("--environment is required.\n\n" + usage());
-    return EXIT_INVALID;
+    return EXIT_USAGE;
   }
   // Validated against the model's own list, BEFORE the preview/fixed checks
   // below. Those two tests ask "is this the preview lane?" and "is this a fixed

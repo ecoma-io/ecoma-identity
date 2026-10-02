@@ -382,7 +382,12 @@ export function resolveEnvironment(topology, environment, { pr } = {}) {
     // that must iterate all of them reads them from here rather than keeping
     // its own list, which is how a fifth deployable would otherwise be deployed
     // and never migrated.
-    deployables: DEPLOYABLES,
+    // Copied, like `services` below: `DEPLOYABLES` is a module-level constant
+    // shared with `previewResources` and `validate-topology.mjs`, so handing out
+    // the array by reference lets one caller sort or push on it and corrupt the
+    // list every later resolution reads. The corruption would be invisible at the
+    // call site and would surface somewhere else entirely.
+    deployables: [...DEPLOYABLES],
     bindings: resolveBindings(topology),
     hosts,
     workers_dev: config.workers_dev,
