@@ -28,7 +28,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { reportFailure, TopologyError } from "./topology-model.mjs";
+import {
+  DEPLOYABLES,
+  loadTopology,
+  reportFailure,
+  resolveEnvironment,
+  TopologyError,
+} from "./topology-model.mjs";
 
 /** Capture what `reportFailure` writes to stderr, and return it as a string. */
 function captureStderr(fn) {
@@ -87,6 +93,50 @@ test("never prints a secret, because run logs get pasted into issues", () => {
   } finally {
     delete process.env.CLOUDFLARE_API_TOKEN;
   }
+});
+
+test("every declared binding slot survives resolution, including one added later", () => {
+  // The property `resolveBindings` used to fail. It spelled the slot names out by
+  // hand, so it was a SECOND view of `topology.bindings` that a new slot would
+  // silently not appear in — and nothing else caught it:
+  // `validate-topology.mjs`'s `exactKeys` checks the deployable KEYS, not each
+  // deployable's slots, and `render-wrangler-config.mjs` reads the manifest
+  // directly, so it saw a new slot this function dropped. The failure is a
+  // `resolve-infra-name.mjs --ask bindings.<deployable>.<newslot>` answering "is
+  // not declared" and exiting 0 — a false negative from the tool the deploy
+  // steps treat as authoritative about this file.
+  const { topology } = loadTopology();
+  const resolved = resolveEnvironment(topology, "staging");
+
+  for (const deployable of DEPLOYABLES) {
+    assert.deepEqual(
+      resolved.bindings[deployable],
+      topology.bindings[deployable] ?? {},
+      `${deployable}: resolution must carry every slot the manifest declares`,
+    );
+  }
+});
+
+test("a binding slot nobody enumerated appears in resolution the same day", () => {
+  // The same property driven through an INVENTED slot, because the six names in
+  // the old table all happen to be present — so "this assertion passes" and "the
+  // code is correct" are different claims. Only the second one protects the next
+  // slot added, and it is the second one this test is for.
+  const { topology } = loadTopology();
+  const withNewSlot = structuredClone(topology);
+  withNewSlot.bindings.identity.hyperdrive = "IDENTITY_HYPERDRIVE";
+
+  const resolved = resolveEnvironment(withNewSlot, "staging");
+  assert.equal(
+    resolved.bindings.identity.hyperdrive,
+    "IDENTITY_HYPERDRIVE",
+    "a slot no code mentions must still reach the resolved environment",
+  );
+  assert.deepEqual(
+    resolved.bindings.identity,
+    withNewSlot.bindings.identity,
+    "resolution must be the declared object, not a filtered copy of it",
+  );
 });
 
 test("survives a thrown non-Error instead of printing 'undefined'", () => {

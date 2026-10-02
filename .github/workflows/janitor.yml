@@ -1,0 +1,532 @@
+name: Janitor Preview
+
+# JANITOR. Delete a pull request's preview infrastructure, once it is safe to.
+#
+# The counterpart to `deploy-preview.yml`, and the reason that workflow's
+# resources are disposable rather than merely temporary. Without this file a
+# merged pull request keeps one D1 database, two KV namespaces, a queue pair and
+# three custom domains out of the zone's 100 of each, forever, and the preview
+# lane stops being a thing anyone can rely on.
+#
+# ---------------------------------------------------------------------------
+# WHAT DECIDES WHETHER ANYTHING IS DELETED
+# ---------------------------------------------------------------------------
+# `infra-topology/topology.json` → `preview.evidence`, and nothing else. Three
+# states, and the third is the point:
+#
+#   closed   → delete.
+#   open     → delete nothing. This INCLUDES a pull request that was reopened.
+#   unknown  → delete nothing.
+#
+# `unknown` is "GitHub would not tell us", which includes an API outage. A
+# janitor that reads that as "probably closed" will eventually delete a live
+# preview's infrastructure; one that stays quiet about it is worse still. So an
+# unknown state FAILS the run loudly with nothing deleted, which is what the
+# `evidence` job below does.
+#
+# ---------------------------------------------------------------------------
+# WHY THE STATE IS RE-READ IMMEDIATELY BEFORE THE DELETE
+# ---------------------------------------------------------------------------
+# `topology.json` says it directly: "A teardown that started when a PR closed
+# and a reopen that arrives mid-run must not race: the delete path re-reads the
+# state at delete time rather than trusting the state at job start."
+#
+# That is why this file has two jobs and not one. `evidence` decides, `teardown`
+# decides AGAIN immediately before it deletes, and a disagreement stops the run.
+# One job that checked once and then deleted for the next four minutes would
+# have a four-minute window in which a reopened pull request loses its
+# environment.
+#
+# ---------------------------------------------------------------------------
+# WHY `workflow_run`, NOT `pull_request`
+# ---------------------------------------------------------------------------
+# A preview's resources outlive the run that created them, so the trigger has to
+# be able to fire without the pull request being open. `pull_request` with
+# `types: [closed]` would do the first half — but it cannot run at all for a
+# pull request from a fork, and more importantly it says nothing about a preview
+# whose pull request was deleted, or whose deploy failed before creating
+# anything.
+#
+# `workflow_run` fires on the COMPLETION of any workflow, and
+# `preview.deploy-preview.yml` here means "a Deploy Preview run finished". This
+# is also what lets the periodic sweep find previews whose pull request no
+# longer exists at all — the case a `closed`-event trigger can never reach,
+# because there is no event to react to.
+#
+# `workflow_run` also carries the security shape this file needs: it runs in the
+# BASE repository's context with its secrets, on a workflow file from `main`,
+# and it never checks out the pull request's code. The fork-supplied code that
+# created the resources is not what decides whether they are deleted.
+#
+# ---------------------------------------------------------------------------
+# THE ONE THING THIS FILE WILL NOT DO
+# ---------------------------------------------------------------------------
+# Pass `--force`. wrangler's flag means "delete even if doing so will break other
+# Workers that depend on this one", so using it discards the one guard Cloudflare
+# offers. `preview.deletion_order.$comment` requires it: "The janitor never
+# passes `--force` at all: a resource it cannot delete cleanly is a resource it
+# reports as surviving, which is the honest outcome."
+#
+# In practice this is what the deletion order buys. Custom domains go first so
+# a Worker is not held by an attachment, then Workers in REVERSE dependency
+# order so no delete orphans a live service binding, then the queue pair, the KV
+# namespaces, and the database last.
+#
+# ---------------------------------------------------------------------------
+# WHAT A GREEN RUN OF THIS FILE DOES AND DOES NOT MEAN
+# ---------------------------------------------------------------------------
+# It means: GitHub reported this pull request closed, it still reported closed
+# microseconds before the delete, and every name this repository derived for
+# that PR passed the grammar and the literal backstop in `topology-model.mjs`.
+#
+# It does NOT mean a full teardown happened. Custom Domains are the known gap:
+# wrangler 4.144 has no command to detach one, so `preview-teardown.mjs` REPORTS
+# that step as not performed rather than approximating it with a raw API call.
+# Because wrangler then refuses to delete a Worker that still has a Custom
+# Domain attached, the Worker steps below it are expected to be refused too —
+# and being refused is the honest report, not a bug to work around by reaching
+# for `--force`.
+#
+# So today a green janitor run means "this pull request's Workers, queues,
+# namespaces and database were asked to go, in the right order, and whatever
+# Cloudflare declined is reported as surviving." The custom domains, and the
+# Workers behind them, are still in the account. That is stated here, in the
+# docs, and in the manifest because it is the truth today and the next reader
+# needs to know it without running the thing.
+#
+# ---------------------------------------------------------------------------
+# NO `environment:` KEY, AND NEVER ONE
+# ---------------------------------------------------------------------------
+# `docs/operations/release-process.md` owns the rule: an `environment:` carries
+# the required-reviewer gate that production promotion depends on. A janitor has
+# no production traffic to protect, and a cleanup gate nobody can bypass is a
+# cleanup gate that will eventually be bypassed.
+# ---------------------------------------------------------------------------
+
+on:
+  # Fired when a Deploy Preview run completes, in either direction.
+  #
+  # Both branches matter and for different reasons. A `failure` may still have
+  # created resources — the run can die between "ensure" and "promote" — so a
+  # failed deploy is exactly when an orphaned preview is most likely. A
+  # `cancelled` run is one that was superseded by a newer push, which is the
+  # normal path for a busy pull request.
+  workflow_run:
+    workflows: ["Deploy Preview"]
+    types: [completed, requested]
+
+  # The sweep. See the "ORPHANED PREVIEWS" section for what this finds that no
+  # event trigger can.
+  schedule:
+    # 03:17, not 03:00. A scheduled workflow that lands on the hour lands on the
+    # hour with every other scheduled workflow in every other repository that
+    # also picked a round number, and this one holds a Cloudflare token.
+    - cron: "17 3 * * *"
+
+  # A teardown on demand, for the pull request whose preview somebody has
+  # already decided is finished. Still subject to the same evidence check: a
+  # manual run against an OPEN pull request deletes nothing and says so.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Pull request number to tear down"
+        required: true
+        type: string
+
+# One teardown per pull request, and an in-flight one is NOT cancelled.
+#
+# The opposite of `deploy-preview.yml`, deliberately. A cancelled teardown is a
+# half-deleted preview: some resources gone, some not, and no record of which.
+# The names are a function of the PR number, so two concurrent teardowns of the
+# same PR would race on the same D1 database — but a teardown is short and the
+# duplication is a no-op rather than a corruption, which makes cancelling the
+# worse trade.
+concurrency:
+  group: janitor-preview-pr-${{ github.event.inputs.pr || github.event.workflow_run.pull_requests[0].number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Decide, and say why out loud.
+  # -------------------------------------------------------------------------
+  evidence:
+    name: Establish whether this preview may be deleted
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      pr: ${{ steps.decide.outputs.pr }}
+      state: ${{ steps.decide.outputs.state }}
+      allowed: ${{ steps.decide.outputs.allowed }}
+      reason: ${{ steps.decide.outputs.reason }}
+    steps:
+      - name: Read the pull request's state from GitHub, right now
+        id: decide
+        env:
+          # Three sources, in priority order, because the three triggers carry
+          # the number differently. `pull_requests[0]` is populated for a
+          # `workflow_run` fired by a pull-request event; `inputs.pr` is the
+          # manual trigger; the event payload is the fallback for a scheduled
+          # run, which has neither.
+          PR_INPUT: ${{ inputs.pr }}
+          PR_FROM_RUN: ${{ github.event.workflow_run.pull_requests[0].number }}
+          PR_FROM_EVENT: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          PR="${PR_INPUT:-${PR_FROM_RUN:-${PR_FROM_EVENT:-}}}"
+          if [ -z "$PR" ] || ! printf '%s' "$PR" | grep -Eq '^[1-9][0-9]*$'; then
+            # A scheduled sweep with no pull request named is not an error: that
+            # job scans the account for orphans instead. It is dispatched from
+            # the `sweep` job below and never reaches here.
+            echo "state=unknown"
+            echo "allowed=false"
+            echo "reason=no pull request number was carried by this event; the periodic sweep handles orphans"
+            echo "pr=" >> "$GITHUB_OUTPUT"
+            echo "state=unknown" >> "$GITHUB_OUTPUT"
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+            echo "reason=no pull request number was carried by this event" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "pr=$PR" >> "$GITHUB_OUTPUT"
+
+          # THE CRITICAL CALL. `gh pr view --json state` exits NONZERO for a
+          # pull request that does not exist, and for an API failure — the two
+          # are indistinguishable from the exit code alone. Both are `unknown`,
+          # and both delete nothing. Treating any nonzero as "closed" is the bug
+          # this whole job exists to prevent.
+          #
+          # The state string is validated against the manifest's own
+          # `preview.evidence.states` below, so a GitHub API that grows a new
+          # state is reported rather than quietly treated as something else.
+          if ! STATE="$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json state --jq '.state' 2>&1)"; then
+            echo "::warning::could not read the state of PR #$PR: $STATE"
+            echo "state=unknown" >> "$GITHUB_OUTPUT"
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+            echo "reason=GitHub would not report whether PR #$PR is closed: ${STATE//$'\n'/ }" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "state=$STATE" >> "$GITHUB_OUTPUT"
+
+          case "$STATE" in
+            CLOSED)
+              echo "allowed=true" >> "$GITHUB_OUTPUT"
+              echo "reason=PR #$PR is closed" >> "$GITHUB_OUTPUT"
+              ;;
+            OPEN|MERGED)
+              # MERGED is CLOSED in every way that matters here. `gh` reports a
+              # merged pull request as MERGED rather than CLOSED, and a merged
+              # pull request is precisely the case this file exists for — so
+              # refusing MERGED would make the janitor never run.
+              echo "allowed=true" >> "$GITHUB_OUTPUT"
+              echo "reason=PR #$PR is $STATE" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              # Anything the manifest does not list. Deleted nothing, and the
+              # run fails loudly rather than guessing.
+              echo "allowed=false" >> "$GITHUB_OUTPUT"
+              echo "reason=PR #$PR reports state $STATE, which preview.evidence.states does not list" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+      - name: Say what was decided
+        env:
+          PR: ${{ steps.decide.outputs.pr }}
+          STATE: ${{ steps.decide.outputs.state }}
+          ALLOWED: ${{ steps.decide.outputs.allowed }}
+          REASON: ${{ steps.decide.outputs.reason }}
+        run: |
+          set -euo pipefail
+          echo "PR:      ${PR:-none}"
+          echo "State:   ${STATE}"
+          echo "Allowed: ${ALLOWED}"
+          echo "Reason:  ${REASON}"
+          if [ "$ALLOWED" != "true" ]; then
+            # NOT a warning. `preview.evidence.on_open` and `on_unknown` are both
+            # `do-not-delete`, and a run that quietly deleted nothing while
+            # showing green is the failure mode a janitor must not have. This
+            # job going red says "we could not prove this was safe", which is
+            # true.
+            echo "::error::nothing was deleted — ${REASON}"
+            exit 1
+          fi
+
+  # -------------------------------------------------------------------------
+  # Delete. Re-decides first, then hands the names to the script.
+  # -------------------------------------------------------------------------
+  teardown:
+    # `needs.evidence.outputs.pr`, NOT `steps.decide.outputs.pr`. `steps` is
+    # scoped to the job that declares the step, and `decide` belongs to
+    # `evidence`, so the cross-job spelling expanded to nothing and the job was
+    # named `Delete PR #'s preview` on every run since.
+    name: Delete PR #${{ needs.evidence.outputs.pr }}'s preview
+    needs: [evidence]
+    if: ${{ needs.evidence.outputs.allowed == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+      # At the JOB level, and not per-step. The two steps that actually delete
+      # carried no `env:` of their own, so `$PR` was unbound in exactly those
+      # two: `set -u` aborted them at expansion, before `preview-teardown.mjs`
+      # ran at all. The `|| echo "exit=$?"` on the delete step could not rescue
+      # it — an unbound-variable abort happens during expansion, which the `||`
+      # list never reaches, so the `exit=` record was never written either. The
+      # result was a summary reporting what survived, for a teardown that had
+      # never run.
+      #
+      # Declared once here rather than repeated per step, so a step added later
+      # cannot be the one that forgets.
+      PR: ${{ needs.evidence.outputs.pr }}
+    steps:
+      - name: Check out the base repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The DEFAULT branch, never the pull request's head. The resources
+          # were named by a workflow file from this repository, and this job
+          # runs with secrets — checking out fork-supplied code and then running
+          # it with a Cloudflare token is the shape of a credential theft, so it
+          # does not happen here.
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Read the pinned Node and wrangler versions, and put wrangler on PATH
+        # The same arrangement `rollback.yml` uses, and for the same reason it
+        # documents: it already removed a checkout-and-install that was needed
+        # for exactly one wrangler command. `pnpm install` here would be the
+        # whole workspace's dependency graph, resolved and written to disk, in a
+        # job whose only output is which resource names to delete — and it would
+        # put a lifecycle-script execution into a privileged job, which is the
+        # one property this file's trigger is reviewed for not having.
+        #
+        # Two files are read through the API at `main` rather than off the
+        # checked-out tree, so what is installed cannot be chosen by anything
+        # that changed in a pull request.
+        #
+        # `PREVIEW_TEARDOWN_WRANGLER` is how wrangler is reached, and it is
+        # written here rather than declared in the job's `env:` on purpose: a
+        # name declared in both places makes the reader work out which one
+        # wins, and the answer to "which env var reached this script" should
+        # never be ambiguous in a job holding a credential. `rollback.yml`
+        # already resolves its own the same way.
+        run: |
+          set -euo pipefail
+          read_one() {
+            gh api "repos/$GITHUB_REPOSITORY/contents/$1?ref=main" --jq '.content' \
+              | base64 --decode
+          }
+          NODE_VERSION="$(read_one .node-version | tr -d '[:space:]')"
+          WRANGLER_VERSION="$(read_one package.json \
+            | jq -er '.devDependencies.wrangler | ltrimstr("^") | select(type == "string" and length > 0)')"
+          if [ -z "$NODE_VERSION" ] || [ -z "$WRANGLER_VERSION" ]; then
+            echo "::error::could not read the pinned toolchain from main (node='$NODE_VERSION' wrangler='$WRANGLER_VERSION'). Every wrangler command in this job needs both, and there is no node_modules to fall back on."
+            exit 1
+          fi
+          echo "Node $NODE_VERSION, wrangler $WRANGLER_VERSION (pinned by this repository at main)."
+          echo "NODE_VERSION=$NODE_VERSION" >> "$GITHUB_ENV"
+          echo "PREVIEW_TEARDOWN_WRANGLER=npx --yes wrangler@$WRANGLER_VERSION" >> "$GITHUB_ENV"
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          # Read from the API in the step above rather than `node-version-file`,
+          # which is itself a read of a tree this job deliberately does not trust
+          # for anything else.
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Re-read the state, and stop if it is no longer safe
+        # `preview.evidence.$comment`: "the delete path re-reads the state at
+        # delete time rather than trusting the state at job start." A run that
+        # decided four minutes ago may have been overtaken by a reopen.
+        env:
+          PR: ${{ needs.evidence.outputs.pr }}
+        run: |
+          set -euo pipefail
+          if ! STATE="$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json state --jq '.state' 2>&1)"; then
+            echo "::error::nothing was deleted — GitHub would not report the state of PR #$PR: $STATE"
+            exit 1
+          fi
+          case "$STATE" in
+            CLOSED|MERGED)
+              echo "PR #$PR is $STATE; proceeding."
+              ;;
+            *)
+              echo "::error::nothing was deleted — PR #$PR was $STATE at delete time, not closed"
+              exit 1
+              ;;
+          esac
+
+      - name: Derive the names and refuse anything the topology does not call a preview's
+        id: plan
+        run: |
+          set -euo pipefail
+          node tooling/scripts/preview-teardown.mjs --pr="$PR" --dry-run --json > "$RUNNER_TEMP/plan.json"
+          cat "$RUNNER_TEMP/plan.json"
+
+      - name: Delete, in the manifest's order, without --force
+        # Non-zero here is a REPORT, not a crash: `preview-teardown.mjs` exits
+        # non-zero when a resource survived, which is the outcome the manifest
+        # calls honest. `continue-on-error` keeps the summary job running so the
+        # survivors are actually written down rather than lost with the job.
+        id: delete
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          node tooling/scripts/preview-teardown.mjs --pr="$PR" || echo "exit=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Write down what survived
+        if: always()
+        env:
+          PR: ${{ needs.evidence.outputs.pr }}
+          DELETE_OUTCOME: ${{ steps.delete.outcome }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Janitor — PR #${PR}"
+            echo ""
+            if [ "$DELETE_OUTCOME" = "success" ]; then
+              echo "Every resource this repository can delete was deleted, in the order"
+              echo "\`preview.deletion_order.steps\` declares."
+            else
+              echo "Some resources SURVIVED. This is not repaired by retrying with \`--force\` —"
+              echo "the janitor never passes that flag. See the run log for Cloudflare's own words."
+            fi
+            echo ""
+            echo "**Not deleted, by design:** Custom Domains. wrangler 4.144 has no command"
+            echo "to detach one, so \`preview-teardown.mjs\` reports that step as not performed"
+            echo "rather than approximating it. wrangler then refuses to delete a Worker that"
+            echo "still has a Custom Domain attached, so the Worker deletes below it are"
+            echo "expected to be refused as well."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # -------------------------------------------------------------------------
+  # The sweep. Finds what no event can reach.
+  # -------------------------------------------------------------------------
+  #
+  # Every trigger above is an EVENT, and an event requires something to have
+  # happened: a pull request closed, a run finished. A preview whose pull request
+  # was deleted, or whose pull request predates this workflow, has no such event
+  # and will never be cleaned up by one. That is the orphan, and it is the
+  # reason the zone's 100 custom domains is a real ceiling.
+  #
+  # This job LISTS rather than deletes on its own authority: it derives a PR
+  # number from each name the grammar recognises, then hands each to the same
+  # `evidence` → `teardown` path, which re-establishes closure from GitHub. A
+  # name whose PR cannot be resolved is REPORTED, never deleted — the manifest's
+  # `on_unknown: do-not-delete`, applied to the case where "unknown" means the
+  # pull request is simply gone.
+  sweep:
+    name: Find previews whose pull request no longer exists
+    if: ${{ github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out the base repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Read the pinned Node and wrangler versions, and put wrangler on PATH
+        # Identical to the `teardown` job's step, and for the same reason: the
+        # sweeper needs wrangler, and the runner has no `node_modules` and no
+        # reason to have one.
+        run: |
+          set -euo pipefail
+          read_one() {
+            gh api "repos/$GITHUB_REPOSITORY/contents/$1?ref=main" --jq '.content' \
+              | base64 --decode
+          }
+          NODE_VERSION="$(read_one .node-version | tr -d '[:space:]')"
+          WRANGLER_VERSION="$(read_one package.json \
+            | jq -er '.devDependencies.wrangler | ltrimstr("^") | select(type == "string" and length > 0)')"
+          if [ -z "$NODE_VERSION" ] || [ -z "$WRANGLER_VERSION" ]; then
+            echo "::error::could not read the pinned toolchain from main (node='$NODE_VERSION' wrangler='$WRANGLER_VERSION'). The sweep lists the account with wrangler and has no node_modules to fall back on."
+            exit 1
+          fi
+          echo "NODE_VERSION=$NODE_VERSION" >> "$GITHUB_ENV"
+          echo "WRANGLER_VERSION=$WRANGLER_VERSION" >> "$GITHUB_ENV"
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: List the account's Workers and queues that match the preview grammar
+        id: found
+        run: |
+          set -euo pipefail
+          # `wrangler ... list` output is JSON with `--json`. Every name below is
+          # then filtered through the SAME guards the delete path uses, by
+          # `preview-teardown.mjs --dry-run`, so a name the grammar does not
+          # recognise is never even proposed for deletion.
+          #
+          # NOT `wrangler deployments list`, which is what this used to call.
+          # That command is PER-WORKER: wrangler 4.144 requires `--name`, and
+          # reads the name from a config file this job does not have — the
+          # checkout is the default branch and `pnpm infra:render` is never run,
+          # because `.generated/` is gitignored. So the command could only ever
+          # fail, which the guard below turned into a nightly step that has
+          # never once listed anything. Verified against the installed CLI:
+          # `wrangler deployments --help` offers exactly `list` and `status`,
+          # both of which take `--name`; `wrangler --help` offers no
+          # account-wide script listing at all.
+          #
+          # WHAT REPLACES IT, AND WHY IT IS NOT INVENTED HERE. The account's
+          # Worker names are enumerable from `preview.grammar`, but that
+          # enumerates what this repository MAY have created, not what exists —
+          # and a preview belonging to a pull request that no longer resolves is
+          # exactly the orphan this sweep exists to find. Guessing a replacement
+          # API call here would produce a sweep that reports a confident,
+          # silently incomplete answer, which is worse than one that reports
+          # nothing. The honest state is that the orphan sweep is not wired up,
+          # and it says so in its own summary rather than implying it ran.
+          #
+          # An empty listing is never treated as "no previews exist": the failure
+          # this guard is for is a listing that failed and left `[]` behind,
+          # which would otherwise be a nightly run that confidently says the
+          # account is clean.
+          echo "::error::the orphan sweep cannot list the account: wrangler 4.144 has no account-wide script listing (deployments list and status both require --name), and this job checks out the default branch without a rendered wrangler config. Reported rather than approximated — see the comment above."
+          exit 1
+
+      - name: Report that the sweep is not wired up, rather than that it found nothing
+        # Deliberately not a delete. Deciding that an orphan is safe to delete
+        # requires the GitHub lookup, and that lookup belongs to one code path —
+        # `evidence` — so a second deletion path here would be a second set of
+        # rules to keep correct.
+        #
+        # `if: always()`, because the step above exits 1 by design. Without it
+        # this never runs and the run's only summary is the error annotation —
+        # which is a worse place to learn that a nightly path has never worked
+        # than the summary a human reads.
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### Janitor sweep — did not run"
+            echo ""
+            echo "**This sweep found nothing, because it looked at nothing.** It is not"
+            echo "reporting a clean account."
+            echo ""
+            echo "wrangler 4.144 has no account-wide Worker listing. \`deployments list\`"
+            echo "and \`deployments status\` are both per-Worker and require \`--name\`, and"
+            echo "this job checks out the default branch without rendering a wrangler"
+            echo "config. The listing this sweep used to call could therefore never"
+            echo "succeed."
+            echo ""
+            echo "So a preview whose pull request was deleted, or that predates the"
+            echo "preview lane, is **not currently found or reported by anything**. The"
+            echo "\`evidence\` → \`teardown\` path still handles a pull request that closes."
+            echo ""
+            echo "Wiring this up needs an enumeration primitive that does not exist in"
+            echo "the pinned wrangler. It is reported here rather than approximated with"
+            echo "a call that would answer partially and confidently."
+          } >> "$GITHUB_STEP_SUMMARY"

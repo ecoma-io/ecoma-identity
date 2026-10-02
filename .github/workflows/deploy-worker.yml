@@ -135,6 +135,24 @@ on:
         required: true
         type: string
 
+      # The pull request number, for the preview lane ONLY.
+      #
+      # Every preview resource name is a FUNCTION of it — `identity-pr-123`,
+      # `ecoma-identity-pr-123`, `pr123-identity.ecoma.io` — so it reaches the
+      # reconciler and the renderer as one value both derive names from. Passed
+      # as an input rather than read from an event payload because a preview is
+      # dispatched by hand, from a ref, and the ref alone does not name a PR.
+      #
+      # Default is EMPTY STRING, not 0: an absent number must be an absent
+      # number. `resolveEnvironment` refuses `pr` on a fixed environment and
+      # `validatePrNumber` refuses `0`, so a staging caller that never sets this
+      # gets exactly today's behaviour rather than a preview name.
+      pr:
+        description: "Pull request number. Required for the preview environment, ignored elsewhere."
+        required: false
+        default: ""
+        type: string
+
       # The git tag that triggered this run, e.g. `identity-v0.1.0`. This is
       # the version's identity: it becomes the Cloudflare Version tag, so
       # "which version had tag X" is a lookup rather than an inference, and a
@@ -273,6 +291,52 @@ on:
         default: ""
         type: string
 
+      # THE IDENTITY WORKERS' HOST, BY THE SAME RULE `home-smoke-base-url`
+      # FOLLOWS FOR home-web — AND FOR THE SAME REASON IT IS A NEW INPUT.
+      #
+      # Without it, the Identity Workers' host comes from the repository
+      # variable `SMOKE_PROBE_BASE_URL`, which is one fixed value per account.
+      # That is correct for staging and production, whose hosts do not vary. It
+      # is wrong for preview, whose host is `pr{N}-identity.ecoma.io` — a
+      # function of the pull request number, and therefore not expressible as a
+      # repository variable. A preview deploy left on that variable would probe
+      # STAGING while claiming to test the preview: it would report on a
+      # deployment it did not touch, which is the exact failure the home-web
+      # split exists to prevent, in the lane that has the most to prove.
+      #
+      # Empty for home-web, whose host arrives through `home-smoke-base-url`.
+      # It is not a fallback in either direction: whichever value belongs to
+      # this deployable is the one that is read, and an absent one exits
+      # non-zero below rather than borrowing the other's.
+      smoke-host:
+        description: "Public base URL of the Identity Worker deployment in this lane; required for identity, identity-admin and identity-jobs, ignored for home-web. Defaults to the repository variable SMOKE_PROBE_BASE_URL when empty."
+        required: false
+        default: ""
+        type: string
+      # WHY THIS EXISTS RATHER THAN INFERRED FROM `smoke-host`. `smoke-host` has a
+      # `default: ""`, so "the caller did not pass a host" and "the caller passed
+      # an empty one" are the SAME value by the time any expression sees them —
+      # `inputs.smoke-host != ''` is false for both. And those two mean opposite
+      # things: the first falls back to `vars.SMOKE_PROBE_BASE_URL`, the second
+      # refuses. `deploy-preview.yml` needs the second for `identity-jobs`, which
+      # is `public: false` with no route on the zone.
+      #
+      # So the distinction is stated by the caller instead of guessed by the
+      # callee. Without it, an empty `smoke-host` was silently replaced by the
+      # repository variable and the `-z "$SMOKE_HOST"` guard below could never
+      # fire — a preview `identity-jobs` would have probed the FIXED Identity
+      # host and reported that result as its own.
+      smoke-host-is-absent-by-design:
+        description: "This deployable has no public host and must not be probed. Fails the health gate loudly rather than probing some other deployable's host. Use when the worker is internal or has no route on the zone."
+        required: false
+        default: "false"
+        type: boolean
+      smoke-gated-elsewhere:
+        description: "This deployable's real health gate lives in another job, not in an HTTP probe, so the probe job has nothing to do. Skips it as SKIPPED rather than failing it — which promoted_to_final would otherwise read as a failed deploy. Use only alongside smoke-host-is-absent-by-design, and only when some other job in this call actually gates the deployment."
+        required: false
+        default: "false"
+        type: boolean
+
     secrets:
       # THE ONLY Cloudflare credential this repository holds. One account, one
       # token; environment isolation comes from resource naming, the topology
@@ -372,6 +436,15 @@ jobs:
       # name, carrying no token, id or secret.
       FRONTEND_ENVIRONMENT: ${{ inputs.environment }}
       RELEASE_TAG: ${{ inputs.tag }}
+      # The pull request this lane is for, empty for the fixed environments. It
+      # is passed to `resolve-infra-name.mjs` for every name lookup rather than
+      # for `renderTemplate` directly, because every preview resource name is a
+      # function of this number and a lookup that forgets it has no correct
+      # answer — only a `{pr}` template, which is a real-looking name for a real
+      # account. `${PR_NUMBER:+--pr "$PR_NUMBER"}` expands to nothing at all on
+      # staging and production, which is exactly right: those names are fixed and
+      # `resolve-infra-name.mjs` refuses `--pr` for them.
+      PR_NUMBER: ${{ inputs.pr }}
       # wrangler reads the token from the environment. Passed through `env`
       # rather than a `--var` so the token never appears in a command line, in
       # a process listing, or in a log line.
@@ -392,6 +465,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Full history, for the same reason `ci.yml`'s build job sets it and
+          # states it: moon resolves a merge base against `main` to decide which
+          # tasks are affected, and a shallow checkout has no `main` ref to
+          # resolve — the job dies with `fatal: ambiguous argument 'main'`
+          # before it builds anything, which reads as a checkout problem rather
+          # than the history requirement it is.
+          #
+          # Staging and production did not need this: they run AFTER a merge, so
+          # the checked-out ref already contains `main`'s history. The preview
+          # lane is the first caller to run BEFORE the merge, on a
+          # `refs/pull/N/merge`, and it is the shallow one. This is the cost of
+          # the lane existing, not a property of the checkout.
+          fetch-depth: 0
 
       # ---- the Cloudflare account id -------------------------------------
       # Read from `infra-topology/topology.json`, which pins it, and written to
@@ -575,6 +661,10 @@ jobs:
           INJECTIONS_JSON: ${{ inputs.injections }}
           ENVIRONMENT: ${{ inputs.environment }}
           DEPLOYABLE: ${{ inputs.worker }}
+          # The preview lane's pull request number. Empty for every fixed
+          # environment, which is what keeps the three commands below byte for
+          # byte the commands staging runs today.
+          PR: ${{ inputs.pr }}
         run: |
           set -euo pipefail
           # There is no tracked config to copy. `pnpm infra:render` projects
@@ -602,13 +692,29 @@ jobs:
           #
           # `--stage offline` is what every staging deploy used, which is why
           # none of them ever created a version.
+          # PR_ARGS is EMPTY for every fixed environment, and an empty argument
+          # list is not the same as an empty `--pr`: `--pr ""` is a PR number of
+          # the empty string, which `validatePrNumber` correctly refuses. So the
+          # flag is added by the shell only when a number is actually present,
+          # and the fixed-environment command line stays exactly what it was.
+          # `${PR_ARGS[@]+...}` rather than a bare `"${PR_ARGS[@]}"`: under
+          # `set -u` an empty array is an unset variable on bash older than 4.4,
+          # and this file runs on whichever bash the runner image ships. The
+          # `+` form expands to nothing for an empty array on every version.
+          PR_ARGS=()
+          if [ -n "$PR" ]; then
+            PR_ARGS=(--pr "$PR")
+          fi
+
           node tooling/scripts/reconcile-infra.mjs \
             --environment "$ENVIRONMENT" \
+            ${PR_ARGS[@]+"${PR_ARGS[@]}"} \
             --out "$RUNNER_TEMP/descriptor.json"
           node tooling/scripts/render-wrangler-config.mjs \
             --stage resolve \
             --descriptor "$RUNNER_TEMP/descriptor.json" \
             --environment "$ENVIRONMENT" \
+            ${PR_ARGS[@]+"${PR_ARGS[@]}"} \
             --deployable "$DEPLOYABLE" \
             --out-dir ".generated" \
             --write
@@ -705,17 +811,48 @@ jobs:
           # means a JSONC reader in a workflow step, which is a second
           # implementation of a format `render-wrangler-config.mjs` already owns.
           #
-          # Topology is plain JSON, it is the file the renderer projects FROM, and
-          # it declares both halves of what this step needs: the binding slot
-          # name (`bindings.<deployable>.d1`) and the resource name
-          # (`environments.<env>.resources.<deployable>.d1.name`). Reading both
-          # from one jq call means they cannot be from different places, and a
-          # deployable that declares no D1 is answered by the same read.
-          read -r D1_BINDING D1_NAME < <(jq -r \
-            --arg env "$ENVIRONMENT" --arg w "$WORKER" '
-              [ (.bindings[$w].d1 // ""),
-                (.environments[$env].resources[$w].d1.name // "") ]
-              | @tsv' infra-topology/topology.json)
+          # THEY COME FROM `resolve-infra-name.mjs` NOW, NOT FROM `jq`, AND THE
+          # REASON IS THE FIRST PREVIEW. `jq` read the manifest RAW, so on a
+          # preview it produced the template `ecoma-identity-pr-{pr}` — while
+          # wrangler had just been handed a config naming `ecoma-identity-pr-33`.
+          # A remote, forward-only migration would have been applied to a
+          # database that does not exist, under a name that has never existed,
+          # in a real account. `{pr}` substitution belongs to exactly one owner
+          # (`renderTemplate`, via `resolveEnvironment`), and asking a shell
+          # question of the manifest is how that rule got skipped. The walk that
+          # checked ownership had the same defect twice over: it crashed with
+          # `Cannot index array with string "d1"` on
+          # `environments.preview.resources`, whose `$comment` is an ARRAY while
+          # the three fixed environments carry no such key — so the bug sat in a
+          # required step of every deploy until the first preview arrived.
+          #
+          # The `if !` IS LOAD-BEARING. This looks up NAMES, and an empty answer
+          # is not an error here: `identity-admin` and `home-web` bind no D1, and
+          # "this deployable has no database" has to arrive as an empty string for
+          # the branch below. So a resolver FAILURE has to be told apart from a
+          # resolver ANSWER, or a mistyped `--pr` would come back as exit 64 and
+          # this step would report "declares no d1_databases binding", skip the
+          # migrations, and exit 0 — a green deploy that migrated nothing.
+          #
+          # `2>&1` is what makes the distinction possible, and it is also what
+          # makes a merge of stdout and stderr into ONE value dangerous: without
+          # `--explain` the tool's absence message is off stderr, so this
+          # captures the VALUE alone and the two cannot be confused. `--explain`
+          # is deliberately NOT passed here for that reason — a caller that wants
+          # the explanation asks for it into a channel it reads separately.
+          infra_name() {
+            local answer
+            if ! answer="$(node tooling/scripts/resolve-infra-name.mjs \
+              --environment "$ENVIRONMENT" ${PR_NUMBER:+--pr "$PR_NUMBER"} \
+              --ask "$1" 2>&1)"; then
+              echo "::error::could not resolve $1 for $WORKER in $ENVIRONMENT: $answer"
+              return 1
+            fi
+            printf '%s' "$answer"
+          }
+
+          D1_BINDING="$(infra_name bindings."$WORKER".d1)"
+          D1_NAME="$(infra_name resources."$WORKER".d1.name)"
 
           if [ -z "$D1_BINDING" ] || [ -z "$D1_NAME" ]; then
             echo "::notice::$WORKER declares no d1_databases binding in $ENVIRONMENT. Nothing to migrate."
@@ -728,12 +865,24 @@ jobs:
 
           # The ledger is per-database and the parallel jobs are per-deployable,
           # so the invariant to check is that this database is this deployable's
-          # alone. Derived from topology, not asserted in prose.
-          CONCURRENT="$(jq -r --arg env "$ENVIRONMENT" --arg n "$D1_NAME" '
-            [.environments[$env].resources
-             | to_entries[]
-             | select(.value.d1.name == $n)
-             | .key] | join(",")' infra-topology/topology.json)"
+          # alone. Derived from topology, not asserted in prose — and read
+          # through the model rather than a second shell walk, for the reason
+          # above: `$comment` is an array only under `preview`, so a hand-rolled
+          # walk over `resources` is correct on staging and wrong on preview,
+          # which is the opposite of what a migration step should be. The
+          # deployables are read from the model rather than listed here, so a
+          # fifth deployable is covered the day it is declared.
+          CONCURRENT=""
+          for candidate in $(node tooling/scripts/resolve-infra-name.mjs \
+            --environment "$ENVIRONMENT" ${PR_NUMBER:+--pr "$PR_NUMBER"} \
+            --ask deployables 2>/dev/null); do
+            candidate_name="$(infra_name resources."$candidate".d1.name)"
+            if [ "$candidate_name" = "$D1_NAME" ]; then
+              CONCURRENT="$CONCURRENT $candidate"
+            fi
+          done
+          CONCURRENT="${CONCURRENT# }"
+
           if [ "$CONCURRENT" != "$WORKER" ]; then
             echo "::error::the database $D1_NAME is declared by [$CONCURRENT], but this job is deploying $WORKER. Two jobs applying migrations to one database race on wrangler's d1_migrations ledger. Split the resource out or run the deploys serially; do not let them run in parallel."
             exit 1
@@ -1015,7 +1164,32 @@ jobs:
       # a MIX of old and new bytes, so pointing home-web's gate at Identity's
       # host would measure the wrong deployment's traffic and report the result
       # as home-web's.
-      SMOKE_HOST: ${{ vars.SMOKE_PROBE_BASE_URL }}
+      #
+      # `smoke-host` when the caller passed one, else the repository variable.
+      # The variable is the default rather than the only source because staging
+      # and production have always declared their Identity host there, and a
+      # caller that forgets a new input should get today's behaviour rather than
+      # a broken gate. Preview cannot use the variable — its host is a function
+      # of the PR number — so it passes the input.
+      #
+      # `SMOKE_HOST_PASSED` exists because NO GitHub expression can distinguish
+      # `SMOKE_HOST_ABSENT_BY_DESIGN` is the caller stating "this deployable has
+      # no public host and must not be probed". It is a separate input because
+      # `smoke-host` cannot say it: that input has a `default: ""`, so omitted
+      # and empty are the same value by the time any expression sees them, and
+      # they mean OPPOSITE things. Omitted falls back to the repository variable;
+      # empty-on-purpose must refuse.
+      #
+      # The shape this replaces made the `-z "$SMOKE_HOST"` guard further down
+      # unreachable for a caller that passed an empty host on purpose: the empty
+      # string was replaced by `vars.SMOKE_PROBE_BASE_URL` before the shell ever
+      # saw it, so a preview `identity-jobs` — `public: false`, no route on the
+      # zone — would have probed the FIXED Identity host and reported that
+      # result as its own. That is the mistake the two-variable rule above
+      # exists to prevent, reached from the other direction: a correct host,
+      # measured for the wrong deployment.
+      SMOKE_HOST: ${{ inputs.smoke-host || vars.SMOKE_PROBE_BASE_URL }}
+      SMOKE_HOST_ABSENT_BY_DESIGN: ${{ inputs.smoke-host-is-absent-by-design }}
       HOME_SMOKE_BASE_URL: ${{ inputs.home-smoke-base-url }}
       IS_HOME_WEB: ${{ inputs.worker == 'home-web' && 'true' || 'false' }}
     steps:
@@ -1142,6 +1316,10 @@ jobs:
             PROBE_BASE_URL="${HOME_SMOKE_BASE_URL%/}"
             PROBE_ROUTE="/"
           else
+            if [ "$SMOKE_HOST_ABSENT_BY_DESIGN" = "true" ]; then
+              echo "::error::$WORKER declares no public host, so there is nothing to probe and nothing may be probed in its place. The ladder stops here rather than measuring some other deployable's host and reporting it as $WORKER's."
+              exit 1
+            fi
             if [ -z "$SMOKE_HOST" ]; then
               echo "::error::no smoke-probe host is configured for this lane, so the health gate cannot run. A gate that cannot run is not a pass; the ladder stops here rather than promoting blind."
               exit 1
@@ -1298,10 +1476,15 @@ jobs:
       # unreferenced. Nothing below resolves it: if a step here ever needs to
       # reach the API, that step needs its own token and its own reason.
       # The Identity Workers' live host. Read from the repository's own
-      # namespace here rather than passed by the caller, because it predates
-      # the second deployable and changing it would touch all three Identity
-      # callers for no reason.
-      SMOKE_HOST: ${{ vars.SMOKE_PROBE_BASE_URL }}
+      # namespace when the caller passes nothing, because it predates the
+      # second deployable and changing it would touch all three Identity
+      # callers for no reason. A caller that DOES pass `smoke-host` overrides
+      # it, and the only lane that does is preview — whose host is
+      # `pr{N}-identity.ecoma.io`, a function of the pull request number that
+      # no repository variable can hold.
+      SMOKE_HOST: ${{ inputs.smoke-host || vars.SMOKE_PROBE_BASE_URL }}
+      SMOKE_HOST_ABSENT_BY_DESIGN: ${{ inputs.smoke-host-is-absent-by-design }}
+      SMOKE_GATED_ELSEWHERE: ${{ inputs.smoke-gated-elsewhere }}
       # home-web's own host, per lane, passed by the caller. It is NOT a
       # fallback to `SMOKE_HOST`: an absent value is a non-zero exit in the
       # step below, because probing the Identity host with a landing-page
@@ -1321,6 +1504,23 @@ jobs:
         run: |
           set -euo pipefail
 
+          # ---- a deployable whose gate is not an HTTP probe ---------------
+          # `promote_to_final` needs this job, so a non-zero here is not just a
+          # failed check: it means the deployment was uploaded and NEVER
+          # promoted, every run, silently. A preview `identity-jobs` hit that
+          # deterministically — it declares no host, and "no host" alone could
+          # only ever mean `exit 1` here, which is correct for a deployable whose
+          # gate lives nowhere else and wrong for one whose gate is the D1
+          # migration step inside `build_and_upload`.
+          #
+          # The caller has to say which case this is. It cannot be inferred:
+          # `home-web` also passes `smoke-host-is-absent-by-design` and DOES
+          # have a host, so the boolean cannot carry both meanings.
+          if [ "$SMOKE_GATED_ELSEWHERE" = "true" ]; then
+            echo "::notice::$WORKER ($LANE) declares no public host and its health gate is another job, so there is nothing here to probe. Skipping the probe, NOT recording a pass: see smoke-gated-elsewhere on the workflow_call."
+            exit 0
+          fi
+
           # ---- which host, and why the absence is fatal -------------------
           # Two variables, two deployables, and no fallback between them. The
           # Identity Workers read the lane's live host; home-web reads the host
@@ -1336,6 +1536,16 @@ jobs:
             fi
             HOST="$HOME_SMOKE_BASE_URL"
           else
+            if [ "$SMOKE_HOST_ABSENT_BY_DESIGN" = "true" ]; then
+              # Said by the caller, because `smoke-host: ""` cannot say it — that
+              # input's default is the empty string, so omitted and empty are the
+              # same value here and they mean opposite things. Without this
+              # distinction the empty string was replaced by
+              # `vars.SMOKE_PROBE_BASE_URL` before the shell saw it and this
+              # check probed Identity's host for a Worker that has none.
+              echo "::error::$WORKER declares no public host, so this check cannot run and will not probe another deployable's host in its place."
+              exit 1
+            fi
             if [ -z "$SMOKE_HOST" ]; then
               # Loudly, and non-zero. A missing probe host is a check that cannot
               # run, and AGENTS.md is explicit that one exits non-zero rather than

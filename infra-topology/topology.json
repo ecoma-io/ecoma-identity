@@ -637,9 +637,29 @@
         "creates them and a janitor cannot tell a development Worker from a",
         "preview one by age alone. Refusing to delete them is the cheap correct",
         "answer: an abandoned `-development` Worker costs nothing, and deleting one",
-        "somebody is running locally breaks their next `wrangler dev --remote`."
+        "somebody is running locally breaks their next `wrangler dev --remote`.",
+        "",
+        "EVERY kind in `preview.grammar` has an entry here, and the key is the",
+        "grammar's own key: `worker`, singular, like `d1`, `kv` and the rest. The",
+        "key used to read `workers` while `previewResources` called the same",
+        "resources `worker`, and `isNeverDeleted` — which asked for `worker` —",
+        "found no list and answered \"not protected\" for every Worker in the",
+        "account, including production. The mismatch was invisible because a",
+        "missing list and an empty one return the same thing.",
+        "",
+        "A kind with grammar and no list is that same fault waiting to happen,",
+        "so `validate-topology.mjs` fails when any grammar kind is missing here.",
+        "The check is cheap and it is the only reason this can be stated as a",
+        "rule rather than as a hope.",
+        "",
+        "`dlq` names three names the `queue` list also carries. That is not",
+        "redundancy to be tidied: `deletion_order` deletes the dead-letter queue",
+        "as its own step, guarded by the `dlq` list, and the `queue` list has",
+        "always covered both because a DLQ and its queue share a name prefix.",
+        "A cleanup run asks about a DLQ under `dlq`, and a caller that has only",
+        "the queue name in hand is protected by the other list."
       ],
-      "workers": [
+      "worker": [
         "identity",
         "identity-admin",
         "identity-jobs",
@@ -673,6 +693,25 @@
         "identity-staging-dlq",
         "identity-development",
         "identity-development-dlq"
+      ],
+      "dlq": [
+        "identity-production-dlq",
+        "identity-staging-dlq",
+        "identity-development-dlq"
+      ],
+      "hostname": [
+        "identity.ecoma.io",
+        "admin.ecoma.io",
+        "ecoma.io",
+        "stg-identity.ecoma.io",
+        "stg-admin.ecoma.io",
+        "stg-home.ecoma.io"
+      ],
+      "rate_limit": ["1001", "1002", "2001", "2002", "3001", "3002"],
+      "cookie": ["ecoma_prod_locale", "ecoma_stg_locale", "ecoma_dev_locale"],
+      "email_provider": [
+        "identity-email-provider-production",
+        "identity-email-provider-staging"
       ]
     },
 

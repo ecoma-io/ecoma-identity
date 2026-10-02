@@ -58,13 +58,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  ENVIRONMENTS,
   EXIT_CANNOT_RUN,
-  EXIT_INVALID,
   EXIT_OK,
+  EXIT_USAGE,
   TopologyError,
   loadTopology,
   reportFailure,
   resolveEnvironment,
+  validatePrNumber,
 } from "./topology-model.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -317,8 +319,14 @@ function usage() {
     "Usage:",
     "  node tooling/scripts/reconcile-infra.mjs --environment <env> [options]",
     "",
-    "  --environment <env>   production | staging | development (the environment",
-    "                        whose resources this run ensures)",
+    "  --environment <env>   production | staging | development | preview (the",
+    "                        environment whose resources this run ensures)",
+    "  --pr <number>         REQUIRED for preview, refused elsewhere. Every",
+    "                        preview resource name is a function of the pull",
+    "                        request number, so reconciling a preview without",
+    "                        it would ensure a resource called `identity-pr-{pr}`.",
+    "                        Validated against preview.pr_number and capped by",
+    "                        preview.max_pr_number.",
     "  --deployable <name>   restrict to one deployable's resources. A deployable",
     "                        that declares none is answered without a single API",
     "                        call. Defaults to every deployable in the environment.",
@@ -337,17 +345,49 @@ function usage() {
 }
 
 function parseArgs(argv) {
-  const options = { environment: null, deployable: null, out: null };
+  const options = { environment: null, deployable: null, out: null, pr: null };
+
+  /**
+   * Read the value that follows a flag, refusing to swallow the next flag.
+   *
+   * `argv[++index]` alone treats `--pr --out /tmp/x.json` as a PR NUMBER of
+   * `--out`, and then reports `/tmp/x.json` as an unknown argument — so the
+   * operator is told about the wrong problem, and the real one, a mistyped
+   * command line, is the one they have to notice themselves. A trailing `--pr`
+   * collapses to `null` and reports "requires --pr", which reads as "you forgot
+   * the flag" rather than "you wrote it with nothing after it".
+   *
+   * `--pr` is where this matters most, because its value is what every preview
+   * resource name is derived from — a number that is not a number should be
+   * refused here rather than carried one layer deeper. The helper is shared by
+   * all four flags because the mistake is the parser's, not `--pr`'s.
+   */
+  const value = (flag, index) => {
+    const next = argv[index + 1];
+    if (next === undefined || next.startsWith("-")) {
+      throw new TopologyError(
+        `${flag} requires a value. ${next === undefined ? `It is the last argument on the command line.` : `${JSON.stringify(next)} is the next flag, not a value.`}`,
+      );
+    }
+    return next;
+  };
+
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--help" || arg === "-h") {
       options.help = true;
     } else if (arg === "--environment") {
-      options.environment = argv[++index] ?? null;
+      options.environment = value("--environment", index);
+      index += 1;
     } else if (arg === "--deployable") {
-      options.deployable = argv[++index] ?? null;
+      options.deployable = value("--deployable", index);
+      index += 1;
     } else if (arg === "--out") {
-      options.out = argv[++index] ?? null;
+      options.out = value("--out", index);
+      index += 1;
+    } else if (arg === "--pr") {
+      options.pr = value("--pr", index);
+      index += 1;
     } else {
       throw new TopologyError(`unknown argument ${JSON.stringify(arg)}`);
     }
@@ -355,7 +395,7 @@ function parseArgs(argv) {
   return options;
 }
 
-export async function reconcile(environment, outPath, { deployable } = {}) {
+export async function reconcile(environment, outPath, { deployable, pr } = {}) {
   const token = process.env.CLOUDFLARE_API_TOKEN;
   if (!token) {
     throw new TopologyError(
@@ -369,7 +409,7 @@ export async function reconcile(environment, outPath, { deployable } = {}) {
       `${topologyFile} declares no usable account.id. Every wrangler command needs it, and there is nowhere else to read it from.`,
     );
   }
-  const resolved = resolveEnvironment(topology, environment);
+  const resolved = resolveEnvironment(topology, environment, { pr });
 
   const all = resolved.resources;
   if (deployable !== undefined && deployable !== null) {
@@ -489,6 +529,21 @@ export async function reconcile(environment, outPath, { deployable } = {}) {
     // topology's single-account decision exists to prevent.
     account: accountId,
     environment,
+    // The pull request these ids belong to, for the same reason and with more
+    // force in the preview lane: every name below is a FUNCTION of this number,
+    // so a preview descriptor without it is a list of ids that cannot be traced
+    // back to the review that asked for them. `null` on every fixed lane,
+    // which is what makes `descriptor.pr !== null` an honest test for "is this
+    // a preview descriptor" rather than a guess.
+    //
+    // `resolved.pr`, not the raw `pr` argument. `resolveEnvironment` returns the
+    // output of `validatePrNumber` on the preview lane and `null` everywhere
+    // else, so this field is a NUMBER for every caller. The raw argument is a
+    // string from `main()` and a number from any programmatic caller, which made
+    // the descriptor's own type depend on how it was invoked — and let an
+    // unvalidated value reach the one field whose entire purpose is to identify
+    // the pull request every name above derives from.
+    pr: resolved.pr ?? null,
     reconciled_at: new Date().toISOString(),
     resources,
   };
@@ -502,13 +557,23 @@ export async function reconcile(environment, outPath, { deployable } = {}) {
   return { out: resolvedOut, descriptor };
 }
 
+/**
+ * `EXIT_USAGE` for every argument fault, including a malformed argv.
+ *
+ * These two branches used to answer `EXIT_INVALID` (1) while the argument checks
+ * below answered `EXIT_USAGE` (64) — one class of fault, two exit codes, so a
+ * caller could not branch on "the operator mistyped something". `EXIT_USAGE` is
+ * what `resolve-infra-name.mjs` and `preview-teardown.mjs` both already use, and
+ * 64 is `EX_USAGE` from `sysexits.h`: the class of the fault is the same however
+ * the argument was wrong, and the message says which.
+ */
 export async function main(argv = process.argv.slice(2)) {
   let options;
   try {
     options = parseArgs(argv);
   } catch (error) {
     process.stderr.write(`${error.message}\n\n${usage()}`);
-    return EXIT_INVALID;
+    return EXIT_USAGE;
   }
   if (options.help) {
     process.stdout.write(`${usage()}\n`);
@@ -516,13 +581,61 @@ export async function main(argv = process.argv.slice(2)) {
   }
   if (!options.environment) {
     process.stderr.write("--environment is required.\n\n" + usage());
-    return EXIT_INVALID;
+    return EXIT_USAGE;
   }
-  if (options.environment === "preview") {
+  // Validated against the model's own list, BEFORE the preview/fixed checks
+  // below. Those two tests ask "is this the preview lane?" and "is this a fixed
+  // lane?", and an unrecognised environment answers "no" to both — so a typo
+  // reached them as an unknown FIXED environment and was reported as
+  // "--pr is meaningless in environment \"preveiw\"", advice about a rule that
+  // does not apply to the name the operator typed. The misspelling itself went
+  // unreported, which is the one thing the operator needed.
+  //
+  // `resolveEnvironment` would have caught it, two checks and a token read
+  // later, as `EXIT_CANNOT_RUN` — a broken configuration reported to an operator
+  // as something that could not be done.
+  if (!ENVIRONMENTS.includes(options.environment)) {
     process.stderr.write(
-      "preview is not reconcilable by name: every preview resource is a function of the PR number and is created by the preview provisioner, not discovered from a long-lived account. Reconciling one would look for a name that has never existed.\n",
+      `unknown environment ${JSON.stringify(options.environment)}; expected one of ${ENVIRONMENTS.join(", ")}.\n\n` +
+        usage(),
     );
-    return EXIT_INVALID;
+    return EXIT_USAGE;
+  }
+  if (options.environment === "preview" && options.pr === null) {
+    process.stderr.write(
+      "--environment preview requires --pr <number>. Every preview resource name is a function of the pull request number, and reconciling one without that number would look for a name that has never existed — `identity-pr-{pr}` is a real-looking name for a real account, which is exactly the wrong thing to send.\n",
+    );
+    return EXIT_USAGE;
+  }
+  if (options.environment !== "preview" && options.pr !== null) {
+    process.stderr.write(
+      `--pr is meaningless in environment ${JSON.stringify(options.environment)}: that environment's resource names are fixed and must not become a function of a pull request. --pr applies to preview only.\n`,
+    );
+    return EXIT_USAGE;
+  }
+  // The PR number is validated HERE, before the token is read and before any
+  // network call, so a mistyped number is answered as a usage error with a
+  // message naming the rule it broke. Deferring it to `resolveEnvironment`
+  // would report it through `reportFailure` as EXIT_CANNOT_RUN, which says "I
+  // could not run" about something the operator typed.
+  //
+  // `loadTopology` is deliberately OUTSIDE the try. A missing or malformed
+  // `infra-topology/topology.json` is a broken configuration, not an argument
+  // mistake, and catching it here reported it as `EXIT_USAGE` — the exit code
+  // for "you typed it wrong" — with no `::error::` annotation and no stack. That
+  // is the one failure in this file that is not the operator's typing, given the
+  // same treatment as the ones that are, and it never reached `reportFailure`.
+  //
+  // It also duplicated the read `reconcile()` performs moments below, so the two
+  // were not a single snapshot of one file.
+  const topology = loadTopology(REPO_ROOT).topology;
+  if (options.pr !== null) {
+    try {
+      validatePrNumber(topology, options.pr);
+    } catch (error) {
+      process.stderr.write(`${error.message}\n`);
+      return EXIT_USAGE;
+    }
   }
 
   const outPath =
@@ -535,6 +648,7 @@ export async function main(argv = process.argv.slice(2)) {
   try {
     const { out, descriptor } = await reconcile(options.environment, outPath, {
       deployable: options.deployable,
+      pr: options.pr,
     });
     const counts = Object.entries(descriptor.resources)
       .filter(([, bucket]) => Object.keys(bucket).length > 0)

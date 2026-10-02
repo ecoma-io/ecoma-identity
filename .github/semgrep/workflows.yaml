@@ -161,27 +161,62 @@ rules:
     paths:
       include:
         - "/.github/workflows/**"
-      # ONE exclusion, and a path rather than a blanket `nosemgrep` because a
+      # TWO exclusions, each a PATH rather than a blanket `nosemgrep` because a
       # suppression over a workflow directory is how a rule stops being read at
-      # all. `review.yml` is the AI semantic review, and it triggers on
-      # `pull_request_target` DELIBERATELY: the LLM credential is a secret, and
-      # `pull_request` withholds secrets from every fork pull request, so the
-      # cheaper trigger would silently review nothing the moment this repository
-      # takes an external contribution. The privilege that buys is spent on one
-      # action's inputs, with no `actions/checkout` of the pull request head and
-      # no step that installs, builds, tests or runs anything — so untrusted
-      # code is read as data and never executed. CodeQL's `actions` language
-      # still analyses that file on every pull request, so the coverage is
-      # duplicated rather than traded away, and this rule keeps firing on every
-      # OTHER workflow — which is where the next `pull_request_target` or
-      # `workflow_run` is most likely to be added by accident.
+      # all. Both files below earn theirs, and the file header's "Widen the
+      # exclusion and the invariant together, or do not touch it" applies to each
+      # one separately.
       #
-      # Removing this exclusion means either accepting a red `analysis-gate` on
-      # every pull request or adding a suppression, and the first of those is
-      # how a gate gets turned off. Widen the exclusion and the invariant
-      # together, or do not touch it.
+      # 1. `review.yml` is the AI semantic review, and it triggers on
+      #    `pull_request_target` DELIBERATELY: the LLM credential is a secret, and
+      #    `pull_request` withholds secrets from every fork pull request, so the
+      #    cheaper trigger would silently review nothing the moment this repository
+      #    takes an external contribution. The privilege that buys is spent on one
+      #    action's inputs, with no `actions/checkout` of the pull request head and
+      #    no step that installs, builds, tests or runs anything — so untrusted
+      #    code is read as data and never executed. CodeQL's `actions` language
+      #    still analyses that file on every pull request, so the coverage is
+      #    duplicated rather than traded away.
+      #
+      # 2. `janitor.yml` triggers on `workflow_run`, which is the chaining shape
+      #    this rule is about. Its security argument lives in that file's header
+      #    and is verifiable, because every privilege-bearing property of it is
+      #    MECHANICAL rather than a promise: it checks out
+      #    `github.event.repository.default_branch` and never the pull request's
+      #    head, in BOTH of its jobs that check out at all; the Node and wrangler
+      #    versions it installs are read through the API at `main` rather than off
+      #    that tree, and the only third-party code it runs is `wrangler` at a
+      #    version this repository pins — never fork-supplied code; and it never
+      #    interpolates a fork-reachable expression into a `run:` step. What
+      #    remains reachable is data only — the PR number and GitHub's own answer
+      #    about its state.
+      #
+      #    Two things make it DIFFER from the escalation this rule warns about.
+      #    First, the chained workflow is not attacker-completable in the sense
+      #    that matters: it is `deploy-preview.yml`, which is this repository's
+      #    own `pull_request` workflow, and a fork's run of it already reaches the
+      #    Cloudflare API directly (that is what `deploy-preview.yml`'s own
+      #    `fork-notice` job exists to report). The janitor adds no capability a
+      #    fork run lacks. Second, its output is names, not privilege: it can only
+      #    delete resources whose names match `preview.grammar` and clear
+      #    `preview.never_delete` in `infra-topology/topology.json`, and it
+      #    refuses to delete anything at all unless GitHub says the pull request
+      #    is closed — re-read immediately before the delete.
+      #
+      #    If a `workflow_run` is ever added to a file that DOES install the
+      #    workspace, build it, check out the head, or interpolate untrusted input
+      #    into a `run:` block, it does not belong in this list. The rules above
+      #    already fail independently on the first three counts, so removing this
+      #    exclusion would surface a real change rather than silently permit one.
+      #
+      # With both exclusions this rule still fires on every OTHER workflow —
+      # which is where the next `pull_request_target` or `workflow_run` is most
+      # likely to be added by accident. Removing an exclusion means either
+      # accepting a red `analysis-gate` on every pull request or adding a
+      # suppression, and the first of those is how a gate gets turned off.
       exclude:
         - "/.github/workflows/review.yml"
+        - "/.github/workflows/janitor.yml"
     message: >-
       This trigger runs with the base repository's secrets and write access
       against code the pull request (or the pushed ref) did not carry through
@@ -190,11 +225,15 @@ rules:
       workflow-chaining one where an attacker-completable first workflow
       elevates into a privileged second (`workflow_run`). Confirm that
       tradeoff is intentional before merging a workflow built on either of
-      these. The one reviewed exception is `.github/workflows/review.yml`, the
-      AI semantic review, whose `pull_request_target` exists because
-      `pull_request` withholds the LLM secret from every fork pull request; its
-      security argument lives in that file, and CodeQL's `actions` language
-      re-checks it on every pull request.
+      these. The two reviewed exceptions are `.github/workflows/review.yml`,
+      the AI semantic review, whose `pull_request_target` exists because
+      `pull_request` withholds the LLM secret from every fork pull request; and
+      `.github/workflows/janitor.yml`, the preview cleanup, whose `workflow_run`
+      chains a fork-reachable workflow into a privileged one but never checks
+      out the pull request's head, never installs or builds, and deletes only
+      what a closed pull request owns. Both arguments live in those files,
+      CodeQL's `actions` language re-checks both on every pull request, and
+      each exclusion is earned by a mechanical property rather than a promise.
     metadata:
       category: security
       confidence: MEDIUM

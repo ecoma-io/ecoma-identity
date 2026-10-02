@@ -447,7 +447,19 @@ export function buildConfig({
     push(
       lines,
       "observability",
-      OBSERVABILITY[shape.observability[environment] ?? "production"],
+      // `shape.observability[environment] ?? "production"` LOOKED right and
+      // wrote `"observability": undefined` for preview. The two sides of this
+      // expression are different vocabularies: the left is an ENVIRONMENT, the
+      // right is a MODE, and `OBSERVABILITY` is keyed by mode
+      // (`full`/`local`/`minimal`). `"production"` is not a mode, so the
+      // fallback resolved to nothing and wrangler rejected the config with
+      // `InvalidSymbol` on the literal text `undefined`.
+      //
+      // It went unnoticed because `pnpm infra:render` never renders preview —
+      // preview is excluded from the offline default set and produced during a
+      // deploy — and because `deploy-worker.yml`'s own validation caught it, on
+      // the first PR to exercise the lane, exactly as it is supposed to.
+      OBSERVABILITY[shape.observability[environment] ?? "full"],
     );
     push(lines, "placement", {
       mode: shape.placement[environment] ?? shape.placement.production,

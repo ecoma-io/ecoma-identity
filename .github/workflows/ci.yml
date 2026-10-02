@@ -510,16 +510,43 @@ jobs:
       # config — still fails the job. The alternative, `MOON_CONCURRENCY=1`,
       # would also remove the race and would serialise every other task in the
       # repository to do it.
+      #
+      # `--version` WAS NOT ENOUGH, and that is why this job kept failing after
+      # the step existed. `worker-build` downloads `wasm-opt` during an actual
+      # COMPILE, not when it prints its version — so the warm-up ran to
+      # completion, reported success, and populated nothing. All three validate
+      # tasks then found the binary absent and raced exactly as before. It
+      # failed `main` at 14:28Z and again at 15:46Z on PR #33.
+      #
+      # The warm-up now runs a real build of the smallest Worker there is, into
+      # a scratch directory this step deletes afterwards. That is the only thing
+      # that provokes the download.
       - name: Warm the shared wasm-opt cache before the tasks run in parallel
         continue-on-error: true
         run: |
+          set -uo pipefail
           cargo install -q "worker-build@^0.8" --locked
-          worker-build --version || true
+          # Build the smallest Worker there is, and throw the artefact away. The
+          # artefact is irrelevant; the `~/.cache/worker-build` side effect is
+          # the entire point of this step.
+          scratch="$(mktemp -d)"
+          # `cd` first, matching the custom build command in
+          # `.generated/cloudflare/*/identity-jobs/wrangler.jsonc`: that command
+          # runs from the Worker's own directory, and `worker-build` reads the
+          # crate it is standing in. `--manifest-path` would work too but would
+          # then be a second spelling of the same command that can drift from
+          # the first.
+          if (cd apps/identity-jobs/worker && worker-build --release --out-dir "$scratch") > /dev/null 2>&1; then
+            echo "warm-up build succeeded; wasm-opt is cached."
+          else
+            echo "::notice::the warm-up build did not complete. The validate tasks below will download wasm-opt themselves, and may race for it — this step exists to prevent that, not to guarantee it."
+          fi
+          rm -rf "$scratch"
           if [ -d "$HOME/.cache/worker-build" ]; then
             echo "worker-build cache present:"
             ls -1 "$HOME/.cache/worker-build"
           else
-            echo "::notice::worker-build did not populate a cache; the validate tasks will download it themselves."
+            echo "::notice::worker-build still has no cache directory; nothing was warmed."
           fi
 
       - name: Validate every wrangler config (real dry-run, uploads nothing)

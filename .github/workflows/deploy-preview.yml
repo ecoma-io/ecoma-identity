@@ -1,0 +1,572 @@
+name: Deploy Preview
+
+# PREVIEW. One pull request, one ephemeral environment, built from every
+# push to that pull request.
+#
+# This is the fourth deploy lane, and it is the only one that CREATES the
+# resources it binds. Production and staging reconcile against an account whose
+# resources outlive any single run; a preview's resources are a function of a
+# PR number and exist for exactly as long as the review that wanted them. That
+# is the whole difference, and it is why this file is a dispatcher rather than a
+# deployment: the work is `deploy-worker.yml`, which already builds, uploads,
+# smoke tests and promotes, and which staging and production both call.
+#
+# ---------------------------------------------------------------------------
+# WHY THIS RUNS ON EVERY PULL REQUEST
+# ---------------------------------------------------------------------------
+# The honest reason is in `docs/operations/release-process.md`: this repository
+# does not consider a change reviewed until it has been observed running. A
+# preview that is deployed by hand is a preview nobody deploys, and the pull
+# requests that would have benefited most — the ones from a contributor without
+# staging access, the ones that touch a binding, the ones nobody thought to try
+# — are exactly the ones that would not have had it pressed.
+#
+# So the trigger is `pull_request`, not `workflow_dispatch`, and the preview is
+# a required check once it goes green (see "WHAT A GREEN RUN PROVES").
+#
+# ---------------------------------------------------------------------------
+# WHY THE FOUR DEPLOYS ARE ORDERED, NOT PARALLEL
+# ---------------------------------------------------------------------------
+# `deploy-staging.yml` runs its four callers concurrently, and that is correct
+# there: staging's resources already exist, so no caller creates anything
+# another caller could be waiting for. Preview is the other case.
+#
+# `identity-admin` and `identity-jobs` bind `IDENTITY` — a Cloudflare service
+# binding naming the `identity` Worker in this same lane (`topology.json`,
+# `bindings`). A service binding to a Worker that does not exist yet is a
+# binding that resolves to nothing at request time, so deploying admin or jobs
+# before identity would promote an environment that answers 502 for the one
+# call it exists to make. Identity goes first; the other three then run
+# together, because none of them depends on each other.
+#
+# ---------------------------------------------------------------------------
+# `pull_request`, NEVER `pull_request_target`
+# ---------------------------------------------------------------------------
+# `pull_request` withholds repository secrets from a fork, which is exactly
+# what should happen to a workflow that creates infrastructure: a fork's pull
+# request may propose code, never spend the account's budget or mint names in
+# it. The consequence is that a fork's deploy job runs with an EMPTY
+# `CLOUDFLARE_API_TOKEN` and fails inside wrangler, whose error names a missing
+# credential rather than an outside contributor. The `fork-notice` job below
+# reports the true reason on the pull request; it does not make the run green,
+# and nothing in this file can or should.
+#
+# `pull_request_target` would fix that and is the wrong fix: it runs the
+# pull request's CODE with the base repository's secrets and write token, in a
+# context where `GITHUB_TOKEN` can push. A workflow whose job is to create and
+# bind infrastructure is the worst possible candidate for that trade.
+#
+# ---------------------------------------------------------------------------
+# WHAT A GREEN RUN OF THIS WORKFLOW DOES AND DOES NOT MEAN
+# ---------------------------------------------------------------------------
+# It means: four Workers were built from this pull request's head, uploaded as
+# immutable Versions, smoke tested against THIS preview's hosts, and promoted to
+# 100% of preview traffic.
+#
+# It does NOT mean authentication works. At platform bootstrap the three
+# Identity Worker composition roots are one-line placeholders (`docs/README.md`),
+# every declared protocol route answers 501, and `deploy-worker.yml`'s smoke
+# test is written to expect exactly that. `identity` additionally declares an
+# `EMAIL_PROVIDER` service binding that `topology.json` marks
+# `provisioned: false`; the deploy fails on that binding, and that failure is
+# the correct one rather than a gap in this file.
+#
+# ---------------------------------------------------------------------------
+# NO `environment:` KEY ON ANY JOB HERE, AND THERE NEVER SHOULD BE ONE.
+# ---------------------------------------------------------------------------
+# `docs/operations/release-process.md` owns the rule: an `environment:` carries
+# the required-reviewer gate that production promotion depends on, and a gate
+# that a pull request can accidentally satisfy is not a gate. A preview has no
+# production traffic to protect, so it has no approval to require.
+# ---------------------------------------------------------------------------
+
+on:
+  pull_request:
+    # Only the three paths that change what gets deployed or what it binds.
+    # Everything else — markdown, `docs/`, `.github/` files other than these —
+    # cannot change a preview's behaviour, and a preview costs one D1 database,
+    # one KV namespace, one queue pair and three custom domains out of the
+    # zone's 100. `paths-ignore` is the honest half of that: it does not
+    # suppress failures, it declines to create an environment nobody asked
+    # questions of.
+    #
+    # Note what is NOT here: no `paths` allowlist for source. A change to a
+    # Worker, a crate, a topology file or a generated config all belong to the
+    # preview; leaving `paths-ignore` narrower than "documentation" would mean
+    # a real deploy could be skipped by a rename.
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/PULL_REQUEST_TEMPLATE*"
+      - ".github/CODEOWNERS"
+      - ".claude/**"
+      - "LICENSE*"
+
+# One preview deploy per pull request, and a newer push DOES cancel an
+# in-flight one.
+#
+# A preview's resource names are a function of the PR number, not of the run, so
+# two concurrent runs for the same pull request race on the same D1 database and
+# the same queue — and a deploy interrupted between "ensure" and "promote"
+# leaves a half-built environment. Cancelling is the safe action here precisely
+# because the names do not depend on the run: whatever a cancelled run created,
+# the next run reuses. This is the opposite of the staging rule, and
+# `deploy-staging.yml` states the difference itself.
+#
+# The group is keyed on the PR number, not `github.head_ref`: a branch that is
+# force-pushed keeps its number and its resources, and a run keyed on the branch
+# name would let two of them write to the same D1 database at once.
+concurrency:
+  group: deploy-preview-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---- what a fork gets instead of a preview ---------------------------
+  #
+  # Not a workaround — a report. A fork's run cannot succeed: `pull_request`
+  # withholds `ECOMA_CLOUDFLARE_API_TOKEN`, and this workflow creates and binds
+  # real infrastructure, which is exactly the thing a fork must not be able to
+  # do. The only question is what the contributor reads afterwards.
+  #
+  # Left alone, the answer is wrangler's, and it names a credential:
+  #
+  #   Missing X-Auth-Key, X-Auth-Email or Authorization header
+  #
+  # which tells an outside contributor nothing about why their pull request did
+  # not get a preview, and tells a maintainer nothing about whether a secret is
+  # misconfigured. Those are different problems with the same symptom, and this
+  # job is what distinguishes them: if the token is present and the deploy still
+  # failed, that is a real failure; if the token is empty because the head is a
+  # fork, that is the policy working.
+  #
+  # It runs FIRST and every deploy depends on it, because a fork's deploy jobs
+  # are pointless work that costs minutes and leaves a red X beside a cause that
+  # was known before the first step ran. It never turns the run green — `if:
+  # always()` on the summary below means a skipped deploy still reports skipped,
+  # not passed.
+  fork-notice:
+    name: Explain why a fork gets no preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      # `pull-requests: write` to leave ONE comment. Nothing else: this job must
+      # not be able to push code, create infrastructure, or read a secret.
+      contents: read
+      pull-requests: write
+    outputs:
+      # The four deploy jobs read this to SKIP rather than to fail. `needs` alone
+      # orders jobs; it does not stop one, and a `failure()` condition here would
+      # report the fork as a deploy failure — which is the thing this whole job
+      # exists to stop being true.
+      is_fork: ${{ steps.classify.outputs.is_fork }}
+    steps:
+      - name: Decide whether this is a fork, before anything else happens
+        id: classify
+        env:
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          set -euo pipefail
+          if [ "$IS_FORK" = "true" ]; then
+            echo "is_fork=true" >> "$GITHUB_OUTPUT"
+            echo "Head is $HEAD_REPO, a fork. The deploy jobs will skip."
+          else
+            echo "is_fork=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: State the policy on the pull request
+        if: ${{ steps.classify.outputs.is_fork == 'true' }}
+        env:
+          # Everything through `env:` — `.github/semgrep`
+          # (`workflow-expression-interpolated-into-run`) is right that a `run:`
+          # body is a shell string GitHub substitutes into before the shell sees
+          # it, and `head.repo.full_name` is attacker-controlled on a fork. The
+          # repository is passed too so the `gh api` path below carries no `${{ }}`
+          # at all.
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "$IS_FORK" != "true" ]; then
+            echo "Not a fork (head is $HEAD_REPO); this job has nothing to report."
+            exit 0
+          fi
+
+          marker="preview-fork-notice-${PR}"
+          notice="$(mktemp)"
+          {
+            printf '<!-- %s -->\n' "$marker"
+            printf 'Preview deployment is not available to forks, and that is deliberate.\n\n'
+            printf '`Deploy Preview` runs on `pull_request`, which withholds this repository'"'"'s\n'
+            printf 'secrets from a fork — so the run has no `ECOMA_CLOUDFLARE_API_TOKEN` and no\n'
+            printf 'preview gets built. That is also what stops a fork'"'"'s code from spending this\n'
+            printf 'account'"'"'s budget or minting resource names in it, which is why the workflow\n'
+            printf 'uses `pull_request` and not `pull_request_target`.\n\n'
+            printf 'This check failing is expected and says nothing about your pull request.\n'
+            printf 'The `Checks (affected)` check runs a fork'"'"'s code exactly as it is, and the\n'
+            printf 'review that matters does not need a preview.\n\n'
+            printf 'For a preview, ask a maintainer to open the branch from this repository: a\n'
+            printf 'pull request opened from a fork keeps its fork origin no matter who pushes to it.\n'
+          } > "$notice"
+
+          # Skip the comment when the marker is already present. A fork pushes
+          # repeatedly and this job runs on every push, so an unguarded post would
+          # leave one identical comment per commit — which is how bot comments
+          # train people to ignore them.
+          existing="$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq "[.[] | select(.body | contains(\"<!-- $marker -->\"))] | length")"
+          if [ "$existing" -gt 0 ]; then
+            echo "Already reported on PR #${PR}; not commenting again."
+          else
+            # `--input` sends a file VERBATIM, so the payload has to be JSON.
+            # `jq -Rs` does the escaping: the notice is Markdown containing
+            # apostrophes and backticks, and neither is legal unescaped in a
+            # JSON string.
+            jq -Rs '{body: .}' "$notice" > "$notice.json"
+            gh api "repos/$REPO/issues/$PR/comments" \
+              --method POST --input "$notice.json" > /dev/null
+            echo "Posted the fork notice on PR #${PR}."
+          fi
+          rm -f "$notice" "$notice.json"
+
+  # ---- the gate that decides whether this workflow runs at all -----------
+  #
+  # NOT A FLAG. A flag is a thing a person sets and then forgets to unset, and
+  # the failure mode of forgetting is a repository that believes it has preview
+  # coverage it does not have. This reads the implementation itself.
+  #
+  # IT ASKS THE DEPLOYED WORKER, NOT THE ROUTE TABLE. `Route::is_implemented()`
+  # (`crates/identity-oidc/src/route.rs`) was the obvious signal and it is the
+  # WRONG one: `deploy-worker.yml` expects `READY_STATUS=503` from
+  # `identity-admin` and `identity-jobs`, so a gate keyed on the route count
+  # would turn this workflow red exactly when authentication lands — a red check
+  # whose meaning is "go and mark me required". `/health` on the deployed Worker
+  # reports the same count in the same context the smoke test uses, so the two
+  # cannot disagree.
+  #
+  # This job checks the IDENTITY Worker only, and that is deliberate rather
+  # than lazy: `identity` is the one deployable whose readiness the others
+  # depend on (they bind it), and it is the one that answers `/health` with a
+  # route table. `home-web` is a real site today and needs no such signal.
+  gate:
+    name: Preview gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      enabled: ${{ steps.probe.outputs.enabled }}
+    steps:
+      # Pinned to a full SHA like every other action in this repository, and
+      # for the reason `.github/semgrep` enforces it: a tag is a pointer the
+      # upstream owner can move, and this job decides whether a pull request may
+      # block merges. It reads no secret and pushes nothing, but a workflow that
+      # is trusted with a gate does not get a looser supply-chain rule than one
+      # that is not.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The probe runs against the repository's OWN Workers — the ones on the
+      # default branch, at the hosts they are deployed to — and not against a
+      # preview. A preview is what this workflow builds; it cannot also be the
+      # thing that decides whether it runs.
+      #
+      # An absent or unreachable host is NOT an error. It means the lane is not
+      # deployed yet, which is the same answer as "no routes implemented": not
+      # ready to gate merges on. Both produce `enabled=false` and a comment that
+      # says which, because a probe that failed for the third reason — a
+      # malformed URL — must not be reported as either of the first two.
+      - name: Ask the deployed Worker how many of its routes are implemented
+        id: probe
+        env:
+          HEALTH_URL: https://identity.ecoma.io/health
+        run: |
+          set -euo pipefail
+
+          if ! body="$(curl --silent --show-error --max-time 20 --fail "$HEALTH_URL" 2>/dev/null)"; then
+            echo "::notice::could not reach $HEALTH_URL (not deployed, or not reachable from this runner). Treating preview as not yet gating."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          implemented="$(printf '%s' "$body" | jq -r '.protocol_routes.implemented // 0')"
+          total="$(printf '%s' "$body" | jq -r '.protocol_routes.total // 0')"
+          echo "identity reports ${implemented}/${total} protocol routes implemented"
+
+          if [ "$implemented" -gt 0 ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::identity reports 0 implemented protocol routes. Preview will still deploy on every pull request, but its result will not be a required check until authentication lands — a red preview today would be a claim about a feature that does not exist yet."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Say, out loud, whether this run gates merges
+        env:
+          # Through `env:`, not `${{ }}` in the script. `.github/semgrep`
+          # (`workflow-expression-interpolated-into-run`) is right that a `run:`
+          # body is a shell string GitHub substitutes into BEFORE the shell sees
+          # it, so a value carrying metacharacters would run as commands. The
+          # value here is `true`/`false` written by the step above and cannot
+          # carry one — but "cannot today" is not a property a gate should rest
+          # on, and the indirection costs one line.
+          ENABLED: ${{ steps.probe.outputs.enabled }}
+        run: |
+          set -euo pipefail
+          if [ "$ENABLED" = "true" ]; then
+            echo "Preview is a required check from now on. Mark it required in the branch protection rules for \`main\`; nothing in this workflow can do that for you, and it will not try."
+          else
+            echo "Preview is advisory. Add \`Deploy Preview\` to main's required checks when the gate above reports a nonzero implemented-route count."
+          fi
+
+  identity:
+    name: Preview — identity (PR #${{ github.event.pull_request.number }})
+    needs: [fork-notice, gate]
+    if: ${{ always() && needs.fork-notice.outputs.is_fork != 'true' && needs.gate.result == 'success' }}
+    uses: ./.github/workflows/deploy-worker.yml
+    permissions:
+      contents: read
+    with:
+      worker: identity
+      # NOT `identity`: a preview's script name carries the PR number, and using
+      # the production name here would promote the PRODUCTION default
+      # environment from a pull request. That is the single most dangerous value
+      # in this file, and it is the same value `deploy-staging.yml` spells out.
+      worker-name: identity-pr-${{ github.event.pull_request.number }}
+      environment: preview
+      pr: ${{ github.event.pull_request.number }}
+      tag: preview-${{ github.run_id }}
+      lane: preview
+      # No ladder and no approval. A canary percentage on a preview has no
+      # failure mode that a direct 100% does not also have, because a preview
+      # has no end users to protect, and the whole point is to reach a URL in
+      # the shortest honest path.
+      canary: "[]"
+      final-percentage: 100
+      requires-approval: false
+      # A preview renders its own identifiers from the descriptor the reconciler
+      # writes during this run, so there is no placeholder left to substitute.
+      injections: "{}"
+      # `pr{N}-identity.ecoma.io`, computed rather than configured: it is a
+      # function of the PR number, and a repository variable cannot hold a
+      # per-pull-request value. Passed for the same reason
+      # `home-smoke-base-url` exists — the default, `SMOKE_PROBE_BASE_URL`,
+      # would probe STAGING and report the result as this deployable's.
+      smoke-host: https://pr${{ github.event.pull_request.number }}-identity.ecoma.io
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+
+  # The other three share this pattern: they need `identity` to exist before
+  # their service bindings resolve, and they do not depend on each other.
+  identity-admin:
+    name: Preview — identity-admin (PR #${{ github.event.pull_request.number }})
+    needs: [fork-notice, gate, identity]
+    if: ${{ always() && needs.fork-notice.outputs.is_fork != 'true' && needs.gate.result == 'success' && needs.identity.result == 'success' }}
+    uses: ./.github/workflows/deploy-worker.yml
+    permissions:
+      contents: read
+    with:
+      worker: identity-admin
+      worker-name: identity-admin-pr-${{ github.event.pull_request.number }}
+      environment: preview
+      pr: ${{ github.event.pull_request.number }}
+      tag: preview-${{ github.run_id }}
+      lane: preview
+      canary: "[]"
+      final-percentage: 100
+      requires-approval: false
+      injections: "{}"
+      smoke-host: https://pr${{ github.event.pull_request.number }}-admin.ecoma.io
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+
+  identity-jobs:
+    name: Preview — identity-jobs (PR #${{ github.event.pull_request.number }})
+    needs: [fork-notice, gate, identity]
+    if: ${{ always() && needs.fork-notice.outputs.is_fork != 'true' && needs.gate.result == 'success' && needs.identity.result == 'success' }}
+    uses: ./.github/workflows/deploy-worker.yml
+    permissions:
+      contents: read
+    with:
+      worker: identity-jobs
+      worker-name: identity-jobs-pr-${{ github.event.pull_request.number }}
+      environment: preview
+      pr: ${{ github.event.pull_request.number }}
+      tag: preview-${{ github.run_id }}
+      lane: preview
+      canary: "[]"
+      final-percentage: 100
+      requires-approval: false
+      injections: "{}"
+      # NO HOST, AND NONE IS PASSED. `identity-jobs` is `public: false` with a
+      # null host: it is a queue consumer with no route on the zone, so
+      # `pr{N}-identity-jobs.ecoma.io` does not exist and nothing may probe it.
+      #
+      # Its gate is the D1 migration step inside `deploy-worker.yml`, which runs
+      # against the database this deploy just ensured. Passing a host here to
+      # satisfy the input would buy a passing probe of a host that is not there.
+      #
+      # `smoke-host-is-absent-by-design` rather than an empty `smoke-host`,
+      # because an empty one cannot say this: that input's default is the empty
+      # string, so "no host on purpose" and "the caller forgot" are the same
+      # value at the boundary, and the health gate resolved it by falling back
+      # to `vars.SMOKE_PROBE_BASE_URL` — which would have probed the FIXED
+      # Identity host and reported that result as `identity-jobs`'s own.
+      smoke-host-is-absent-by-design: true
+      # And `smoke-gated-elsewhere`, because `smoke-host-is-absent-by-design`
+      # alone made this deployable fail its health gate on EVERY preview run:
+      # `promote_to_final` needs the `smoke` job, and that job's only possible
+      # answer to "no host" was `exit 1`. So the deployment was uploaded and
+      # never promoted, silently, every time. The two flags together say the
+      # real thing — this deployable has no host to probe, and its gate is the
+      # migration step above — which neither flag can say alone.
+      smoke-gated-elsewhere: true
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+
+  home-web:
+    name: Preview — home-web (PR #${{ github.event.pull_request.number }})
+    needs: [fork-notice, gate, identity]
+    if: ${{ always() && needs.fork-notice.outputs.is_fork != 'true' && needs.gate.result == 'success' && needs.identity.result == 'success' }}
+    uses: ./.github/workflows/deploy-worker.yml
+    permissions:
+      contents: read
+    with:
+      worker: home-web
+      worker-name: home-web-pr-${{ github.event.pull_request.number }}
+      environment: preview
+      pr: ${{ github.event.pull_request.number }}
+      tag: preview-${{ github.run_id }}
+      lane: preview
+      canary: "[]"
+      final-percentage: 100
+      requires-approval: false
+      injections: "{}"
+      # `pr{N}-home.ecoma.io`, for the reason
+      # `deploy-staging.yml` gives: a landing-page assertion made against
+      # Identity's host would pass for a site it never requested.
+      home-smoke-base-url: https://pr${{ github.event.pull_request.number }}-home.ecoma.io
+      # home-web's gate is its own landing page. It has no Worker-side route
+      # table to report from, and it is a real site today — it is not what the
+      # gate above is waiting for.
+      #
+      # Stated explicitly rather than as an empty `smoke-host`, which cannot
+      # distinguish "no Identity host here" from "the caller forgot" and would
+      # resolve the difference by borrowing Identity's host.
+      smoke-host-is-absent-by-design: true
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+
+  summary:
+    name: Preview summary
+    needs:
+      [fork-notice, gate, identity, identity-admin, identity-jobs, home-web]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      # NO CLOUDFLARE_API_TOKEN. This job reads job results and writes a
+      # summary; it needs no credential, and a credential a job does not need is
+      # a credential that can leak from a job that does.
+      - name: Say what this run produced, and what it did not
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GATE_ENABLED: ${{ needs.gate.outputs.enabled }}
+          IS_FORK: ${{ needs.fork-notice.outputs.is_fork }}
+          # Each result is named rather than joined into one string. A joined
+          # string has to be compared against an exact four-word literal whose
+          # ORDER this file happens to declare, so adding a deployable would
+          # turn this summary silently red. Per-job checks cannot rot that way.
+          IDENTITY: ${{ needs.identity.result }}
+          ADMIN: ${{ needs.identity-admin.result }}
+          JOBS: ${{ needs.identity-jobs.result }}
+          HOME: ${{ needs.home-web.result }}
+        run: |
+          set -euo pipefail
+
+          # A fork skips every deploy, so every result is `skipped`. Reporting
+          # that as four failures would put a red summary on a pull request that
+          # was never eligible for a preview in the first place, which is the
+          # opposite of what the `fork-notice` job just explained.
+          if [ "$IS_FORK" = "true" ]; then
+            echo "### Preview for PR #${PR} — not deployed (fork)"
+            echo ""
+            echo "Preview deployment does not run for forks, because \`pull_request\` withholds"
+            echo "this repository's secrets from one. See the comment on this pull request."
+            exit 0
+          fi
+
+          echo "### Preview for PR #${PR}"
+          echo ""
+          echo "| Deployable | Host | Result |"
+          echo "| --- | --- | --- |"
+          echo "| identity | https://pr${PR}-identity.ecoma.io | ${IDENTITY} |"
+          echo "| identity-admin | https://pr${PR}-admin.ecoma.io | ${ADMIN} |"
+          echo "| identity-jobs | *(no hostname — a queue consumer)* | ${JOBS} |"
+          echo "| home-web | https://pr${PR}-home.ecoma.io | ${HOME} |"
+          echo ""
+          failed=0
+          skipped_all=1
+          for pair in "identity:${IDENTITY}" "identity-admin:${ADMIN}" "identity-jobs:${JOBS}" "home-web:${HOME}"; do
+            name="${pair%%:*}"
+            result="${pair#*:}"
+            # A fork is already handled above and returned. Past that point a
+            # `skipped` result means something UPSTREAM did not succeed —
+            # `gate`, or `identity` — and all four deploys share that
+            # condition, so all four are skipped and nothing was deployed. The
+            # fork exemption was here once and applied to every skip; the line
+            # underneath it said all four were promoted, over a table showing
+            # four skips. Only `success` is promoted.
+            if [ "$result" != "success" ]; then
+              failed=1
+              if [ "$result" = "skipped" ]; then
+                skipped_all=0
+              fi
+              echo "::warning::${name} did not succeed (${result}). Nothing was promoted for it; do not trust a version id from this run."
+            fi
+          done
+          if [ "$failed" -eq 0 ]; then
+            echo "All four deployables were promoted to preview traffic."
+          elif [ "$skipped_all" -eq 0 ]; then
+            # Named rather than left to the per-row warnings, because
+            # "nothing was deployed" and "some deployables failed" are different
+            # diagnoses and the table alone does not distinguish them.
+            echo "**Nothing was deployed.** Every deployable was skipped, which means an"
+            echo "upstream job did not succeed — read the \`gate\` and \`identity\` jobs above"
+            echo "for why. This run built no preview, so this PR has no preview URL."
+          fi
+          echo ""
+          if [ "$GATE_ENABLED" = "true" ]; then
+            echo "**Gating:** yes. Authentication is implemented enough for this run to be a"
+            echo "required check; see \`main\`'s branch protection rules."
+          else
+            echo "**Gating:** no. The deployed \`identity\` Worker reports zero implemented protocol"
+            echo "routes, so this run proves the deploy works and nothing about authentication."
+            echo "It becomes a required check on its own once that count is nonzero — no file"
+            echo "needs editing to make that happen."
+          fi
+          echo ""
+          echo "**What this proves:** the four Workers were built from commit \`${HEAD_SHA}\` and promoted to preview traffic."
+          echo ""
+          echo "**What this does not prove:** that authentication works. At platform bootstrap every"
+          echo "declared protocol route answers 501, and \`identity\` declares an \`EMAIL_PROVIDER\`"
+          echo "binding that is not provisioned — the deploy fails there, and that failure is correct."
+          echo ""
+          echo "These resources are named for PR #${PR} and are deleted once GitHub reports"
+          echo "this pull request closed — by \`.github/workflows/janitor.yml\`, which re-reads"
+          echo "that state immediately before deleting and never passes \`--force\`."
+          echo ""
+          echo "Not everything: wrangler has no command to detach a Custom Domain, so the three"
+          echo "hostnames above — and the Workers behind them, which wrangler will not delete while"
+          echo "a domain is attached — survive the teardown and are reported as surviving. See"
+          echo "\`docs/operations/deployment-model.md\`."
