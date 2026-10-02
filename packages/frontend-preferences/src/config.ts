@@ -58,8 +58,15 @@
  * name, and `cookiePolicy()` says so rather than inventing one.
  */
 
-import generated from "../../../.generated/frontend/config.json";
-import support from "../frontend-support.json";
+// `with { type: "json" }` is REQUIRED, not decoration. Node 22+ rejects a
+// JSON module import without it, and this module is loaded three ways: by `tsc`
+// for the package build, by Vite when an application bundles it, and by Vitest
+// directly. Only the last two surface the missing attribute — `tsc` compiles
+// the import away — so the build passes and the consuming app's build fails
+// with ERR_IMPORT_ATTRIBUTE_MISSING, which names neither this line nor the
+// renderer that produces the file.
+import generated from "../../../.generated/frontend/config.json" with { type: "json" };
+import support from "../frontend-support.json" with { type: "json" };
 
 import { MissingFrontendConfigError } from "./errors.js";
 
