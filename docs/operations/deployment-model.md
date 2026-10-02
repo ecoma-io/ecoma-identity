@@ -51,6 +51,27 @@ wrangler versions deploy --version-id <id> --percentage <p>
 A Worker that has been uploaded to and never deployed serves the previous
 Deployment, or nothing.
 
+**The first deploy of a Worker is the one exception, and it is forced by
+Cloudflare rather than chosen.** `wrangler versions upload` cannot create a
+Worker: it refuses with _"You cannot upload a new version of a Worker that does
+not yet exist"_, and `wrangler deploy` is the only command that creates one. A
+brand-new Worker therefore has no Versions API path at all — a bootstrap cycle
+neither command closes on its own.
+
+So `build_and_upload` asks the Cloudflare API whether the Worker exists before
+it uploads, and on that one run only, uses `wrangler deploy`. Two things make
+this safe rather than a hole in the ladder:
+
+- **Nothing was displaced.** There is no previous version, because there is no
+  previous Worker. The percentage ladder exists to move traffic _off_ something
+  that is already serving; on a first deploy there is nothing to protect.
+- **Nothing had requested the hostname.** The custom domain comes into
+  existence with this same deploy, so the traffic `deploy` sends has no audience
+  yet.
+
+Every deploy from the second onward takes the `versions upload` path and waits
+for its promotion, on every lane, forever. This is [#27](https://github.com/ecoma-io/ecoma-identity/issues/27).
+
 The consequence, which is the single most important operational fact in this
 document: **the version id is the unit of deployment and of rollback.** A
 version is immutable, so a version id names exactly one set of bytes forever. A
