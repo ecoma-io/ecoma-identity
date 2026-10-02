@@ -161,7 +161,10 @@ generated from it by `pnpm infra:render` into `.generated/`, which is not
 tracked. Staging deploys automatically on a merge to `main`. Preview deploys on
 every push to a pull request that changes a deployable, and **its deploys fail
 today**: `identity` binds an `EMAIL_PROVIDER` service naming a stub Worker that
-does not exist yet, and nothing deletes a preview — there is no cleanup workflow.
+does not exist yet. A closed pull request's preview is deleted by
+`.github/workflows/janitor.yml`, which never passes `--force` and reports what
+survived — and today Custom Domains are among what survives, because wrangler
+has no command to detach one.
 Production promotes **immutable Worker versions** through a canary ladder:
 smoke → 1% → health gate → 10% → **human approval** → 50% → 100%. Admin and
 Jobs go to 100% automatically; they hold no data, so the blast radius of a bad

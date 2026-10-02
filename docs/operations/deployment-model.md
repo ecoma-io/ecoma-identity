@@ -406,15 +406,35 @@ answers 10143 on that binding. The one deployable that would complete is
 lane sequences `identity` first, and `identity-admin` and `identity-jobs` bind
 `IDENTITY`.
 
-**Nothing deletes a preview yet.** There is no cleanup workflow in this
-repository. The policy is declared and validated — `preview.deletion_order`
-(reverse topological, custom domains before Workers), `preview.evidence` with
-`on_unknown: do-not-delete` and `on_open: do-not-delete`, `preview.never_delete`
-as a literal backstop that does not depend on the grammar being right, and
-`previewResources()` in `tooling/scripts/topology-model.mjs` walks it — but no
-workflow acts on it. A merged pull request's D1 database, KV namespace, queue
-pair and three custom domains therefore persist indefinitely, against a zone
-limit of 100 custom domains.
+**A janitor deletes a preview, and it is deliberately incomplete.**
+`.github/workflows/janitor.yml` tears a preview down once GitHub reports its pull
+request closed — twice, once to decide and once immediately before the delete,
+because `preview.evidence.$comment` requires the state be re-read at delete time
+rather than trusted from job start. The rules live in
+`tooling/scripts/preview-teardown.mjs`, not in the workflow's `run:` block, so
+they can be tested without an account; `preview-teardown.test.mjs` is that test.
+
+It never passes `--force`. wrangler's flag means "delete even if doing so will
+break other Workers that depend on this one", so using it would discard the one
+guard Cloudflare offers — `preview.deletion_order.$comment` bans it outright and
+the script refuses to construct an argv containing it. A resource Cloudflare
+declines is reported as **surviving**, and the run is non-zero, which is the
+manifest's stated honest outcome rather than a failure to work around.
+
+**What a green janitor run does not delete:** Custom Domains. wrangler 4.144 has
+no command to detach one, so that step is **reported as not performed** rather
+than approximated with a raw zones-API call. Because wrangler also refuses to
+delete a Worker that still has a Custom Domain attached, the Worker steps below
+it are expected to be refused as well — so today a preview's three hostnames and
+the Workers behind them remain in the account, and a green run means "every
+resource this repository _can_ delete was asked to go, in the right order, and
+whatever Cloudflare declined is written down". Closing that gap needs a Custom
+Domain delete that does not exist yet.
+
+A scheduled sweep additionally reports previews whose pull request no longer
+exists, via `tooling/scripts/list-preview-prs.mjs`. It reports and does not
+delete: an orphan is precisely the case where the pull request's state cannot be
+read, and `preview.evidence.on_unknown` is `do-not-delete`.
 
 `pnpm infra:render` projects each FIXED block into one config per deployable, and
 `home-web` is in all three alongside the Workers:
