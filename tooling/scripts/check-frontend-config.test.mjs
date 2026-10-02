@@ -35,11 +35,15 @@ afterEach(() => {
 
 function runGate() {
   try {
-    execFileSync(process.execPath, [GATE], {
+    // stdout is kept on SUCCESS, not only on failure: the green-path test
+    // asserts what the gate says when it is happy, and a helper that returned
+    // "" whenever there was nothing to complain about would make that
+    // assertion vacuous.
+    const stdout = execFileSync(process.execPath, [GATE], {
       cwd: REPO_ROOT,
       encoding: "utf8",
     });
-    return { code: 0, output: "" };
+    return { code: 0, output: stdout };
   } catch (error) {
     return {
       code: error.status ?? 1,
@@ -115,40 +119,40 @@ function runGateIn(root) {
 }
 
 describe("check-frontend-config on the current tree", () => {
-  it("reports only the duplicate owners this branch has not yet migrated", () => {
-    // The gate is RED on `main`, by design and by evidence: `nuxt.config.ts`
-    // declares the cookie name, the domain and the base URL a second time, and
-    // `layouts/default.vue` names a locale in code. That is issue #17, and a
-    // gate that went green while those copies existed would not be a gate.
-    //
-    // So this test asserts the gate FIRES, and — just as importantly — that it
-    // names exactly the files the migration is about to rewrite and nothing
-    // else. The second half is the part that carries: if a future change added a
-    // sixth owner in a new application, this list would have to change, and
-    // whoever changed it would be looking at the offending file.
+  // It was RED on `main` until this branch migrated the last of the copies:
+  // `nuxt.config.ts` declared the cookie name, the domain and the base URL a
+  // second time, and `layouts/default.vue` named a locale in code. That is issue
+  // #17, and a gate that had gone green while those copies existed would not have
+  // been a gate.
+  //
+  // So this test asserts the gate is GREEN now — which is a stronger statement
+  // than the red one it replaced. That migration is the only thing that made it
+  // green, and the mutation tests below are what make the green mean something:
+  // a tree with the old copies back in it fails again.
+  it("reports that every preference value has one owner", () => {
     const { code, output } = runGate();
-    assert.notEqual(
+    assert.equal(
       code,
       0,
-      "the gate passed a tree that still has duplicate owners",
+      "the gate found a second owner after the migration:\n" + output,
     );
+    assert.match(output, /one owner each/);
+  });
 
-    // The gate reports one line per OFFENCE, so a file with three hardcoded
-    // values appears three times. Deduplicated here, because what this test is
-    // about is WHICH FILES carry a duplicate owner.
-    const named = [
-      ...new Set(
-        output
-          .split("\n")
-          .filter((line) => line.startsWith("  apps/"))
-          .map((line) => line.trim().split(" ")[0].split(":")[0]),
-      ),
-    ].sort();
-
-    assert.deepEqual(named, [
-      "apps/home-web/layouts/default.vue",
-      "apps/home-web/nuxt.config.ts",
-    ]);
+  it("would still have been red on main's copies", () => {
+    // The regression that gives the test above its meaning. `main`'s
+    // `nuxt.config.ts` lines, verbatim, back in a fixture: the gate has to fire
+    // on exactly these, or it never did and the green is luck.
+    const mainHardcodes = [
+      'export const cookieKey = "ecoma_prod_locale";',
+      'export const cookieDomain = ".ecoma.io";',
+      'export const baseUrl = "https://ecoma.io";',
+      'const locale = "vi";',
+    ];
+    for (const source of mainHardcodes) {
+      const { code } = runGateIn(fixtureWith(source));
+      assert.notEqual(code, 0, `the gate no longer catches: ${source}`);
+    }
   });
 });
 
@@ -180,9 +184,19 @@ describe("check-frontend-config rejects a second owner", () => {
       expect: /locale literal/,
     },
     {
-      what: "a colour-mode literal",
+      what: "a colour-mode default bound by an initialiser",
       source: 'export const mode = "system";',
-      expect: /colour-mode literal/,
+      expect: /colour-mode default/,
+    },
+    {
+      what: "a colour-mode default on a property named `default`",
+      source: 'const support = { defaultColorMode: "system" };',
+      expect: /colour-mode default/,
+    },
+    {
+      what: "a colour-mode default used as a parameter default",
+      source: 'function paint(mode = "system") { return mode; }',
+      expect: /colour-mode default/,
     },
   ];
 
@@ -224,6 +238,82 @@ describe("check-frontend-config rejects a second owner", () => {
     assert.notEqual(code, 0);
     assert.match(output, /generated copy declares/);
   });
+
+  // A NARROWED RULE FAILS BY PASSING. Every rejection above proves the gate
+  // fires; none of them proves it still fires. `"system"` is a member of the
+  // `ColorMode` union, so `mode === "system"` and the offered-modes array are
+  // how that type is written, not a fact restated — and an earlier version of
+  // this rule rejected both, which was correct for neither. These are the shapes
+  // it must catch anyway.
+  const stillForbidden = [
+    {
+      what: "a colour-mode default behind a typed initialiser",
+      source:
+        'const DEFAULT_MODE: ColorMode = "system";\nexport { DEFAULT_MODE };',
+    },
+    {
+      what: "a colour-mode default in a nested options object",
+      source: 'export const theme = { color: { defaultColorMode: "system" } };',
+    },
+    {
+      what: "a colour-mode default on a class field",
+      source: 'class Theme {\n  defaultColorMode = "system";\n}',
+    },
+    {
+      what: "a colour-mode default returned from a resolver",
+      source:
+        'export function defaultMode(): ColorMode {\n  return "system";\n}',
+    },
+  ];
+
+  for (const shape of stillForbidden) {
+    it(`still rejects ${shape.what}`, () => {
+      const { code, output } = runGateIn(fixtureWith(shape.source));
+      assert.notEqual(
+        code,
+        0,
+        "the narrowed rule stopped catching this, which is what a rule narrowed " +
+          "too far looks like",
+      );
+      assert.match(output, /colour-mode default/);
+    });
+  }
+
+  // And the shapes that made the rule wrong: each is TypeScript, not a second
+  // owner. If any of these fails, the rule has re-narrowed into uselessness.
+  const legitimate = [
+    {
+      what: "comparing a mode against the union's system member",
+      source:
+        'export function isSystem(mode: ColorMode): boolean {\n  return mode === "system";\n}',
+    },
+    {
+      what: "offering the three modes a visitor may choose",
+      source:
+        'const OFFERED: readonly ColorMode[] = ["system", "light", "dark"];\nexport { OFFERED };',
+    },
+    {
+      what: "narrowing an unknown value before applying it",
+      source:
+        'if (readColorMode() !== "system") {\n  return;\n}\napplyColorMode("dark");',
+    },
+    {
+      what: "reading the default from the projection",
+      source:
+        'import cfg from "@ecoma-io/frontend-preferences";\nexport const mode = cfg.defaultColorMode;',
+    },
+  ];
+
+  for (const shape of legitimate) {
+    it(`accepts ${shape.what}`, () => {
+      const { code, output } = runGateIn(fixtureWith(shape.source));
+      assert.equal(
+        code,
+        0,
+        "the gate rejected TypeScript rather than a second owner:\n" + output,
+      );
+    });
+  }
 
   it("reports a missing support copy as something to render, not as silence", () => {
     const root = fixtureWith("export const fine = 1;");

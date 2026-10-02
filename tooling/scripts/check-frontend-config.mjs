@@ -156,8 +156,13 @@ const SKIP_DIRS = new Set([
  * `ecoma_locale` is listed rather than only `cookieKey:` because the specific
  * string is what #17 was about: it is a name that exists in no environment and
  * would silently be the same name in all four.
+ *
+ * Every entry here is a bare string match on the whole file, so an entry must be
+ * a value that cannot appear for any other reason. The colour mode is NOT one —
+ * its literal is a member of the `ColorMode` union — so it has its own
+ * position-aware rule in {@link colorModeDefaultOffences} instead.
  */
-function forbiddenLiterals(topology, support) {
+function forbiddenLiterals(topology) {
   return [
     { literal: "ecoma_locale", why: "the pre-namespace cookie name from #17" },
     {
@@ -188,11 +193,130 @@ function forbiddenLiterals(topology, support) {
       literal: `https://pr{pr}-${topology.account.zone}`,
       why: "a preview host template as a literal",
     },
-    {
-      literal: `"${support.defaultColorMode}"`,
-      why: "a colour-mode literal; the default comes from the projection",
-    },
   ];
+}
+
+/**
+ * Whether a colour-mode literal is CONSUMED rather than PRODUCED.
+ *
+ * The rule is one sentence: an application may ask what `"system"` is, and may
+ * offer it; it may not decide it. So the legal positions are exactly the two
+ * where the literal names an existing value rather than supplying a new one —
+ *
+ *   - a comparison: `mode === "system"`, `readColorMode() !== "system"`, and
+ *     the `case` of a switch over a `ColorMode`. These are the type's
+ *     discriminants, and a union cannot be written without them;
+ *   - an array member: `["system", "light", "dark"]`. Those are the modes a
+ *     visitor may CHOOSE, which stays three whichever way the platform default
+ *     is set — so restating the default would not even change what that array
+ *     renders.
+ *
+ * Everything else — an initialiser, a returned value, a field, a property, an
+ * argument — is the application supplying the platform's answer, and that is
+ * what the law forbids. `readColorMode()` already answers it, from the
+ * projection.
+ *
+ * ## Why the array case needs the bracket walk
+ *
+ * A `,` precedes an array member and also precedes a function argument, and
+ * only the first is legal. So "is this `,` inside `[`" cannot be answered by
+ * looking at the character before it: `["light", "system"]` and
+ * `paint("light", "system")` both end in `, "system"`. Hence the stack below.
+ *
+ * @param before Everything preceding the literal, comments already stripped.
+ * @returns Whether the literal is in a position that consumes it.
+ */
+function consumesColorMode(before) {
+  const trimmed = before.replace(/\s+$/, "");
+
+  // A comparison. `===` is checked before `==` because both end in `==`.
+  if (/(?:===|!==|==|!=)$/.test(trimmed)) return true;
+
+  // A `case` label: `case "system":`. The discriminant of a switch, and a switch
+  // over `ColorMode` is the other place the union's members have to appear.
+  if (/\bcase$/.test(trimmed)) return true;
+
+  return isArrayMember(before);
+}
+
+/**
+ * Whether the text before `offset` sits inside an unclosed `[` — and, if so,
+ * whether nothing but a comma separates it from that bracket.
+ *
+ * A stack rather than a backwards scan because the two must agree on nesting:
+ * `[["a"], "system"]` and `f(["a"], "system")` both have a `]` between the
+ * `[` and the literal, and only the second is a function argument.
+ *
+ * @param before Everything preceding the literal.
+ * @returns Whether the literal is an element of an array literal.
+ */
+function isArrayMember(before) {
+  const stack = [];
+  for (let index = 0; index < before.length; index += 1) {
+    const character = before[index];
+    if (character === "(" || character === "{" || character === "[") {
+      stack.push(character);
+    } else if (character === ")" || character === "}" || character === "]") {
+      stack.pop();
+    }
+  }
+
+  const innermost = stack.at(-1);
+  if (innermost !== "[") return false;
+
+  const lastOpen = before.lastIndexOf("[");
+  const between = before.slice(lastOpen + 1).trim();
+  return between === "" || between.endsWith(",");
+}
+
+/**
+ * A colour-mode literal an application PRODUCES rather than consumes, in one
+ * scanned file.
+ *
+ * Built from the projection's value so that changing the platform default
+ * cannot leave the rule firing on correct code: were the default to become
+ * `dark`, `mode === "system"` would still be legitimate, and a rule keyed on
+ * `"system"` would keep flagging it while missing a real `= "dark"` default.
+ *
+ * ## Why comments are stripped for this rule alone
+ *
+ * Every other rule here scans comments on purpose, because #17 was kept in step
+ * by a comment asserting a value. This one cannot: `"system"` is a word
+ * ordinary English prose uses, and `apps/identity/web/index.html` says
+ * `picks "system"` while explaining that the bootstrap does not watch the
+ * operating system. Flagging that would cry wolf on the first file scanned.
+ *
+ * ## What this is not
+ *
+ * A proof. It reads source text, so a value assembled from parts — `"sys" +
+ * "tem"` — passes it. So does one that arrives through a function argument this
+ * rule cannot see past. The module header already says the scan is syntactic
+ * rather than semantic, and that is the honest description of this rule too.
+ *
+ * @param relative The file's path, for the report.
+ * @param source Its contents.
+ * @param support The vocabulary, for the default's value.
+ * @returns One offence per producing occurrence.
+ */
+function colorModeDefaultOffences(relative, source, support) {
+  const code = stripComments(source);
+  const pattern = new RegExp(
+    `(["'\`])${escapeRegExp(support.defaultColorMode)}\\1`,
+    "g",
+  );
+
+  const offences = [];
+  for (const match of code.matchAll(pattern)) {
+    const before = code.slice(0, match.index);
+    if (consumesColorMode(before)) continue;
+    offences.push({
+      file: relative,
+      line: code.slice(0, match.index).split("\n").length,
+      what: `the colour-mode default ${JSON.stringify(match[0])} written where an application produces one`,
+      why: 'the platform default comes from the projection and readColorMode() already reads it; comparing against "system", or offering it in a list, consumes a value rather than restating one',
+    });
+  }
+  return offences;
 }
 
 /** Recursively list source files under `absolute`, relative to the repo root. */
@@ -398,7 +522,7 @@ export function main() {
   }));
   const totalFiles = groups.reduce((sum, group) => sum + group.files.length, 0);
 
-  const literals = forbiddenLiterals(topology, support);
+  const literals = forbiddenLiterals(topology);
   const offences = [
     ...checkSupportCopy(support),
     ...groups.flatMap((group) =>
@@ -408,13 +532,16 @@ export function main() {
     ),
     ...groups.flatMap((group) =>
       group.checks.has("locales")
-        ? group.files.flatMap((relative) =>
-            localeOffences(
-              relative,
-              fs.readFileSync(path.join(REPO_ROOT, relative), "utf8"),
-              support,
-            ),
-          )
+        ? group.files.flatMap((relative) => {
+            const source = fs.readFileSync(
+              path.join(REPO_ROOT, relative),
+              "utf8",
+            );
+            return [
+              ...localeOffences(relative, source, support),
+              ...colorModeDefaultOffences(relative, source, support),
+            ];
+          })
         : [],
     ),
   ];

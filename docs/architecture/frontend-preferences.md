@@ -226,12 +226,34 @@ reverse order ships the broken locale.
 
 - **`tooling/scripts/check-frontend-config.mjs`** — the coherence gate. Fails on
   a frontend source that hardcodes a cookie name, the zone apex, a canonical URL,
-  a colour-mode literal or a locale literal. It also compares the package's
+  a colour-mode **default** or a locale literal. It also compares the package's
   generated copy of the vocabulary against its source and fails on drift.
   Wired into `ci.yml`'s `checks` job, so it runs on every pull request.
   It deliberately scans **comments** for cookie names and **code only** for
   locales: prose about a locale is legitimate, and a comment that hardcodes a
   cookie name is precisely the defect #17 reports.
+
+  The colour-mode rule is the one that needs its reasoning stated, because the
+  obvious version of it is wrong. `"system"` cannot simply be forbidden: it is
+  a **member of the `ColorMode` union**, so `if (mode === "system")` and
+  `["system", "light", "dark"]` are how that type is written rather than a
+  second owner of a fact, and both appear in `useColorMode.ts`. The gate
+  therefore draws the line between **consuming** a colour-mode literal and
+  **producing** one. A comparison (`===`, `!==`) or a `case` label consumes it,
+  because those are the union's discriminants; so does an array member, because
+  the three modes are what a visitor may _offer_, which stays three whichever
+  way the platform default is set. Every other position — an initialiser, a
+  returned value, a class field, an object property, an argument — is an
+  application supplying the platform's answer, and that is forbidden. `export
+const mode = "system"` fails; `export const mode = cfg.defaultColorMode`
+  passes; `mode === "system"` passes.
+
+  Both directions are tested, because a rule narrowed too far fails by _passing_
+  rather than by erroring: `check-frontend-config.test.mjs` asserts the gate
+  still catches an initialiser, a parameter default, a nested property, a class
+  field and a returned value, and separately that it accepts the four shapes in
+  the tree today.
+
 - **`module-boundaries.config.mjs`** — a row per frontend application, each
   permitted to depend on `frontend-preferences` and nothing else among the
   frontends. The package may not depend on an application.
