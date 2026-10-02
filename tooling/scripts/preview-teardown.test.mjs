@@ -20,6 +20,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 
 import {
   FIXED_ENVIRONMENTS,
@@ -28,15 +29,26 @@ import {
   previewResources,
 } from "./topology-model.mjs";
 import {
+  WRANGLER_INVOCATION_ENV,
   assertNoForce,
   commandFor,
   planTeardown,
   refusals,
   runDelete,
+  wranglerInvocation,
 } from "./preview-teardown.mjs";
 
 const { topology } = loadTopology();
 const PR = 33;
+
+/** The local spelling — `node_modules` exists here, and only here. */
+function withWrangler(extra = {}) {
+  return {
+    ...process.env,
+    [WRANGLER_INVOCATION_ENV]: "pnpm exec wrangler",
+    ...extra,
+  };
+}
 
 function allNames(plan) {
   return plan.flatMap((entry) => entry.names);
@@ -231,13 +243,10 @@ test("an already-absent resource is not a failure", () => {
   // closed more than once. Reporting "not found" as a failure would leave every
   // janitor run red forever and train everyone to ignore it.
   //
-  // `runDelete` is exercised against a command that legitimately cannot exist
-  // rather than against a stubbed wrangler, so the exit code and the stderr are
-  // real. `/nonexistent-binary` exits 127 with no output at all, so the absence
-  // patterns cannot be what carries this — see the next test for the negative
-  // case that proves the patterns do work.
+  // `runDelete` is exercised against the real wrangler with an argument it does
+  // not accept, so the exit code and the stderr are wrangler's own.
   const missing = runDelete(["--definitely-not-a-wrangler-flag"], {
-    env: process.env,
+    env: withWrangler(),
     cwd: process.cwd(),
   });
   assert.equal(
@@ -253,7 +262,7 @@ test("a delete that is refused reports SURVIVED rather than throwing", () => {
   // that threw on the first refusal would leave every LATER resource in place
   // while reporting failure — the opposite of what a cleanup run is for.
   const result = runDelete(["d1", "delete", "definitely-not-a-database-xyz"], {
-    env: process.env,
+    env: withWrangler(),
     cwd: process.cwd(),
   });
   assert.ok(
@@ -267,6 +276,72 @@ test("a delete that is refused reports SURVIVED rather than throwing", () => {
       "a survivor must carry Cloudflare's own words",
     );
   }
+});
+
+test("wrangler is named by the caller, and an unset variable is refused", () => {
+  // The bug this guards is not hypothetical: the script shipped hardcoding
+  // `pnpm exec wrangler`, and `janitor.yml` checks the repository out WITHOUT
+  // installing dependencies, so on the runner every delete would have failed
+  // with "Command wrangler not found" — reported, correctly by the delete path
+  // and very misleadingly by a run summary, as resources that SURVIVED.
+  //
+  // The refusal is the point. Defaulting to the locally-convenient spelling
+  // would make the failure silent and the report wrong; a caller that has not
+  // said how to reach wrangler has not run a teardown.
+  assert.throws(
+    () => wranglerInvocation({}),
+    /PREVIEW_TEARDOWN_WRANGLER is not set/,
+  );
+  assert.throws(
+    () => wranglerInvocation({ PREVIEW_TEARDOWN_WRANGLER: "   " }),
+    /PREVIEW_TEARDOWN_WRANGLER is not set/,
+  );
+
+  // Both spellings the repository actually uses parse into argv the runner can
+  // execute, with no shell between here and spawnSync.
+  assert.deepEqual(
+    wranglerInvocation({ PREVIEW_TEARDOWN_WRANGLER: "pnpm exec wrangler" }),
+    ["pnpm", "exec", "wrangler"],
+  );
+  assert.deepEqual(
+    wranglerInvocation({
+      PREVIEW_TEARDOWN_WRANGLER: "npx --yes wrangler@4.144.0",
+    }),
+    ["npx", "--yes", "wrangler@4.144.0"],
+  );
+});
+
+test("a missing wrangler is refused before the first name is derived", () => {
+  // Ordering, and it is the whole value of the refusal: reached from `main`,
+  // this exits before the plan runs and says "no wrangler". Reached after it,
+  // the same condition would produce nine SURVIVED lines and a summary reading
+  // "some resources survived", which is a different and much more expensive
+  // story to investigate.
+  const env = { ...process.env, PREVIEW_TEARDOWN_WRANGLER: "" };
+  delete env.CLOUDFLARE_API_TOKEN;
+  env.CLOUDFLARE_API_TOKEN = "not-a-real-token";
+
+  const result = spawnSync(
+    process.execPath,
+    ["tooling/scripts/preview-teardown.mjs", "--pr=33"],
+    {
+      cwd: process.cwd(),
+      env,
+      encoding: "utf8",
+    },
+  );
+
+  assert.notEqual(result.status, 0, "a missing wrangler must not exit zero");
+  assert.match(
+    result.stderr,
+    /PREVIEW_TEARDOWN_WRANGLER is not set/,
+    "the failure must name the missing variable, not a Cloudflare error",
+  );
+  assert.equal(
+    /\bdeleted\b/.test(result.stdout),
+    false,
+    "nothing may have been attempted before the refusal",
+  );
 });
 
 test("the custom-domain step is reported as not performed, never approximated", () => {

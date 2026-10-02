@@ -266,6 +266,14 @@ jobs:
     timeout-minutes: 15
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+      # How wrangler is reached, NOT hardcoded in the script. See the step that
+      # sets it, and `wranglerInvocation()` in `preview-teardown.mjs`: a
+      # `pnpm exec wrangler` on a runner with no `node_modules` fails every
+      # delete with "Command wrangler not found", and a failure of that shape is
+      # reported as a resource that SURVIVED rather than as a teardown that never
+      # ran.
+      PREVIEW_TEARDOWN_WRANGLER: ""
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Check out the base repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -278,13 +286,49 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
+      - name: Read the pinned Node and wrangler versions, and put wrangler on PATH
+        # The same arrangement `rollback.yml` uses, and for the same reason it
+        # documents: it already removed a checkout-and-install that was needed
+        # for exactly one wrangler command. `pnpm install` here would be the
+        # whole workspace's dependency graph, resolved and written to disk, in a
+        # job whose only output is which resource names to delete — and it would
+        # put a lifecycle-script execution into a privileged job, which is the
+        # one property this file's trigger is reviewed for not having.
+        #
+        # Two files are read through the API at `main` rather than off the
+        # checked-out tree, so what is installed cannot be chosen by anything
+        # that changed in a pull request.
+        run: |
+          set -euo pipefail
+          read_one() {
+            gh api "repos/$GITHUB_REPOSITORY/contents/$1?ref=main" --jq '.content' \
+              | base64 --decode
+          }
+          NODE_VERSION="$(read_one .node-version | tr -d '[:space:]')"
+          WRANGLER_VERSION="$(read_one package.json \
+            | jq -er '.devDependencies.wrangler | ltrimstr("^") | select(type == "string" and length > 0)')"
+          if [ -z "$NODE_VERSION" ] || [ -z "$WRANGLER_VERSION" ]; then
+            echo "::error::could not read the pinned toolchain from main (node='$NODE_VERSION' wrangler='$WRANGLER_VERSION'). Every wrangler command in this job needs both, and there is no node_modules to fall back on."
+            exit 1
+          fi
+          echo "Node $NODE_VERSION, wrangler $WRANGLER_VERSION (pinned by this repository at main)."
+          echo "NODE_VERSION=$NODE_VERSION" >> "$GITHUB_ENV"
+          echo "PREVIEW_TEARDOWN_WRANGLER=npx --yes wrangler@$WRANGLER_VERSION" >> "$GITHUB_ENV"
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          # Read from the API in the step above rather than `node-version-file`,
+          # which is itself a read of a tree this job deliberately does not trust
+          # for anything else.
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Re-read the state, and stop if it is no longer safe
         # `preview.evidence.$comment`: "the delete path re-reads the state at
         # delete time rather than trusting the state at job start." A run that
         # decided four minutes ago may have been overtaken by a reopen.
         env:
           PR: ${{ needs.evidence.outputs.pr }}
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if ! STATE="$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json state --jq '.state' 2>&1)"; then
@@ -317,8 +361,7 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
-          node tooling/scripts/preview-teardown.mjs --pr="$PR"
-          echo "exit=$?" >> "$GITHUB_OUTPUT"
+          node tooling/scripts/preview-teardown.mjs --pr="$PR" || echo "exit=$?" >> "$GITHUB_OUTPUT"
 
       - name: Write down what survived
         if: always()
@@ -368,12 +411,39 @@ jobs:
     timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.ECOMA_CLOUDFLARE_API_TOKEN }}
+      WRANGLER_VERSION: ""
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Check out the base repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
+
+      - name: Read the pinned Node and wrangler versions, and put wrangler on PATH
+        # Identical to the `teardown` job's step, and for the same reason: the
+        # sweeper needs wrangler, and the runner has no `node_modules` and no
+        # reason to have one.
+        run: |
+          set -euo pipefail
+          read_one() {
+            gh api "repos/$GITHUB_REPOSITORY/contents/$1?ref=main" --jq '.content' \
+              | base64 --decode
+          }
+          NODE_VERSION="$(read_one .node-version | tr -d '[:space:]')"
+          WRANGLER_VERSION="$(read_one package.json \
+            | jq -er '.devDependencies.wrangler | ltrimstr("^") | select(type == "string" and length > 0)')"
+          if [ -z "$NODE_VERSION" ] || [ -z "$WRANGLER_VERSION" ]; then
+            echo "::error::could not read the pinned toolchain from main (node='$NODE_VERSION' wrangler='$WRANGLER_VERSION'). The sweep lists the account with wrangler and has no node_modules to fall back on."
+            exit 1
+          fi
+          echo "NODE_VERSION=$NODE_VERSION" >> "$GITHUB_ENV"
+          echo "WRANGLER_VERSION=$WRANGLER_VERSION" >> "$GITHUB_ENV"
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: List the account's Workers and queues that match the preview grammar
         id: found
@@ -383,8 +453,17 @@ jobs:
           # then filtered through the SAME guards the delete path uses, by
           # `preview-teardown.mjs --dry-run`, so a name the grammar does not
           # recognise is never even proposed for deletion.
-          wrangler deployments list --json > "$RUNNER_TEMP/deployments.json" 2>/dev/null \
-            || echo '[]' > "$RUNNER_TEMP/deployments.json"
+          #
+          # An empty listing here is REPORTED as empty, never treated as "no
+          # previews exist": the failure this guard is for is a listing that
+          # failed and left `[]` behind, which would otherwise be a nightly run
+          # that confidently says the account is clean.
+          if ! npx --yes "wrangler@$WRANGLER_VERSION" deployments list --json > "$RUNNER_TEMP/deployments.json" 2>"$RUNNER_TEMP/deployments.err"; then
+            echo "::error::could not list the account's deployments; the sweep reports nothing rather than an empty account: $(tail -c 400 "$RUNNER_TEMP/deployments.err" | tr '\n' ' ')"
+            exit 1
+          fi
+          head -c 200 "$RUNNER_TEMP/deployments.json"
+          echo
 
           prs="$(node tooling/scripts/list-preview-prs.mjs --json < "$RUNNER_TEMP/deployments.json")"
           echo "$prs" | tee "$RUNNER_TEMP/prs.json"

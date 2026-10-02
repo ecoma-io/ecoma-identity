@@ -228,6 +228,44 @@ const ALREADY_ABSENT = [
 ];
 
 /**
+ * How wrangler is invoked, and why it is not decided here.
+ *
+ * `pnpm exec wrangler` resolves out of `node_modules/`, so on a runner that only
+ * checked the repository out — no `pnpm install` — every delete above fails with
+ * `Command "wrangler" not found`, and a failure this shape is reported as a
+ * resource that SURVIVED rather than as a teardown that never ran. That is the
+ * worst possible reading of a run: every name in the plan reported as
+ * undeleted, with no sign that the tool itself was missing.
+ *
+ * `rollback.yml` hit exactly this and solved it by reading the pinned Node and
+ * wrangler versions through the API at `main` and running `npx wrangler@<pin>`.
+ * So the caller decides, and the decision is an ENVIRONMENT VARIABLE rather than
+ * a constant: a local `pnpm test` and a tokenless GitHub runner cannot both be
+ * the hardcoded spelling. `PREVIEW_TEARDOWN_WRANGLER` is argv before the delete's
+ * own argv, split on whitespace, so a caller that needs `npx --yes
+ * wrangler@4.144.0` sets exactly that and nothing else changes here.
+ *
+ * Empty is refused rather than defaulted, because "the caller decided nothing"
+ * and "the caller decided the obvious thing" must not be the same answer when
+ * the second one is wrong on a bare runner.
+ */
+export const WRANGLER_INVOCATION_ENV = "PREVIEW_TEARDOWN_WRANGLER";
+
+export function wranglerInvocation(env) {
+  const raw = (env?.[WRANGLER_INVOCATION_ENV] ?? "").trim();
+  if (raw === "") {
+    throw new Error(
+      `${WRANGLER_INVOCATION_ENV} is not set. It is argv before the delete's own ` +
+        `arguments, for example "pnpm exec wrangler" locally or ` +
+        `"npx --yes wrangler@4.144.0" on a runner with no node_modules. It is ` +
+        `refused rather than defaulted: a default that works locally and fails ` +
+        `on the runner is how a teardown reports every resource as surviving.`,
+    );
+  }
+  return raw.split(/\s+/);
+}
+
+/**
  * Run one delete, returning what happened rather than throwing.
  *
  * NEVER rethrows a delete failure. A janitor that stops at the first refusal
@@ -236,7 +274,8 @@ const ALREADY_ABSENT = [
  * caller's summary has to be able to say exactly which ones survived.
  */
 export function runDelete(argv, { env, cwd }) {
-  const run = spawnSync("pnpm", ["exec", "wrangler", ...argv], {
+  const [command, ...prefix] = wranglerInvocation(env);
+  const run = spawnSync(command, [...prefix, ...argv], {
     cwd,
     env,
     encoding: "utf8",
@@ -263,11 +302,14 @@ const USAGE = `Usage: node tooling/scripts/preview-teardown.mjs --pr=<n> [--json
   --json       Emit one JSON report on stdout instead of prose.
   --dry-run    Print the plan and the refusals, delete nothing.
 
-Requires CLOUDFLARE_API_TOKEN in the environment. The PR's state is NOT read
-here: this script refuses anything that is not a closed pull request's own
-resources by NAME, and the workflow re-reads GitHub's answer immediately before
-calling it. A caller that cannot establish closure must not call this at all —
-see preview.evidence.on_unknown, which is do-not-delete.
+Requires CLOUDFLARE_API_TOKEN in the environment, and PREVIEW_TEARDOWN_WRANGLER
+naming the wrangler command to run (argv before the delete's own arguments) —
+"pnpm exec wrangler" where node_modules exists, "npx --yes wrangler@<pin>" on a
+runner that only checked the repository out. The PR's state is NOT read here:
+this script refuses anything that is not a closed pull request's own resources
+by NAME, and the workflow re-reads GitHub's answer immediately before calling
+it. A caller that cannot establish closure must not call this at all — see
+preview.evidence.on_unknown, which is do-not-delete.
 `;
 
 export function parseArgs(argv) {
@@ -305,6 +347,19 @@ function main(argv) {
         "process listing.\n",
     );
     return EXIT_CANNOT_RUN;
+  }
+
+  // Checked here, before the first name is derived, for the same reason the
+  // token is: a missing wrangler is not a resource that survived a delete, and
+  // `runDelete` would report it as one. Failing before the plan runs says which
+  // of the two it was.
+  if (!options.dryRun) {
+    try {
+      wranglerInvocation(process.env);
+    } catch (error) {
+      reportFailure("preview-teardown", error);
+      return EXIT_CANNOT_RUN;
+    }
   }
 
   let topology;
