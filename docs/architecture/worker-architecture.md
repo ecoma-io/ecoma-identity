@@ -112,12 +112,13 @@ holds exactly one binding, and it is not on any axis the table measures:
 
 There is no `—`, because there is nothing to elide: `home-web` has no `IDENTITY_DB`
 row to dash, no `IDENTITY` service-binding row to dash, no `JOBS_KV` row. Its
-three environment configs, generated from
+three fixed environment configs, generated from
 [../../infra-topology/topology.json](../../infra-topology/topology.json) into
 `.generated/cloudflare/{development,staging,production}/home-web/`, declare
-`ASSETS` and nothing else. The architecture gate refuses an Identity
-binding there, which is what makes the absence a property of the system rather
-than a fact about today's files — see
+`ASSETS` and nothing else — and so does its preview config, which is rendered
+during the deploy rather than by `pnpm infra:render`. The architecture gate
+refuses an Identity binding there, which is what makes the absence a property of
+the system rather than a fact about today's files — see
 [trust-boundaries.md](trust-boundaries.md) §10.
 
 `home-web` has no `/health` and no `/ready` either, so the route table below does

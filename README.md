@@ -155,10 +155,13 @@ and is enforced from `cargo metadata`, not from source text.
 
 ## Deployment
 
-Three environments — `development`, `staging`, `production` — declared in
-`infra-topology/topology.json` and nowhere else. The wrangler configuration is
+Four environments — `development`, `staging`, `preview`, `production` — declared
+in `infra-topology/topology.json` and nowhere else. The wrangler configuration is
 generated from it by `pnpm infra:render` into `.generated/`, which is not
-tracked. Staging deploys automatically on a merge to `main`.
+tracked. Staging deploys automatically on a merge to `main`. Preview deploys on
+every push to a pull request that changes a deployable, and **its deploys fail
+today**: `identity` binds an `EMAIL_PROVIDER` service naming a stub Worker that
+does not exist yet, and nothing deletes a preview — there is no cleanup workflow.
 Production promotes **immutable Worker versions** through a canary ladder:
 smoke → 1% → health gate → 10% → **human approval** → 50% → 100%. Admin and
 Jobs go to 100% automatically; they hold no data, so the blast radius of a bad
