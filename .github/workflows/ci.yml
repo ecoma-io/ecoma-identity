@@ -160,6 +160,53 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # -------------------------------------------------------------------------
+      # THE THREE VERIFY GATES THAT NOTHING WAS RUNNING.
+      #
+      # `pnpm verify` runs ten checks. `moon ci` below covers most of them, but
+      # not these three, and the reason is structural rather than an oversight:
+      # `moon ci` is an AFFECTED graph, and no moon project owns `contracts/`,
+      # `infra-topology/` or the root Cargo workspace's rustfmt state. A change
+      # inside `tooling/scripts/` or `contracts/` moves no project's paths, so
+      # `moon ci` correctly answers "no tasks affected" — verified rather than
+      # assumed: a probe commit touching only `tooling/scripts/` still produced
+      # "No tasks affected by changed files".
+      #
+      # So each of these was a gate a contributor ran and CI did not:
+      #
+      #   cargo fmt --all -- --check   NO rustfmt GATE EXISTED ANYWHERE IN CI.
+      #                               Only `lefthook.yml` ran it, on staged
+      #                               files, on a contributor's machine — and
+      #                               lefthook's `files:` pattern cannot see a
+      #                               reformat that spans two files, or one
+      #                               caused by a change to a rustfmt config.
+      #   pnpm contracts               the four API contracts, including the
+      #                               check that `contracts/oidc/v1/README.md`
+      #                               agrees with the Rust route table.
+      #   pnpm topology:validate       the deployment topology can describe only
+      #                               what this repository means.
+      #
+      # All three are pure Node plus a local rustfmt — about a second together,
+      # against a 30-minute job timeout. The price of not having them was a red
+      # run for whoever happened to push next, which is the same defect as a
+      # check that cannot run.
+      #
+      # WHY THESE ARE HERE AND NOT IN A NEW JOB: they need no toolchain beyond
+      # what this job already installed, they are the same commands `pnpm
+      # verify` runs so a contributor and CI reach the same verdict, and a
+      # separate job would buy a separate 30-minute timeout for three seconds of
+      # work. If one of them ever needs a toolchain this job does not have, it
+      # moves to its own job rather than growing this one.
+      #
+      # `cargo fmt` is the only Rust command added, and it is a check rather
+      # than a build: no target needed, no compilation, no `Cargo.lock` churn.
+      - name: Rust formatting (the gate CI never had)
+        run: cargo fmt --all -- --check
+      - name: API contracts agree with the code beside them
+        run: pnpm contracts
+      - name: The deployment topology is internally coherent
+        run: pnpm topology:validate
+
       # Every pull-request commit reaches main verbatim — under merge-commit
       # merging as the SAME object, through the merge's second parent — and the
       # local commit-msg hook cannot see history it was not installed for, so
@@ -396,6 +443,43 @@ jobs:
       # builds because it is an independent deployable with no Worker dependency.
       - name: Build home-web (Nuxt/Nitro application)
         run: pnpm exec moon run home-web:package
+
+      # `wasm-opt` IS A SHARED-CACHE RACE, AND THE FIX IS TO WIN IT ONCE HERE.
+      #
+      # `worker-build` downloads a `wasm-opt` binary into
+      # `~/.cache/worker-build/` and caches it. `moon run :wrangler-validate`
+      # runs one `wrangler-validate` per deployable, and with
+      # `MOON_CONCURRENCY=4` those three run AT THE SAME TIME — so on a cold
+      # cache all three decide the binary is absent and all three try to write
+      # it. Two of them get `Text file busy (os error 26)` from the kernel,
+      # which is what happens when a file is being executed while another
+      # process writes to it, and the job dies with a wasm error that has
+      # nothing to do with any wrangler config.
+      #
+      # This is not hypothetical: it failed the run on 2026-10-02 at 11:07Z
+      # and passed the two runs before it, which is the signature of a race and
+      # not of a defect in a config. `build_and_upload` never sees it because
+      # that job's four jobs each build ONE Worker.
+      #
+      # Warming the cache in a step of its own, before any parallelism exists,
+      # removes the race rather than hiding its symptom. It is `continue-on-
+      # error` because this step is an optimisation and the task below is the
+      # check: if the warm-up cannot download, `worker-build` downloads it
+      # itself and the real failure — a genuine compile error in a genuine
+      # config — still fails the job. The alternative, `MOON_CONCURRENCY=1`,
+      # would also remove the race and would serialise every other task in the
+      # repository to do it.
+      - name: Warm the shared wasm-opt cache before the tasks run in parallel
+        continue-on-error: true
+        run: |
+          cargo install -q "worker-build@^0.8" --locked
+          worker-build --version || true
+          if [ -d "$HOME/.cache/worker-build" ]; then
+            echo "worker-build cache present:"
+            ls -1 "$HOME/.cache/worker-build"
+          else
+            echo "::notice::worker-build did not populate a cache; the validate tasks will download it themselves."
+          fi
 
       - name: Validate every wrangler config (real dry-run, uploads nothing)
         run: pnpm exec moon run :wrangler-validate

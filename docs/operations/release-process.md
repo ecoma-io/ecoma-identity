@@ -11,14 +11,14 @@ knows which part is a decision and which part is a script.
 
 | Fact                                                              | State                                                                            |
 | ----------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Release Please owns version, release PR and tag                   | `PLANNED` — decided; the config file is `DEFERRED`                               |
-| The release PR is merged by a human                               | `PLANNED` — constraint 17                                                        |
-| Post-tag build, version upload and smoke test are automatic       | `PLANNED` — constraint 18; the workflow is `DEFERRED`                            |
-| Staging deploys automatically after a merge to the default branch | `PLANNED` — constraint 16; the workflow is `DEFERRED`                            |
-| Production promotion of `identity` needs two human approvals      | `PLANNED` — constraint 19; the workflow is `DEFERRED`                            |
+| Release Please owns version, release PR and tag                   | `IMPLEMENTED` — `release.yml`, `release-please-config.json`, the manifest        |
+| The release PR is merged by a human                               | `IMPLEMENTED` — constraint 17; enforced by the merge queue, not by the workflow  |
+| Post-tag build, version upload and smoke test are automatic       | `IMPLEMENTED` — `deploy-worker.yml`; the run it starts has never happened        |
+| Staging deploys automatically after a merge to the default branch | `IMPLEMENTED` — `deploy.yml:42-43`, `push` to `branches: [main]`                 |
+| Production promotion of `identity` needs two human approvals      | `IMPLEMENTED` — two jobs carry `environment: production`; the environment exists |
 | Commitlint validates commit messages at `commit-msg` and in CI    | `IMPLEMENTED` — `commitlint.config.mjs`                                          |
-| A `.release-please-manifest.json`                                 | `DEFERRED` — named in the root `Cargo.toml` comment; the file does not exist yet |
-| Every workflow that does any of the above                         | `DEFERRED` — `.github/workflows/` is empty                                       |
+| A `.release-please-manifest.json`                                 | `IMPLEMENTED` — the file and `release-please-config.json` both exist             |
+| Every workflow that does any of the above                         | `IMPLEMENTED` — eight files; only `release.yml`'s own run is `DEFERRED`          |
 
 **No release has been cut. No tag exists. Nothing has been deployed.**
 
@@ -142,6 +142,34 @@ green check on a broken build; a graph that is wrong in the direction of
 _over_-running is slow and correct. New modules must be added to
 `.moon/workspace.yml` in the same commit that creates them, which is the
 "new module = one commit, four files" rule in `AGENTS.md`.
+
+### What the affected graph cannot see, and what runs anyway
+
+An affected graph has one honest blind spot, and it is worth naming rather than
+leaving to be discovered: **a directory that no moon project owns is not part of
+any project's affected set.** `contracts/`, `infra-topology/` and
+`tooling/` are such directories — documents and scripts that nothing imports and
+nothing depends on. A change inside them moves no project's paths, so `moon ci`
+correctly reports _"No tasks affected by changed files"_ and the affected graph
+does exactly what it promises. Verified rather than assumed: a probe commit
+touching only `tooling/scripts/` produced that exact message.
+
+So the `checks` job runs three `pnpm verify` gates outside `moon ci`, on the whole
+tree, on every trigger:
+
+| Gate                         | What the affected graph would miss                                                                                                                                                                                         |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cargo fmt --all -- --check` | **Any rustfmt violation at all.** There was no rustfmt gate anywhere in CI before this; only `lefthook.yml`, on staged files, on a contributor's machine — and a `files:` pattern cannot see a reformat spanning two files |
+| `pnpm contracts`             | A contract drifting from the code beside it, including `contracts/oidc/v1/README.md` disagreeing with the Rust route table                                                                                                 |
+| `pnpm topology:validate`     | The deployment topology describing something this repository does not mean                                                                                                                                                 |
+
+They are whole-tree on purpose, for the same reason the `architecture` job is: a
+contract that has drifted is a fact about a pair of files rather than about the
+files that changed, and the pair is exactly what an affected graph is blind to.
+
+This is the general rule, and it is the shape any future gate should take: **a
+check belongs in the affected graph if a moon project owns what it reads, and
+beside it as a whole-tree step if nothing does.**
 
 ## The release PR
 

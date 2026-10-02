@@ -41,6 +41,16 @@ const ACCOUNT = "406bdb82319b162b09bf5f137a156600";
 /**
  * The contract, restated from Cloudflare's published API schema. The fake below
  * is written against THIS, not against the script under test.
+ *
+ * `createMethod` and `requiredCreateFields` describe the CREATE operation that
+ * shares each path with the listing. For D1 that overlap is the trap this file
+ * was written for; for KV and queues the create path is separate in Cloudflare's
+ * schema but shares the element shape, and recording it here keeps the fake
+ * honest about all three rather than special-casing the one that bit.
+ *
+ * `element.name` and `element.id` are the LISTING element's fields. They are the
+ * fields a create response carries too, because a create returns the resource
+ * it made in the same shape a listing returns it in.
  */
 const CONTRACT = {
   d1: {
@@ -56,11 +66,15 @@ const CONTRACT = {
   kv: {
     method: "GET",
     path: `/client/v4/accounts/${ACCOUNT}/storage/kv/namespaces`,
+    createMethod: "POST",
+    requiredCreateFields: ["title"],
     element: { name: "title", id: "id" },
   },
   queue: {
     method: "GET",
     path: `/client/v4/accounts/${ACCOUNT}/queues`,
+    createMethod: "POST",
+    requiredCreateFields: ["queue_name"],
     element: { name: "queue_name", id: "queue_id" },
   },
 };
@@ -72,10 +86,29 @@ const CONTRACT = {
  * account. It is paginated at `per_page` exactly as Cloudflare paginates, and it
  * reports `result_info` with the four fields Cloudflare reports and no others.
  *
- * Returns `{ calls }` so a test can assert on what the script SENT.
+ * CREATE IS SUPPORTED, and it mutates the inventory — a POST that passes the
+ * required-field check appends to the fake account, exactly as Cloudflare does.
+ * That is what lets a test distinguish "found it" from "made it and then found
+ * it": the descriptor's id must equal the created element's id either way, but
+ * the CALL LOG says which happened. `calls` records everything, and `created`
+ * records only what the script made.
+ *
+ * Returns `{ calls, created, restore }`.
  */
-function fakeCloudflare({ inventory, perPage = 100 }) {
+function fakeCloudflare({
+  inventory,
+  perPage = 100,
+  duplicateAfterCreate = null,
+}) {
   const calls = [];
+  const created = [];
+  // Mutated in place so a re-list sees the create, which is the whole point of
+  // the fake having a create at all.
+  const state = {
+    d1: [...(inventory.d1 ?? [])],
+    kv: [...(inventory.kv ?? [])],
+    queue: [...(inventory.queue ?? [])],
+  };
   const original = globalThis.fetch;
 
   globalThis.fetch = async (url, init = {}) => {
@@ -119,6 +152,30 @@ function fakeCloudflare({ inventory, perPage = 100 }) {
           ],
         });
       }
+      const nameField = CONTRACT[kind].element.name;
+      const idField = CONTRACT[kind].element.id;
+      const name = body[nameField];
+      const element = {
+        [idField]: `created-${kind}-${state[kind].length + 1}`,
+        [nameField]: name,
+      };
+      state[kind].push(element);
+      created.push({ kind, name, element });
+      // A fault the script must survive: a create that somehow leaves TWO
+      // resources under one name. Cloudflare has no idempotency key, so the
+      // duplicate check is the only thing standing between that and a binding
+      // chosen at random.
+      if (duplicateAfterCreate && duplicateAfterCreate[kind] === name) {
+        state[kind].push({ [idField]: `impostor-${kind}`, [nameField]: name });
+      }
+      // Synchronous: 200 with the resource inline, no 202, no polling.
+      return jsonResponse(200, {
+        success: true,
+        errors: [],
+        messages: [],
+        result: element,
+        result_info: null,
+      });
     }
     if (method !== CONTRACT[kind].method) {
       return jsonResponse(405, {
@@ -127,7 +184,7 @@ function fakeCloudflare({ inventory, perPage = 100 }) {
       });
     }
 
-    const all = inventory[kind] ?? [];
+    const all = state[kind];
     const page = Number(parsed.searchParams.get("page") ?? "1");
     const size = Number(parsed.searchParams.get("per_page") ?? String(perPage));
     const slice = all.slice((page - 1) * size, page * size);
@@ -148,6 +205,7 @@ function fakeCloudflare({ inventory, perPage = 100 }) {
 
   return {
     calls,
+    created,
     restore() {
       globalThis.fetch = original;
     },
@@ -347,19 +405,232 @@ test("the descriptor carries resource ids but never the token that fetched them"
   );
 });
 
-test("a name that does not exist fails, and never invents an id", async () => {
+test("a name that does not exist is CREATED, not reported missing", async () => {
+  // This is the reversal ADR-0021 records. The account starts empty; a deploy
+  // that refuses to run against an empty account never runs at all.
   const inventory = {
     ...INVENTORY,
     d1: [{ uuid: "db-uuid-2", name: "somebody-elses-db" }],
   };
   const fake = fakeCloudflare({ inventory });
+  const { descriptor } = await withReconciler(fake, ({ reconcile }) =>
+    reconcile("staging", "/tmp/reconcile-test-6.json"),
+  );
+  assert.equal(
+    descriptor.resources.d1["ecoma-identity-staging"].id,
+    "created-d1-2",
+    "the staging database must have been made, with the id the account reports",
+  );
+  assert.equal(
+    fake.created.filter((c) => c.kind === "d1").length,
+    1,
+    "exactly one d1 create — the other named database is not ours to touch",
+  );
+});
+
+test("every missing kind is created with the verb, path and body field Cloudflare requires", async () => {
+  // The per-kind create field is a THIRD naming, distinct from both the listing
+  // id field and the common `name`: `title` for KV, `queue_name` for a queue.
+  // A create that sends `{name: ...}` to the KV endpoint provisions nothing and
+  // Cloudflare answers about a property the script never mentioned.
+  const fake = fakeCloudflare({ inventory: { d1: [], kv: [], queue: [] } });
+  const { descriptor } = await withReconciler(fake, ({ reconcile }) =>
+    reconcile("staging", "/tmp/reconcile-test-9.json"),
+  );
+
+  const creates = fake.calls.filter((c) => c.method === "POST");
+  assert.deepEqual(
+    [...new Set(creates.map((c) => c.kind))].sort(),
+    ["d1", "kv", "queue"],
+    "all three kinds must be created on an empty account",
+  );
+  // Indexed by (kind, name), not by kind: two deployables own two KV
+  // namespaces, and keying by kind alone silently keeps only the last one.
+  const createdBy = new Map(
+    creates.map((c) => [
+      `${c.kind}/${c.body[CONTRACT[c.kind].element.name]}`,
+      c,
+    ]),
+  );
+  assert.equal(createdBy.get("d1/ecoma-identity-staging").method, "POST");
+  assert.ok(
+    createdBy.has("kv/identity-staging-kv"),
+    "the identity KV is created",
+  );
+  assert.ok(createdBy.has("kv/jobs-staging-kv"), "the jobs KV is created");
+  assert.ok(createdBy.has("queue/identity-staging"));
+  // The body field per kind, which is what the whole assertion is about.
+  assert.equal(
+    createdBy.get("kv/identity-staging-kv").body.title,
+    "identity-staging-kv",
+  );
+  assert.equal(
+    createdBy.get("kv/identity-staging-kv").body.name,
+    undefined,
+    "a KV namespace is created by `title`; sending `name` provisions nothing",
+  );
+  // And the second queue — the DLQ is a separate name and a separate resource.
+  assert.equal(
+    fake.created.filter((c) => c.name === "identity-staging-dlq").length,
+    1,
+    "the dead-letter queue is its own resource and must be created too",
+  );
+
+  // The descriptor must be complete, not partial.
+  assert.equal(Object.keys(descriptor.resources.d1).length, 1);
+  assert.equal(
+    Object.keys(descriptor.resources.kv).length,
+    2,
+    "identity + jobs KV",
+  );
+  assert.equal(
+    Object.keys(descriptor.resources.queue).length,
+    2,
+    "queue + dlq",
+  );
+});
+
+test("the bound id comes from a re-list, not from the create response", async () => {
+  // A create response is what Cloudflare SAYS it made; a re-list is what the
+  // account CONTAINS. The reconciler must not bind the former.
+  const fake = fakeCloudflare({ inventory: { d1: [], kv: [], queue: [] } });
+  const { descriptor } = await withReconciler(fake, ({ reconcile }) =>
+    reconcile("staging", "/tmp/reconcile-test-10.json"),
+  );
+  const createdName = "ecoma-identity-staging";
+  const fromCreate = fake.created.find((c) => c.name === createdName).element
+    .uuid;
+  // Same value here, because the fake is consistent — what is asserted is the
+  // CALL that produced the binding, not the coincidence of the id.
+  assert.equal(descriptor.resources.d1[createdName].id, fromCreate);
+
+  // The order is the point: a listing strictly AFTER the create. `findIndex` on
+  // the POST, then assert at least one GET follows it.
+  //
+  // The exact URL is what makes this bite. Both listings ask for page 1
+  // per_page 100 and carry no distinguishing parameter, so an earlier version of
+  // this assertion compared URLs, found the pre-create and the post-create
+  // listing byte-identical, and passed a mutation that skipped the re-list
+  // entirely. Comparing positions in the call log is what distinguishes them.
+  const d1Calls = fake.calls.filter((c) => c.kind === "d1");
+  const createAt = d1Calls.findIndex((c) => c.method === "POST");
+  assert.ok(createAt >= 0, "the d1 create must have happened");
+  const listingsAfterCreate = d1Calls
+    .slice(createAt + 1)
+    .filter((c) => c.method === "GET");
+  assert.equal(
+    listingsAfterCreate.length,
+    2,
+    `expected one listing inside createResource and one before the descriptor is resolved:\n${JSON.stringify(
+      d1Calls.map((c) => c.method),
+      null,
+      2,
+    )}`,
+  );
+});
+
+test("a create that leaves a duplicate name is refused, not resolved to one of them", async () => {
+  // No Cloudflare create has an idempotency key, so a concurrent create can
+  // produce two resources under one name. The duplicate check is the only guard.
+  const fake = fakeCloudflare({
+    inventory: { d1: [], kv: [], queue: [] },
+    duplicateAfterCreate: { d1: "ecoma-identity-staging" },
+  });
   await withReconciler(fake, async ({ reconcile }) => {
     await assert.rejects(
-      () => reconcile("staging", "/tmp/reconcile-test-6.json"),
-      /no d1 named "ecoma-identity-staging" exists/,
-      "a typo in topology must be a failed run, not a guessed binding",
+      () => reconcile("staging", "/tmp/reconcile-test-11.json"),
+      /2 d1 resources are named/,
+      "binding one of two same-named databases is how a deploy writes into the wrong one",
     );
   });
+});
+
+test("--deployable asks for one deployable's resources and no others", async () => {
+  // The four staging jobs run in parallel, one per deployable. Each must not be
+  // charged a listing of resources it does not bind — and must not create them.
+  const fake = fakeCloudflare({ inventory: { d1: [], kv: [], queue: [] } });
+  await withReconciler(fake, ({ reconcile }) =>
+    reconcile("staging", "/tmp/reconcile-test-12.json", {
+      deployable: "identity-jobs",
+    }),
+  );
+  assert.equal(
+    fake.created.filter((c) => c.name === "jobs-staging-kv").length,
+    1,
+    "the jobs KV must be created",
+  );
+  assert.equal(
+    fake.created.filter((c) => c.name !== "jobs-staging-kv").length,
+    0,
+    `identity-jobs owns no D1 and no queue; nothing else may be provisioned:\n${JSON.stringify(fake.created)}`,
+  );
+  assert.equal(
+    fake.calls
+      .filter((c) => c.method === "GET")
+      .map((c) => c.kind)
+      .filter((k) => k === "d1").length,
+    0,
+    "no D1 listing may happen for a deployable that declares no D1",
+  );
+});
+
+test("a deployable declaring no resources makes no API call at all", async () => {
+  // `identity-admin` and `home-web` declare nothing. Three listings to learn
+  // that is three round trips per run, four times over, for an answer that is
+  // already in topology.json.
+  const fake = fakeCloudflare({ inventory: { d1: [], kv: [], queue: [] } });
+  const { descriptor } = await withReconciler(fake, ({ reconcile }) =>
+    reconcile("staging", "/tmp/reconcile-test-13.json", {
+      deployable: "identity-admin",
+    }),
+  );
+  assert.equal(
+    fake.calls.length,
+    0,
+    `nothing should have been called:\n${JSON.stringify(fake.calls, null, 2)}`,
+  );
+  assert.equal(
+    descriptor.resources.d1 && Object.keys(descriptor.resources.d1).length,
+    0,
+  );
+});
+
+test("an account with nothing in it reconciles to a complete descriptor and exits zero", async () => {
+  // The first deploy onto a fresh account. It must succeed, not fail.
+  const fake = fakeCloudflare({ inventory: { d1: [], kv: [], queue: [] } });
+  const { descriptor } = await withReconciler(fake, ({ reconcile }) =>
+    reconcile("staging", "/tmp/reconcile-test-14.json"),
+  );
+  assert.equal(descriptor.account, ACCOUNT);
+  assert.equal(descriptor.environment, "staging");
+  assert.equal(Object.keys(descriptor.resources.d1).length, 1);
+  assert.equal(Object.keys(descriptor.resources.kv).length, 2);
+  assert.equal(Object.keys(descriptor.resources.queue).length, 2);
+  for (const [kind, bucket] of Object.entries(descriptor.resources)) {
+    for (const [name, entry] of Object.entries(bucket)) {
+      assert.ok(
+        typeof entry.id === "string" && entry.id.length > 0,
+        `${kind}/${name} bound an empty id`,
+      );
+    }
+  }
+});
+
+test("an unknown --deployable is refused rather than silently reconciling everything", async () => {
+  // A typo in the flag would otherwise reconcile the whole environment — and on
+  // an empty account, provision all of it.
+  const fake = fakeCloudflare({ inventory: { d1: [], kv: [], queue: [] } });
+  await withReconciler(fake, async ({ reconcile }) => {
+    await assert.rejects(
+      () =>
+        reconcile("staging", "/tmp/reconcile-test-15.json", {
+          deployable: "identit-admin",
+        }),
+      /no deployable named "identit-admin"/,
+      "a misspelled deployable must not fall back to reconciling everything",
+    );
+  });
+  assert.equal(fake.calls.length, 0);
 });
 
 test("a duplicate name is refused rather than resolved to one of them", async () => {

@@ -128,9 +128,49 @@ in `.output/` at that moment rather than the bytes the `package` task verified.
 
 ### Its smoke contract
 
-The three Identity Workers are smoke tested by requiring `/health` and `/ready`
-to answer 200. `home-web` has neither route — it is a public site, not an Identity
-Worker, and it holds no readiness state to report. Its smoke contract is:
+The smoke contract is **per-deployable**, and that is not a detail of how it is
+written — it is what makes it true. The three Identity Workers do not agree about
+what an unready service looks like on the wire, and a single contract for all
+three is a contract at least two of them cannot satisfy:
+
+| Deployable       | `/health` | `/ready` | Decided by                                                   |
+| ---------------- | --------- | -------- | ------------------------------------------------------------ |
+| `identity`       | 200       | **200**  | `Route::status()` — `apps/identity/worker/src/lib.rs`        |
+| `identity-admin` | 200       | **503**  | `Answer::status()` — `apps/identity-admin/worker/src/lib.rs` |
+| `identity-jobs`  | 200       | **503**  | `Answer::status()` — `apps/identity-jobs/worker/src/lib.rs`  |
+
+`/health` is liveness and all three answer 200. `/ready` is not uniform: the two
+composition roots answer **503**, which is what an unready service answers, and
+requiring 200 from them was a false claim about deployables that had never been
+promotable at all — `promote_to_final` needs `smoke`, so a uniform 200 made those
+two permanently unreachable in every lane.
+
+**The body is asserted, not only the status.** A status match cannot tell an
+honest Worker from one that has begun claiming a readiness it does not have, so
+each `/ready` response is read and must carry that deployable's own unambiguous
+un-readiness marker:
+
+- `identity` must carry `"ready": false` **and**
+  `"authentication": "not_implemented"`;
+- `identity-admin` and `identity-jobs` must carry `"status": "not_ready"`.
+
+A Worker answering the status in its row while having dropped these fields fails
+smoke. That is the assertion that keeps a green run from ever being the reason
+anyone believes this repository can authenticate somebody.
+
+An unrecognised deployable is a hard error rather than a default: a fallback would
+be a contract nobody reviewed, applied to a deployable nobody checked.
+
+The `/ready` **asymmetry is filed, not resolved** — see
+[issue #24](https://github.com/ecoma-io/ecoma-identity/issues/24). `identity`
+answering 200 while carrying `ready: false` means the three Workers do not agree
+about what an unready bootstrap looks like on the wire. Making `identity` answer
+503 would change how Cloudflare routes a version on `/ready`, which is a question
+about probe semantics and not about this check; the workflow accepts what each
+binary is built to answer rather than changing what it is built to answer.
+
+`home-web` has neither route — it is a public site, not an Identity Worker, and it
+holds no readiness state to report. Its smoke contract is:
 
 1. `GET /` answers **200**;
 2. the HTML contains the landing page's stable markers (`<title>Ecoma</title>`
@@ -297,6 +337,22 @@ and an environment is a thing the runner refuses to pass. The identity and
 `home-web` promotion jobs for 50% and 100% carry `environment: production`; the
 jobs at 1% and 10% do not.
 
+**The environment exists, and what it will do.** `production` is configured with
+a required-reviewer rule and `prevent_self_review`, recorded in
+`[.github/repository-settings.json](../../.github/repository-settings.json)` and
+verified live with `GET /repos/ecoma-io/ecoma-identity/environments`. Before
+this repository had one, every job above ran straight through: GitHub creates an
+undeclared environment implicitly, without protection rules, the first time a
+job names one.
+
+The named reviewer is the account that pushes, and `prevent_self_review` forbids
+it from approving its own deployment. **So both production gates will stop at
+`Waiting for approval` until a second person is added as a collaborator and as an
+environment reviewer.** That is the gate functioning rather than broken — a
+repository of one cannot satisfy a two-eyes rule by itself, and the alternative
+setting would be an approval that approves itself. The job is not stuck; it waits,
+and a reviewer releases it from the run's deployment page.
+
 ## Environments
 
 Three environments, each one a block in `infra-topology/topology.json`:
@@ -340,6 +396,38 @@ making it more informative. The staging environment has its own database and its
 own KV; nothing is shared with production, because a shared staging database is a
 staging environment that can corrupt production data through a test. `home-web`
 has no database or KV at all, so this is a statement about the Identity Workers.
+
+## Which jobs check the repository out, and why
+
+**One job does.** `build_and_upload` checks the repository out, installs the
+workspace and builds — it is the only job that produces bytes.
+
+The other four Cloudflare jobs — `canary`, `smoke`, and the three promotions —
+**do not check the repository out at all**, and none of them builds. That is not a
+speed optimisation; it is the mechanical expression of ADR-0013. A promotion names
+an already-uploaded Version id, and what makes that safe is that the bytes it
+sends traffic to are the bytes that were built, uploaded and smoke-tested. Any
+toolchain in those jobs is a toolchain that could grow a build step, and a build
+step in a promotion is a rebuild.
+
+What replaced the checkout, and where each piece comes from:
+
+| What                           | Where it comes from in a no-checkout job                          |
+| ------------------------------ | ----------------------------------------------------------------- |
+| Node version                   | `.node-version`, read through the contents API at `main`          |
+| wrangler version               | `package.json`'s `devDependencies.wrangler`, same API             |
+| wrangler itself                | `npx --yes wrangler@<pinned>`, from the npm registry              |
+| Cloudflare account id          | `infra-topology/topology.json`, same API                          |
+| the failure-annotation wrapper | `tooling/scripts/wrangler-step.sh`, same API, into `$RUNNER_TEMP` |
+
+All five are read at `main`, not at the running SHA — the same rule
+[rollback.md](rollback.md) uses, and for the same reason: a rollback must read the
+repository as it is now, not the mid-incident commit that happened to be running.
+
+`smoke` is the strongest case: it calls no API, reads no file and runs no wrangler
+at all. It is `curl`, `grep` and `jq` against a public host, and it carries no
+Cloudflare API token — a credential a job never uses is a credential that can leak
+from a job that does.
 
 ## What is deployed from what
 

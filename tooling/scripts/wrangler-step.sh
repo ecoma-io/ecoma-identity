@@ -25,6 +25,26 @@
 #     that only exists in the log is a message most people never read.
 #
 # ---------------------------------------------------------------------------
+# WHICH WRANGLER THIS RUNS
+# ---------------------------------------------------------------------------
+# `$WRANGLER_BIN` names the binary; everything else here is the same either way.
+# The default is `pnpm exec wrangler`, which resolves the binary out of
+# `node_modules` and is what a job with a checkout and an install wants.
+#
+# A job with NEITHER sets `$WRANGLER_BIN` to `npx --yes wrangler@$VERSION` and
+# gets wrangler from the npm registry instead, which is how `rollback.yml`
+# already runs — and how the promotion jobs in `deploy-worker.yml` now run, so
+# that promoting a version does not require checking the repository out and
+# installing 1,400 dependencies to execute one command.
+#
+# The two spellings are deliberately NOT unified. `pnpm exec` resolves against
+# the lockfile-installed tree, which is a *different* wrangler than
+# `wrangler@$VERSION` from the registry if `package.json` and the lockfile ever
+# disagree; the pinned-registry form is reproducible on its own, and the
+# pnpm form is what CI's other jobs already exercise. Making the wrapper choose
+# one silently would hide that difference rather than remove it.
+#
+# ---------------------------------------------------------------------------
 # SECRETS
 # ---------------------------------------------------------------------------
 # The Cloudflare token is read by wrangler from the ENVIRONMENT and is never
@@ -59,6 +79,12 @@ fi
 LABEL="$1"
 shift 2
 
+# Unquoted on purpose: this is a COMMAND, not a name, and the no-checkout jobs
+# set `npx --yes wrangler@4.144.0`. Word-splitting it into argv is the point.
+# Every caller sets it to a literal in the workflow file — nothing in a checked
+# file, a version id or a response body reaches this string.
+WRANGLER_BIN="${WRANGLER_BIN:-pnpm exec wrangler}"
+
 # ---------------------------------------------------------------------------
 # STDOUT PASSES THROUGH, THE LOG GOES TO STDERR.
 # ---------------------------------------------------------------------------
@@ -77,7 +103,7 @@ LOG="$(mktemp)"
 trap "rm -f '$LOG'" EXIT
 
 set +e
-pnpm exec wrangler "$@" 2> >(tee -a "$LOG" >&2) | tee -a "$LOG"
+$WRANGLER_BIN "$@" 2> >(tee -a "$LOG" >&2) | tee -a "$LOG"
 STATUS="${PIPESTATUS[0]}"
 set -e
 
@@ -90,7 +116,7 @@ if [ "$STATUS" -ne 0 ]; then
   echo ""
   echo "The full wrangler output is in this step's log above. This step ran:"
   echo ""
-  echo '    pnpm exec wrangler '"$*"
+  echo "    $WRANGLER_BIN $*"
   echo ""
   echo "Nothing was uploaded and no traffic moved."
 fi
