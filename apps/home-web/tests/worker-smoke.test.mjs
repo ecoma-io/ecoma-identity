@@ -23,11 +23,24 @@ const CONFIG = path.join(
   "home-web",
   "wrangler.jsonc",
 );
+// The same render writes the browser-safe frontend projection, which is where
+// the locale cookie's name for THIS environment comes from. The test reads it
+// rather than writing a name down: a name written here would be a second owner
+// of a value `infra-topology` owns, and the assertion below would keep passing
+// against a build that used a different one — which is the failure mode of the
+// bug this projection was introduced to remove.
+const FRONTEND_CONFIG = path.join(
+  WORKSPACE_ROOT,
+  ".generated",
+  "frontend",
+  "config.json",
+);
 const PORT = 8794;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 
 let worker;
 let output = "";
+let localeCookieName = "";
 
 async function waitForWorker() {
   const deadline = Date.now() + 60_000;
@@ -76,6 +89,18 @@ before(async () => {
     fs.existsSync(CONFIG),
     `the renderer reported success but ${CONFIG} does not exist`,
   );
+
+  assert.ok(
+    fs.existsSync(FRONTEND_CONFIG),
+    `the renderer reported success but ${FRONTEND_CONFIG} does not exist, so the build under test was made against some earlier environment's preferences`,
+  );
+  const frontendConfig = JSON.parse(fs.readFileSync(FRONTEND_CONFIG, "utf8"));
+  assert.equal(
+    frontendConfig.environment,
+    "development",
+    `${FRONTEND_CONFIG} describes ${JSON.stringify(frontendConfig.environment)}; this test asserts development behaviour, so a leftover render from another environment would make every assertion below meaningless`,
+  );
+  localeCookieName = frontendConfig.cookie.name;
 
   assert.ok(
     fs.existsSync(path.join(APP_ROOT, ".output", "server", "index.mjs")),
@@ -156,9 +181,13 @@ test("the root redirects to a locale prefix rather than serving a page", async (
 });
 
 test("the root redirect honours a stored locale cookie", async () => {
+  assert.ok(
+    localeCookieName,
+    "the development locale cookie name was not read from the projection",
+  );
   const response = await fetch(`${ORIGIN}/`, {
     redirect: "manual",
-    headers: { cookie: "ecoma_locale=vi" },
+    headers: { cookie: `${localeCookieName}=vi` },
   });
   assert.ok(
     response.status >= 300 && response.status < 400,

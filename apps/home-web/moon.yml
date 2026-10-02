@@ -9,6 +9,38 @@
 tags:
   - home-web
 
+# Render the browser-safe frontend projection that `nuxt.config.ts` reads, into
+# the one path every frontend imports: `.generated/frontend/config.json`. The
+# values come from `infra-topology` (see docs/architecture/frontend-preferences.md),
+# so which environment this is decides which cookie name, cookie domain and site
+# URL the bundle is built with — never a value written in this file.
+#
+# THE `rm` IS NOT DECORATION. `.generated/` is shared by every frontend in the
+# repository and survives between tasks. Without the delete, a render that fails
+# leaves the previous environment's file in place and the task proceeds against
+# it — a preview silently shipping the production cookie name, which is exactly
+# the failure the per-environment namespace exists to prevent. `set -eu` stops
+# the task at the failed render before `nuxt` is reached. Delete first, render
+# second: the worst case is then a loud "config is missing" error, which
+# `nuxt.config.ts` throws with a named message.
+#
+# WHY INLINE, IN EACH OF THE FOUR TASKS THAT READ IT, INSTEAD OF A TASK OR A
+# `deps:` EDGE. `deps:` names another task in this project; the renderer is a
+# workspace-root script, so an inline `script` is the mechanism Moon offers. The
+# cost is that Moon's content hashing cannot see the file the command produces —
+# which is why every task that renders sets `options: { cache: false }`: a cached
+# `build` would serve a frontend config built against a topology the cache never
+# looked at. This is the reasoning `test` records for its own inputs.
+#
+# WHY `FRONTEND_ENVIRONMENT` IS UNSET BY DEFAULT, AND `FRONTEND_PR` IS FORWARDED
+# FOR `preview` ALONE. Development, because it is the only environment needing no
+# credential and no argument, and a frontend build is credential-free by
+# construction (ADR-0009, §27). A PR number on a fixed environment is an error the
+# renderer raises rather than ignores, and it should stay one: `pr{pr}-home…` is
+# a real hostname, and rendering a PR host for a fixed environment is the class of
+# bug the namespace exists to prevent. A preview with no number therefore fails
+# loudly rather than emitting a host containing a literal `{pr}`.
+
 tasks:
   format-check:
     script: '"$MOON_WORKSPACE_ROOT/node_modules/.bin/prettier" --check --ignore-unknown .'
@@ -22,13 +54,32 @@ tasks:
       - "**/*.{js,mjs,cjs,ts,vue}"
     outputs: []
 
+  # Renders the projection first: `nuxt typecheck` loads `nuxt.config.ts`, which
+  # throws by name if the config is absent, so a typecheck without the render
+  # would report a missing file rather than a type error.
   typecheck:
-    script: 'cd "$MOON_PROJECT_ROOT" && "$MOON_PROJECT_ROOT/node_modules/.bin/nuxt" typecheck'
+    script: |
+      set -eu
+      cd "$MOON_PROJECT_ROOT"
+      rm -f "$MOON_WORKSPACE_ROOT/.generated/frontend/config.json"
+      if [ "${FRONTEND_ENVIRONMENT:-development}" = "preview" ]; then
+        : "${FRONTEND_PR:?FRONTEND_PR must be the pull request number when FRONTEND_ENVIRONMENT=preview; the renderer will not invent a preview hostname.}"
+        node "$MOON_WORKSPACE_ROOT/tooling/scripts/render-wrangler-config.mjs" \
+          --stage offline --environment preview --pr "$FRONTEND_PR" \
+          --deployable home-web --write
+      else
+        node "$MOON_WORKSPACE_ROOT/tooling/scripts/render-wrangler-config.mjs" \
+          --stage offline --environment "${FRONTEND_ENVIRONMENT:-development}" \
+          --deployable home-web --write
+      fi
+      "$MOON_PROJECT_ROOT/node_modules/.bin/nuxt" typecheck
     inputs:
       - "**/*.{ts,vue}"
       - "nuxt.config.ts"
       - "tsconfig.json"
     outputs: []
+    options:
+      cache: false
 
   test:
     script: 'cd "$MOON_PROJECT_ROOT" && node --test tests/worker-smoke.test.mjs'
@@ -45,28 +96,83 @@ tasks:
       - ".output/**/*"
     outputs: []
 
+  # Uncached on purpose; see the note on `cache: false` above. `build` reads the
+  # projected config through an inline shell command rather than a `deps:` edge,
+  # so Moon cannot hash the file that command produced — a cached build here
+  # would be a build against a topology nobody looked at.
   build:
-    script: 'cd "$MOON_PROJECT_ROOT" && "$MOON_PROJECT_ROOT/node_modules/.bin/nuxt" build'
+    script: |
+      set -eu
+      cd "$MOON_PROJECT_ROOT"
+      rm -f "$MOON_WORKSPACE_ROOT/.generated/frontend/config.json"
+      if [ "${FRONTEND_ENVIRONMENT:-development}" = "preview" ]; then
+        : "${FRONTEND_PR:?FRONTEND_PR must be the pull request number when FRONTEND_ENVIRONMENT=preview; the renderer will not invent a preview hostname.}"
+        node "$MOON_WORKSPACE_ROOT/tooling/scripts/render-wrangler-config.mjs" \
+          --stage offline --environment preview --pr "$FRONTEND_PR" \
+          --deployable home-web --write
+      else
+        node "$MOON_WORKSPACE_ROOT/tooling/scripts/render-wrangler-config.mjs" \
+          --stage offline --environment "${FRONTEND_ENVIRONMENT:-development}" \
+          --deployable home-web --write
+      fi
+      "$MOON_PROJECT_ROOT/node_modules/.bin/nuxt" build
     inputs:
       - "**/*.{ts,vue,json,jsonc,yml,yaml,md,css,html}"
       - "nuxt.config.ts"
       - "package.json"
     outputs:
       - ".output/**/*"
+    options:
+      cache: false
 
+  # `nuxt dev` restarts on a config change and does not rebuild, so the render
+  # has to happen before the process starts rather than on reload.
   dev:
-    script: 'cd "$MOON_PROJECT_ROOT" && "$MOON_PROJECT_ROOT/node_modules/.bin/nuxt" dev'
+    script: |
+      set -eu
+      cd "$MOON_PROJECT_ROOT"
+      rm -f "$MOON_WORKSPACE_ROOT/.generated/frontend/config.json"
+      if [ "${FRONTEND_ENVIRONMENT:-development}" = "preview" ]; then
+        : "${FRONTEND_PR:?FRONTEND_PR must be the pull request number when FRONTEND_ENVIRONMENT=preview; the renderer will not invent a preview hostname.}"
+        node "$MOON_WORKSPACE_ROOT/tooling/scripts/render-wrangler-config.mjs" \
+          --stage offline --environment preview --pr "$FRONTEND_PR" \
+          --deployable home-web --write
+      else
+        node "$MOON_WORKSPACE_ROOT/tooling/scripts/render-wrangler-config.mjs" \
+          --stage offline --environment "${FRONTEND_ENVIRONMENT:-development}" \
+          --deployable home-web --write
+      fi
+      "$MOON_PROJECT_ROOT/node_modules/.bin/nuxt" dev
     options:
       runInCI: false
+      cache: false
     inputs: []
     outputs: []
 
   # Nitro's build is the immutable Worker and Workers Assets package. This task
   # deliberately does not rebuild it: it proves the artefact the deploy workflow
   # will upload exists and is internally complete.
+  #
+  # It renders the projection anyway, for the same reason `wrangler-validate`
+  # does below: the deploy workflow runs this task and then a `wrangler deploy`,
+  # and the environment those two run in has to be the one whose cookie name the
+  # bundle was built with. A check that runs against whatever the last render
+  # left behind is not a check.
   package:
     script: |
       set -eu
+      cd "$MOON_PROJECT_ROOT"
+      rm -f "$MOON_WORKSPACE_ROOT/.generated/frontend/config.json"
+      if [ "${FRONTEND_ENVIRONMENT:-development}" = "preview" ]; then
+        : "${FRONTEND_PR:?FRONTEND_PR must be the pull request number when FRONTEND_ENVIRONMENT=preview; the renderer will not invent a preview hostname.}"
+        node "$MOON_WORKSPACE_ROOT/tooling/scripts/render-wrangler-config.mjs" \
+          --stage offline --environment preview --pr "$FRONTEND_PR" \
+          --deployable home-web --write
+      else
+        node "$MOON_WORKSPACE_ROOT/tooling/scripts/render-wrangler-config.mjs" \
+          --stage offline --environment "${FRONTEND_ENVIRONMENT:-development}" \
+          --deployable home-web --write
+      fi
       test -f "$MOON_PROJECT_ROOT/.output/server/index.mjs"
       test -d "$MOON_PROJECT_ROOT/.output/public"
       test -n "$(find "$MOON_PROJECT_ROOT/.output/public" -type f -print -quit)"
@@ -75,6 +181,8 @@ tasks:
     inputs:
       - ".output/**/*"
     outputs: []
+    options:
+      cache: false
 
   wrangler-validate:
     script: |
