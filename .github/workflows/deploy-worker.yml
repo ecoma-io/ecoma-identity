@@ -453,11 +453,19 @@ jobs:
       # deployable in the one place a reader is checking exactly that. The
       # guard is the component name for the same reason the build step below
       # is: three shapes, one list of names, checked at review time.
+      - name: Read the declared Rust channel (Identity Workers only)
+        if: inputs.worker != 'home-web'
+        id: rust-toolchain
+        run: echo "channel=$(tooling/scripts/read-rust-toolchain.sh)" >> "$GITHUB_OUTPUT"
       - name: Set up the Rust toolchain (Identity Workers only)
         if: inputs.worker != 'home-web'
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
         with:
-          toolchain: stable
+          # Derived from `.moon/toolchains.yml`, the single owner of the
+          # channel, by `tooling/scripts/read-rust-toolchain.sh` — the same
+          # script the three call sites in `ci.yml` use, and for the same
+          # reason recorded there.
+          toolchain: ${{ steps.rust-toolchain.outputs.channel }}
           targets: wasm32-unknown-unknown
       - name: Cache the Rust build (Identity Workers only)
         if: inputs.worker != 'home-web'
